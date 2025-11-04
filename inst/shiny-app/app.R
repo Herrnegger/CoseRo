@@ -19,10 +19,8 @@ library(lubridate)
 library(DT)
 library(shinyFiles)
 
-# Source helper functions and data readers
-source("01_cosero_core_run.R")
-source("02_cosero_readers.R")
-source("app_helpers.R")
+# Note: Functions loaded from COSERO package
+# (run_cosero, read_cosero_output, plotting functions, etc.)
 
 # Default output directory (current working directory's output folder)
 default_output_dir <- normalizePath(file.path(getwd(), "output"), winslash = "/", mustWork = FALSE)
