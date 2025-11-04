@@ -24,8 +24,16 @@ source("02_cosero_readers.R")
 #' @param bounds_file Path to parameter bounds CSV file
 #' @param parameters Vector of parameter names to include (NULL = all)
 #' @return Tibble with parameter bounds
-load_parameter_bounds <- function(bounds_file = "cosero_parameter_bounds.csv",
+load_parameter_bounds <- function(bounds_file = NULL,
                                    parameters = NULL) {
+  # Use default parameter bounds file from package if not specified
+  if (is.null(bounds_file)) {
+    bounds_file <- system.file("extdata", "parameter_bounds.csv", package = "COSERO")
+    if (bounds_file == "") {
+      stop("Could not find parameter_bounds.csv in package installation", call. = FALSE)
+    }
+  }
+
   bounds <- read.csv(bounds_file, stringsAsFactors = FALSE)
 
   if (!is.null(parameters)) {
