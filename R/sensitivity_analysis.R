@@ -13,9 +13,8 @@ library(hydroGOF)
 library(parallel)
 library(pbapply)  # For progress bars in parallel
 
-# Source COSERO core functions
-source("01_cosero_core_run.R")
-source("02_cosero_readers.R")
+# Note: COSERO functions loaded from package
+# (run_cosero, read_cosero_output, read_defaults, etc.)
 
 # 2 Parameter Setup #####
 
@@ -324,20 +323,13 @@ run_cosero_ensemble_parallel <- function(project_path,
   cl <- makeCluster(n_cores)
   on.exit(stopCluster(cl))
 
-  # Get full paths to source files
-  wd <- getwd()
-  core_run_file <- file.path(wd, "01_cosero_core_run.R")
-  readers_file <- file.path(wd, "02_cosero_readers.R")
-
   # Export necessary objects and functions to cluster
   clusterExport(cl, c("project_path", "parameter_sets", "par_bounds", "base_settings",
                       "par_filename", "original_values", "temp_dir",
-                      "modify_parameter_file", "read_parameter_file",
-                      "run_cosero", "read_defaults", "read_cosero_output",
-                      "core_run_file", "readers_file"),
+                      "modify_parameter_file", "read_parameter_file"),
                 envir = environment())
 
-  # Load required libraries on each worker
+  # Load required libraries and package on each worker
   clusterEvalQ(cl, {
     library(dplyr)
     library(readr)
@@ -345,8 +337,7 @@ run_cosero_ensemble_parallel <- function(project_path,
     library(stringr)
     library(lubridate)
     library(data.table)
-    source(core_run_file)
-    source(readers_file)
+    library(COSERO)  # Load package functions
   })
 
   # Parallel worker function
