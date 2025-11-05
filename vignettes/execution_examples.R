@@ -3,8 +3,8 @@
 # Author: COSERO R Interface Examples
 # Date: 2025-09-26
 
-# Load the COSERO interface
-source("01_cosero_core_run.R")
+# Load the COSERO package
+library(COSERO)
 
 # ==============================================================================
 # COSERO PARAMETER DOCUMENTATION

@@ -6,9 +6,7 @@
 # Load required libraries
 library(dplyr)
 library(ggplot2)
-
-# Source COSERO functions
-source("05_cosero_sensitivity_analysis.R")
+library(COSERO)  # Load COSERO package functions
 
 # ==============================================================================
 # EXAMPLE 1: Snow and Runoff Parameters

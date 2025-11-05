@@ -1,0 +1,48 @@
+Package: COSERO
+Type: Package
+Title: R Interface and Shiny Application for the COSERO Hydrological Model
+Version: 0.1.0
+Authors@R: c(
+    person("COSERO", "Development Team", email = "your.email@example.com", role = c("aut", "cre"))
+    )
+Description: Provides a complete R interface for the COSERO hydrological model,
+    including automated model execution, fast output reading, interactive Shiny
+    visualization app, and Sobol-based global sensitivity analysis framework.
+    Users can run COSERO simulations programmatically or through a modern web GUI.
+License: MIT + file LICENSE
+Encoding: UTF-8
+LazyData: true
+Depends:
+    R (>= 4.0.0)
+Imports:
+    shiny (>= 1.7.0),
+    bslib (>= 0.4.0),
+    plotly (>= 4.10.0),
+    dplyr (>= 1.0.0),
+    tidyr (>= 1.2.0),
+    purrr (>= 0.3.0),
+    lubridate (>= 1.9.0),
+    data.table (>= 1.14.0),
+    readr (>= 2.1.0),
+    tibble (>= 3.1.0),
+    stringr (>= 1.4.0),
+    DT (>= 0.20),
+    shinyFiles (>= 0.9.0),
+    fs (>= 1.5.0),
+    ggplot2 (>= 3.4.0),
+    sensobol (>= 1.1.0),
+    hydroGOF (>= 0.4.0),
+    parallel,
+    pbapply (>= 1.5.0)
+Suggests:
+    testthat (>= 3.0.0),
+    knitr,
+    rmarkdown,
+    kaleido,
+    webshot
+RoxygenNote: 7.2.3
+Roxygen: list(markdown = TRUE)
+VignetteBuilder: knitr
+URL: https://github.com/yourusername/COSERO-R
+BugReports: https://github.com/yourusername/COSERO-R/issues
+SystemRequirements: COSERO.exe (Windows executable for hydrological modeling)

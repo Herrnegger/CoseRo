@@ -13,9 +13,8 @@ library(hydroGOF)
 library(parallel)
 library(pbapply)  # For progress bars in parallel
 
-# Source COSERO core functions
-source("01_cosero_core_run.R")
-source("02_cosero_readers.R")
+# Note: COSERO functions loaded from package
+# (run_cosero, read_cosero_output, read_defaults, etc.)
 
 # 2 Parameter Setup #####
 
@@ -114,7 +113,7 @@ create_custom_bounds <- function(parameters,
 #' Load parameter bounds from CSV file or use custom bounds.
 #' Custom bounds take precedence over CSV file.
 #'
-#' @param bounds_file Path to parameter bounds CSV file (used as fallback)
+#' @param bounds_file Path to parameter bounds CSV file (NULL = use package default)
 #' @param parameters Vector of parameter names to include (NULL = all)
 #' @param custom_bounds Custom parameter bounds tibble from create_custom_bounds() (optional)
 #' @param custom_min Vector of minimum values for custom bounds (optional)
@@ -122,8 +121,11 @@ create_custom_bounds <- function(parameters,
 #' @param custom_modification_type Vector of modification types for custom bounds (optional)
 #' @return Tibble with parameter bounds
 #' @examples
-#' # Load from CSV (default behavior)
+#' # Load from package default CSV
 #' bounds <- load_parameter_bounds(parameters = c("BETA", "CTMAX"))
+#'
+#' # Load from custom CSV file
+#' bounds <- load_parameter_bounds(bounds_file = "my_bounds.csv")
 #'
 #' # Use custom bounds with create_custom_bounds()
 #' custom <- create_custom_bounds(
@@ -141,7 +143,7 @@ create_custom_bounds <- function(parameters,
 #'   custom_max = c(8, 10),
 #'   custom_modification_type = c("absval", "absval")
 #' )
-load_parameter_bounds <- function(bounds_file = "cosero_parameter_bounds.csv",
+load_parameter_bounds <- function(bounds_file = NULL,
                                    parameters = NULL,
                                    custom_bounds = NULL,
                                    custom_min = NULL,
@@ -174,10 +176,18 @@ load_parameter_bounds <- function(bounds_file = "cosero_parameter_bounds.csv",
     return(custom_bounds)
   }
 
-  # Option 3: Fall back to CSV file
-  if (!file.exists(bounds_file)) {
+  # Option 3: Load from CSV file
+  # Use default parameter bounds file from package if not specified
+  if (is.null(bounds_file)) {
+    bounds_file <- system.file("extdata", "parameter_bounds.csv", package = "COSERO")
+    if (bounds_file == "") {
+      stop("Could not find parameter_bounds.csv in package installation.\n",
+           "Either install the package data or provide a custom bounds_file path.",
+           call. = FALSE)
+    }
+  } else if (!file.exists(bounds_file)) {
     stop("Parameter bounds file not found: ", bounds_file,
-         "\nEither provide the CSV file or use custom bounds parameters")
+         "\nEither provide a valid CSV file path or use custom bounds parameters")
   }
 
   bounds <- read.csv(bounds_file, stringsAsFactors = FALSE)
@@ -471,20 +481,13 @@ run_cosero_ensemble_parallel <- function(project_path,
   cl <- makeCluster(n_cores)
   on.exit(stopCluster(cl))
 
-  # Get full paths to source files
-  wd <- getwd()
-  core_run_file <- file.path(wd, "01_cosero_core_run.R")
-  readers_file <- file.path(wd, "02_cosero_readers.R")
-
   # Export necessary objects and functions to cluster
   clusterExport(cl, c("project_path", "parameter_sets", "par_bounds", "base_settings",
                       "par_filename", "original_values", "temp_dir",
-                      "modify_parameter_file", "read_parameter_file",
-                      "run_cosero", "read_defaults", "read_cosero_output",
-                      "core_run_file", "readers_file"),
+                      "modify_parameter_file", "read_parameter_file"),
                 envir = environment())
 
-  # Load required libraries on each worker
+  # Load required libraries and package on each worker
   clusterEvalQ(cl, {
     library(dplyr)
     library(readr)
@@ -492,8 +495,7 @@ run_cosero_ensemble_parallel <- function(project_path,
     library(stringr)
     library(lubridate)
     library(data.table)
-    source(core_run_file)
-    source(readers_file)
+    library(COSERO)  # Load package functions
   })
 
   # Parallel worker function
