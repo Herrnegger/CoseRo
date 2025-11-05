@@ -19,19 +19,174 @@ source("02_cosero_readers.R")
 
 # 2 Parameter Setup #####
 
+#' Create Custom Parameter Bounds
+#'
+#' Create parameter bounds manually without using CSV file
+#'
+#' @param parameters Vector of parameter names
+#' @param min Vector of minimum values (same length as parameters)
+#' @param max Vector of maximum values (same length as parameters)
+#' @param modification_type Vector of modification types: "absval", "relchg", or "abschg" (same length as parameters)
+#' @param default Vector of default values (optional, same length as parameters)
+#' @param description Vector of parameter descriptions (optional)
+#' @param category Vector of parameter categories (optional)
+#' @return Tibble with parameter bounds in the same format as CSV file
+#' @examples
+#' # Create custom bounds for 3 parameters
+#' custom_bounds <- create_custom_bounds(
+#'   parameters = c("BETA", "CTMAX", "TAB1"),
+#'   min = c(0.1, 2, 0.1),
+#'   max = c(10, 12, 5),
+#'   modification_type = c("absval", "absval", "relchg"),
+#'   default = c(4.5, 5, 1)
+#' )
+create_custom_bounds <- function(parameters,
+                                  min,
+                                  max,
+                                  modification_type,
+                                  default = NULL,
+                                  description = NULL,
+                                  category = NULL) {
+
+  # Validate inputs
+  n_params <- length(parameters)
+
+  if (length(min) != n_params) {
+    stop("Length of 'min' must match length of 'parameters'")
+  }
+  if (length(max) != n_params) {
+    stop("Length of 'max' must match length of 'parameters'")
+  }
+  if (length(modification_type) != n_params) {
+    stop("Length of 'modification_type' must match length of 'parameters'")
+  }
+
+  # Validate modification types
+  valid_types <- c("absval", "relchg", "abschg")
+  invalid_types <- modification_type[!modification_type %in% valid_types]
+  if (length(invalid_types) > 0) {
+    stop("Invalid modification_type: ", paste(invalid_types, collapse = ", "),
+         "\nValid types are: ", paste(valid_types, collapse = ", "))
+  }
+
+  # Validate min < max
+  if (any(min >= max)) {
+    invalid_idx <- which(min >= max)
+    stop("min must be less than max for parameters: ",
+         paste(parameters[invalid_idx], collapse = ", "))
+  }
+
+  # Set defaults for optional parameters
+  if (is.null(default)) {
+    default <- (min + max) / 2  # Use midpoint as default
+  } else if (length(default) != n_params) {
+    stop("Length of 'default' must match length of 'parameters'")
+  }
+
+  if (is.null(description)) {
+    description <- paste("Parameter:", parameters)
+  } else if (length(description) != n_params) {
+    stop("Length of 'description' must match length of 'parameters'")
+  }
+
+  if (is.null(category)) {
+    category <- rep("custom", n_params)
+  } else if (length(category) != n_params) {
+    stop("Length of 'category' must match length of 'parameters'")
+  }
+
+  # Create tibble in same format as CSV
+  bounds <- tibble::tibble(
+    parameter = parameters,
+    description = description,
+    min = min,
+    max = max,
+    default = default,
+    modification_type = modification_type,
+    category = category
+  )
+
+  return(bounds)
+}
+
 #' Load COSERO Parameter Bounds
 #'
-#' @param bounds_file Path to parameter bounds CSV file
+#' Load parameter bounds from CSV file or use custom bounds.
+#' Custom bounds take precedence over CSV file.
+#'
+#' @param bounds_file Path to parameter bounds CSV file (used as fallback)
 #' @param parameters Vector of parameter names to include (NULL = all)
+#' @param custom_bounds Custom parameter bounds tibble from create_custom_bounds() (optional)
+#' @param custom_min Vector of minimum values for custom bounds (optional)
+#' @param custom_max Vector of maximum values for custom bounds (optional)
+#' @param custom_modification_type Vector of modification types for custom bounds (optional)
 #' @return Tibble with parameter bounds
+#' @examples
+#' # Load from CSV (default behavior)
+#' bounds <- load_parameter_bounds(parameters = c("BETA", "CTMAX"))
+#'
+#' # Use custom bounds with create_custom_bounds()
+#' custom <- create_custom_bounds(
+#'   parameters = c("BETA", "CTMAX"),
+#'   min = c(0.5, 3),
+#'   max = c(8, 10),
+#'   modification_type = c("absval", "absval")
+#' )
+#' bounds <- load_parameter_bounds(custom_bounds = custom)
+#'
+#' # Use custom bounds with direct parameters
+#' bounds <- load_parameter_bounds(
+#'   parameters = c("BETA", "CTMAX"),
+#'   custom_min = c(0.5, 3),
+#'   custom_max = c(8, 10),
+#'   custom_modification_type = c("absval", "absval")
+#' )
 load_parameter_bounds <- function(bounds_file = "cosero_parameter_bounds.csv",
-                                   parameters = NULL) {
+                                   parameters = NULL,
+                                   custom_bounds = NULL,
+                                   custom_min = NULL,
+                                   custom_max = NULL,
+                                   custom_modification_type = NULL) {
+
+  # Option 1: Use pre-built custom_bounds tibble
+  if (!is.null(custom_bounds)) {
+    if (!is.null(parameters)) {
+      custom_bounds <- custom_bounds %>% filter(parameter %in% parameters)
+    }
+    cat("Using custom parameter bounds (", nrow(custom_bounds), " parameters)\n")
+    return(custom_bounds)
+  }
+
+  # Option 2: Build custom bounds from individual parameters
+  if (!is.null(custom_min) && !is.null(custom_max) && !is.null(custom_modification_type)) {
+    if (is.null(parameters)) {
+      stop("'parameters' must be specified when using custom_min, custom_max, and custom_modification_type")
+    }
+
+    custom_bounds <- create_custom_bounds(
+      parameters = parameters,
+      min = custom_min,
+      max = custom_max,
+      modification_type = custom_modification_type
+    )
+
+    cat("Using custom parameter bounds (", nrow(custom_bounds), " parameters)\n")
+    return(custom_bounds)
+  }
+
+  # Option 3: Fall back to CSV file
+  if (!file.exists(bounds_file)) {
+    stop("Parameter bounds file not found: ", bounds_file,
+         "\nEither provide the CSV file or use custom bounds parameters")
+  }
+
   bounds <- read.csv(bounds_file, stringsAsFactors = FALSE)
 
   if (!is.null(parameters)) {
     bounds <- bounds %>% filter(parameter %in% parameters)
   }
 
+  cat("Loading parameter bounds from CSV (", nrow(bounds), " parameters)\n")
   return(bounds)
 }
 
