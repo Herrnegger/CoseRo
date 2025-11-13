@@ -1,31 +1,31 @@
 parameter,description,min,max,default,modification_type,category
-BETA,Runoff generation parameter (soil moisture function),0.1,10,4.5,absval,runoff
-CTMAX,Maximum snow melt factor on June 21 (mm/°C/d),2,12,5,absval,snow
-CTMIN,Minimum snow melt factor on Dec 21 (mm/°C/d),0.2,5,2,absval,snow
+BETA,Runoff generation parameter (soil moisture function),0.1,10,4.5,relchg,runoff
+CTMAX,Maximum snow melt factor on June 21 (mm/°C/d),2,12,5,relchg,snow
+CTMIN,Minimum snow melt factor on Dec 21 (mm/°C/d),0.2,5,2,relchg,snow
 ETSLPCOR,ETP correction for slope and aspect,0.9,1.1,1,relchg,evapotranspiration
 ETSYSCOR,ETP systematic error correction factor,0.9,1.1,1,relchg,evapotranspiration
 ETVEGCOR,ETP correction for vegetation type,0.4,1.1,1,relchg,evapotranspiration
-FK,Field capacity (conceptual storage),0.08,1,1,absval,soil
-FKFAK,Factor for ETA from ETP as function of soil moisture,0.6,0.8,0.7,absval,evapotranspiration
-GLAC_CT_,Glacier melt factor adjustment,0.5,2.0,1,relchg,snow
-H1,Outlet level surface flow reservoir (mm),0,20,2,absval,runoff
-H2,Outlet level inter flow reservoir (mm),0,20,10,absval,runoff
-INTMAX,Maximum interception storage capacity (mm),0.5,4,0,absval,interception
-KBF,Recession constant base flow (h),0.5,4.0,1,relchg,groundwater
-M,Soil storage capacity (mm),0.2,3.0,1,relchg,soil
-NVAR,Variance for distributing new snowfall,0.1,2.5,1.5,absval,snow
+FK,Field capacity (conceptual storage),0.08,0.42,1,relchg,soil
+FKFAK,Factor for ETA from ETP as function of soil moisture,0.6,0.7,0.7,relchg,evapotranspiration
+GLAC_CT,Glacier melt factor adjustment,0.1,0.5,0.25,relchg,snow
+H1,Outlet level surface flow reservoir (mm),0,20,2,relchg,runoff
+H2,Outlet level inter flow reservoir (mm),0,20,10,relchg,runoff
+INTMAX,Maximum interception storage capacity (mm),0.5,4,0,relchg,interception
+KBF,Recession constant base flow (h),2000,12000,3000,relchg,groundwater
+M,Soil storage capacity (mm),50,1000,1000,relchg,soil
+NVAR,Variance for distributing new snowfall,0.1,2.5,1.5,relchg,snow
 PCOR,Precipitation correction factor,0.9,1.5,1,relchg,precipitation
-PWP,Permanent wilting point,0,0.12,0,absval,soil
+PWP,Permanent wilting point,0.03,0.12,0,relchg,soil
 RAINCOR,Rain correction factor,1.0,1.3,1,relchg,precipitation
-RAINTRT,Transition temperature for pure rain (°C),-2,1,0,abschg,snow
-SNOWTRT,Transition temperature for pure snow (°C),-2,2,0,abschg,snow
-TAB1,Recession constant surface flow (h),0.1,5.0,1,relchg,runoff
-TAB2,Recession constant inter flow (h),0.1,5.0,1,relchg,runoff
-TAB3,Recession constant base flow (h),0.2,4.0,1,relchg,groundwater
-TAB4,Recession constant subbasin routing (h),0.1,4.0,1,relchg,routing
-TAB5,Time shift for QAB (h),0.1,10.0,1,relchg,routing
+RAINTRT,Transition temperature for pure rain (°C),1,4,3,abschg,snow
+SNOWTRT,Transition temperature for pure snow (°C),0,2,0,abschg,snow
+TAB1,Recession constant surface flow (h),1,50,50,relchg,runoff
+TAB2,Recession constant inter flow (h),25,300,500,relchg,runoff
+TAB3,Recession constant base flow (h),500,5000,5000,relchg,groundwater
+TAB4,Recession constant subbasin routing (h),0.05,2,1,relchg,routing
+TAB5,Time shift for QAB (h),0.1,10,1,relchg,routing
 TCOR,Temperature correction constant (°C),0,3,0,abschg,temperature
 THRT,Threshold temperature for snow melt (°C),0,1,0,abschg,snow
-TVS1,Recession constant percolation from surface flow (h),0.1,1.5,1,relchg,runoff
-TVS2,Recession constant percolation from inter flow (h),0.05,1.5,1,relchg,runoff
-WATERBODY,Open water body flag (0/1),0,1,0,absval,other
+TVS1,Recession constant percolation from surface flow (h),5,150,100,relchg,runoff
+TVS2,Recession constant percolation from inter flow (h),45,1500,1000,relchg,runoff
+WATERBODY,Open water body flag (0/1),0,1,0,relchg,other

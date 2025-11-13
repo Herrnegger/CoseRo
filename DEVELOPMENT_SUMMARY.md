@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-Complete R interface for the COSERO hydrological model, including automated execution, output reading, and interactive visualization.
+Complete R interface for the COSERO hydrological model, including automated execution, output reading, interactive visualization, and sensitivity analysis with ensemble runs.
 
 ## Development Timeline
 
@@ -308,6 +308,50 @@ rv <- reactiveValues(
 
 ---
 
+### Phase 4: Sensitivity Analysis & Ensemble Runs
+**File:** `R/sensitivity_analysis.R`
+
+**Purpose:** Global sensitivity analysis using Sobol sampling with automated parameter modification and ensemble execution
+
+**Key Functions:**
+- `generate_sobol_samples()` - Quasi-random parameter sampling
+- `load_parameter_bounds()` - Load bounds from CSV
+- `create_custom_bounds()` - Define custom parameter ranges
+- `modify_parameter_table()` - Modify COSERO parameter files (tabular format)
+- `run_cosero_ensemble()` - Sequential ensemble execution
+- `run_cosero_ensemble_parallel()` - Parallel ensemble execution with load balancing
+
+**Key Features:**
+1. **Parameter Modification Types:**
+   - `relchg` - Relative change (multiply by factor, e.g., 0.5× to 2×)
+   - `abschg` - Absolute change (add/subtract value, e.g., -2°C to +2°C)
+   - Preserves spatial patterns across zones
+   - Automatic clipping to physical bounds
+
+2. **Parallel Execution:**
+   - Worker isolation (separate project copies)
+   - Load balancing with `parLapplyLB()`
+   - Automatic package loading on workers
+   - Time estimates and efficiency metrics
+
+3. **Progress Tracking:**
+   - Sequential: Live progress with time estimates `[2/3] (est. 0.8m remaining) 24.1s`
+   - Parallel: Initial time estimate, final efficiency report
+
+4. **Console Output Management:**
+   - Systematic `quiet` parameter propagation
+   - Suppressed: parameter reading, modification details, runtime messages
+   - Shown: progress indicators, errors, final summary
+
+**Recent Improvements (2025-11):**
+- Added time-remaining estimates for sequential runs
+- Added parallel efficiency metrics (actual vs ideal speedup)
+- Comprehensive quiet mode reduces output by ~90%
+- Fixed parameter file backup organization (parameterfile_backup/ folder)
+- Enhanced progress indicators with runtime per run
+
+---
+
 ## Complete Input Documentation
 
 ### 1. COSERO Execution Inputs (`run_cosero`)
@@ -549,10 +593,11 @@ data <- read_cosero_output("path/to/output")
 
 **A. Parameter Database (`cosero_parameter_bounds.csv`)**
 - 30 frequently-used COSERO parameters with bounds
-- Three modification types:
-  - **absval**: Direct replacement (e.g., BETA = 2.5)
+- Two modification types:
   - **relchg**: Multiply by factor (e.g., TAB1 = original × 1.3)
   - **abschg**: Add to original (e.g., TCOR = original + 1.5)
+- Physical bounds (min/max) for clipping final values
+- Optional sampling ranges (sample_min/sample_max) for Sobol
 - Organized by category: runoff, snow, evapotranspiration, soil, groundwater, routing
 
 **B. Core Functions (`05_cosero_sensitivity_analysis.R`)**
@@ -582,8 +627,9 @@ data <- read_cosero_output("path/to/output")
   - Returns same format as sequential version
 
 **Helper Functions:**
-- `read_parameter_file()` - Extract current parameter values
-- `modify_parameter_file()` - Apply parameter modifications with type-aware logic
+- `read_parameter_file()` / `read_parameter_table()` - Extract current parameter values (case-insensitive)
+- `modify_parameter_file()` / `modify_parameter_table()` - Apply parameter modifications with type-aware logic
+- `find_parameter_column()` - Case-insensitive parameter name matching with monthly expansion support
 
 **Result Processing:**
 - `extract_ensemble_output()` - Extract simulation outputs (runoff, ET)
@@ -664,27 +710,32 @@ Based on SWAT model methodology (SWATrunR + sensobol workflow):
 - No file conflicts or race conditions
 - Automatic temp folder cleanup
 
-#### Parameter Modification Types
-
-**absval (Absolute Value):**
-```r
-# Direct replacement
-BETA: sample from [0.1, 10] → BETA = 2.5
-```
+#### Parameter Modification Types (Updated 2025-11-07)
 
 **relchg (Relative Change - Multiplier):**
 ```r
-# Multiply by sampled factor
-TAB1: sample from [0.1, 5.0]
-If original = 50, sampled = 1.3 → TAB1 = 50 × 1.3 = 65
+# Multiply original by sampled factor
+# Physical bounds: min/max (e.g., BETA: 0.1 to 10)
+# Sampling range: sample_min/sample_max (e.g., 0.5 to 2.0 = 50% to 200%)
+BETA: sample from [0.5, 2.0] → final = original × 1.3
+Example: original = 4.5, sampled = 1.3 → BETA = 5.85 (clipped to [0.1, 10])
 ```
 
 **abschg (Absolute Change - Additive):**
 ```r
-# Add to original value
-TCOR: sample from [0, 3]
-If original = 0, sampled = 1.5 → TCOR = 0 + 1.5 = 1.5
+# Add sampled value to original
+# Physical bounds: min/max (e.g., TCOR: -3 to +3°C)
+# Sampling range: sample_min/sample_max (e.g., -2 to +2°C)
+TCOR: sample from [-2, 2] → final = original + 1.5
+Example: original = 0, sampled = 1.5 → TCOR = 1.5°C (clipped to [-3, 3])
 ```
+
+**Key Changes:**
+- Removed `absval` modification type (caused uniform parameter values)
+- Separated **sampling ranges** (`sample_min`/`sample_max`) from **physical bounds** (`min`/`max`)
+- For `relchg`: defaults to sampling 0.5-2.0× (can override)
+- For `abschg`: defaults to sampling full physical range
+- Physical bounds act as safety clipping after modification
 
 #### Typical Workflow
 
@@ -756,6 +807,43 @@ library(dplyr)       # Data manipulation
 library(tidyr)       # Data tidying
 library(purrr)       # Functional programming
 library(ggplot2)     # Visualization
+```
+
+#### Enhanced Parameter Handling (2025-11-07)
+
+**Case-Insensitive Matching:**
+- All parameter functions now match names case-insensitively
+- `TCOR`, `tcor`, `TCor`, `Tcor` all resolve to same parameter
+- Works in reading, modification, and bounds lookup
+
+**Monthly Parameter Expansion:**
+- Automatically applies modifications to all 12 monthly variants
+- Example: `TCOR` modifies `TCor1_`, `TCor2_`, ..., `TCor12_`
+- Supported for: TCOR, PCOR, TMMon, INTMAX, ETVEGCOR, DAYSDRY, DAYSWET, ETSYSCOR
+- Single command modifies all months uniformly
+
+**Read All Zones:**
+- `read_parameter_table(..., zone_id = "all")` returns data frame with all zones
+- Enables histogram plotting and spatial analysis
+- Columns: NZ_ (zone ID) + requested parameters
+
+**Example:**
+```r
+# Case-insensitive + monthly expansion
+bounds <- load_parameter_bounds(parameters = "tcor")  # lowercase works!
+modification <- list(TCOR = 2.0)  # Adds +2°C to all TCor1-12
+
+modify_parameter_table(
+  par_file = "para.txt",
+  params = modification,
+  par_bounds = bounds,
+  original_values = list(TCOR = 0)
+)
+# Output: Modified 12 monthly variants of TCOR: TCor1_, TCor2_, ..., TCor12_
+
+# Read all zones for histogram
+all_beta <- read_parameter_table("para.txt", "BETA", zone_id = "all")
+hist(all_beta$BETA, main = "BETA spatial distribution")
 ```
 
 ---

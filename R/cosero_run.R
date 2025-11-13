@@ -29,6 +29,26 @@ cosero_defaults <- data.frame(
 )
 
 # 2.2 Configuration Display #####
+
+#' Show COSERO Default Configuration Parameters
+#'
+#' Displays available COSERO configuration parameters and their types.
+#' Useful for understanding what settings can be passed to run_cosero().
+#'
+#' @param parameter_name Optional. If specified, shows details for a single parameter.
+#'   If NULL (default), shows all available parameters.
+#'
+#' @return Invisibly returns the cosero_defaults data frame
+#' @export
+#' @examples
+#' \dontrun{
+#' # Show all parameters
+#' show_cosero_defaults()
+#'
+#' # Show details for specific parameter
+#' show_cosero_defaults("STARTDATE")
+#' show_cosero_defaults("OUTPUTTYPE")
+#' }
 show_cosero_defaults <- function(parameter_name = NULL) {
   if (!is.null(parameter_name)) {
     param_info <- cosero_defaults[cosero_defaults$parameter == parameter_name, ]
@@ -149,6 +169,9 @@ modify_defaults <- function(defaults_file, settings, quiet = FALSE) {
 
   lines <- readLines(defaults_file)
 
+  # Filter out NULL values (user wants to keep existing defaults)
+  settings <- settings[!sapply(settings, is.null)]
+
   for (param_name in names(settings)) {
     param_value <- settings[[param_name]]
 
@@ -192,6 +215,37 @@ create_default_defaults <- function(defaults_file, quiet = FALSE) {
   if (!quiet) cat("Created default defaults.txt at:", defaults_file, "\n")
 }
 
+#' Read COSERO Defaults File
+#'
+#' Reads configuration settings from a COSERO defaults.txt file.
+#' Parses the file format and returns settings as a named list.
+#'
+#' @param defaults_file Path to defaults.txt file
+#'
+#' @return Named list with configuration settings. Common items include:
+#'   \item{PROJECTINFO}{Project name/description}
+#'   \item{DATAFILE}{Input data filename}
+#'   \item{PARAFILE}{Parameter filename}
+#'   \item{STARTDATE}{Start date as character vector c(YYYY, MM, DD, HH, MM)}
+#'   \item{ENDDATE}{End date as character vector c(YYYY, MM, DD, HH, MM)}
+#'   \item{SPINUP}{Spin-up period in timesteps}
+#'   \item{OUTPUTTYPE}{Output detail level (0-3)}
+#'   \item{...}{Other COSERO settings}
+#'
+#' @export
+#' @examples
+#' \dontrun{
+#' # Read defaults file
+#' settings <- read_defaults("path/to/input/defaults.txt")
+#'
+#' # Access specific settings
+#' start_date <- settings$STARTDATE
+#' spinup <- settings$SPINUP
+#'
+#' # Use in run_cosero
+#' result <- run_cosero("path/to/project",
+#'                      defaults_settings = settings)
+#' }
 read_defaults <- function(defaults_file) {
   if (!file.exists(defaults_file)) {
     stop("defaults.txt file not found: ", defaults_file)
@@ -584,7 +638,7 @@ run_cosero <- function(project_path,
         source("02_cosero_readers.R")
       }
       tryCatch({
-        output_data <- read_cosero_output(project_setup$output_dir, project_setup$defaults_file)
+        output_data <- read_cosero_output(project_setup$output_dir, project_setup$defaults_file, quiet = quiet)
       }, error = function(e) {
         warning("Could not read output files: ", e$message)
       })
@@ -592,8 +646,10 @@ run_cosero <- function(project_path,
       cat("Skipping output file reading (read_outputs = FALSE)\n")
     }
 
-    if (!quiet) cat("\nCOSERO simulation completed successfully!\n")
-    cat(sprintf("Runtime: %.2f seconds (%.2f minutes)\n", runtime_seconds, runtime_seconds/60))
+    if (!quiet) {
+      cat("\nCOSERO simulation completed successfully!\n")
+      cat(sprintf("Runtime: %.2f seconds (%.2f minutes)\n", runtime_seconds, runtime_seconds/60))
+    }
 
     return(list(
       exit_code = exec_result$exit_code,
@@ -601,6 +657,7 @@ run_cosero <- function(project_path,
       has_error = FALSE,
       error_message = NULL,
       output_data = output_data,
+      defaults_settings = defaults_settings,
       project_path = project_path,
       execution_time = end_time,
       runtime_seconds = runtime_seconds

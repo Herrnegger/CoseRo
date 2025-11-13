@@ -18,6 +18,7 @@ library(dplyr)
 library(lubridate)
 library(DT)
 library(shinyFiles)
+library(shinyjs)
 
 # Note: Functions loaded from COSERO package
 # (run_cosero, read_cosero_output, plotting functions, etc.)
@@ -39,6 +40,9 @@ app_theme <- bs_theme(
   heading_font = font_google("Raleway", wght = c(400, 500)),
   code_font = font_google("Fira Code"),
   font_scale = 0.95,                # Global font size control (0.8-1.2 recommended)
+  bg = "#f8f9fa",                   # Main background color (white by default)
+  fg = "#212529",                   # Main text color
+  "body-bg" = "#f8f9fa",            # Body background
   "card-border-color" = "#dee2e6",
   "card-cap-bg" = "#f8f9fa",
   "well-bg" = "#f8f9fa"
@@ -47,10 +51,82 @@ app_theme <- bs_theme(
 # UI Definition ####
 ui <- fluidPage(
   theme = app_theme,
+  useShinyjs(),  # Enable shinyjs
+
+  # Custom CSS for enhanced visuals
+  tags$head(
+    tags$style(HTML("
+      .drag-drop-zone {
+        border: 2px solid #97BC62;
+        border-radius: 8px;
+        padding: 25px;
+        text-align: center;
+        background-color: #f8f9fa;
+        transition: all 0.3s ease;
+        cursor: pointer;
+        margin-bottom: 15px;
+      }
+      .drag-drop-zone:hover {
+        background-color: #e9ecef;
+        border-color: #2C5F2D;
+        box-shadow: 0 2px 6px rgba(44, 95, 45, 0.15);
+      }
+      .section-header {
+        font-size: 1.2em;
+        font-weight: 600;
+        color: #2C5F2D;
+        margin-bottom: 20px;
+        margin-top: 15px;
+        padding-bottom: 10px;
+        border-bottom: 2px solid #97BC62;
+      }
+      .subsection-header {
+        font-size: 1.05em;
+        font-weight: 600;
+        color: #495057;
+        margin-top: 15px;
+        margin-bottom: 12px;
+      }
+      .input-hint {
+        font-size: 0.85em;
+        color: #6c757d;
+        margin-top: -8px;
+        margin-bottom: 12px;
+      }
+      .card-header {
+        font-weight: 600;
+        background-color: #f8f9fa;
+      }
+      .validation-success {
+        color: #28a745;
+        font-weight: 500;
+        padding: 8px 12px;
+        background-color: #d4edda;
+        border-radius: 4px;
+        margin: 10px 0;
+      }
+      .validation-warning {
+        color: #856404;
+        font-weight: 500;
+        padding: 8px 12px;
+        background-color: #fff3cd;
+        border-radius: 4px;
+        margin: 10px 0;
+      }
+      .validation-error {
+        color: #721c24;
+        font-weight: 500;
+        padding: 8px 12px;
+        background-color: #f8d7da;
+        border-radius: 4px;
+        margin: 10px 0;
+      }
+    "))
+  ),
 
   # Custom header
   tags$div(
-    style = "display: flex; align-items: center; padding: 15px 0px; margin-bottom: 20px; border-bottom: 2px solid #dee2e6;",
+    style = "display: flex; align-items: center; padding: 15px 0px; margin-bottom: 20px; border-bottom: 2px solid #dee2e6; box-shadow: 0 2px 4px rgba(0,0,0,0.05);",
     tags$img(
       src = "logo.svg",
       height = "75px",
@@ -69,38 +145,45 @@ ui <- fluidPage(
           "COSERO Run",
           icon = icon("play-circle"),
 
-          h3("Run COSERO Model"),
+          tags$div(class = "section-header", "Configure & Run COSERO Model"),
 
           fluidRow(
-            # Left Column - Essential Parameters
-            column(6,
+            # Single column layout
+            column(8,
               card(
                 card_header("Project Setup"),
                 card_body(
-                fluidRow(
-                  column(9,
-                    textInput(
-                      "run_project_path",
-                      "Project Directory:",
-                      value = normalizePath(getwd(), winslash = "/", mustWork = FALSE),
-                      placeholder = "Path to COSERO project folder"
-                    )
-                  ),
-                  column(3,
-                    tags$label(" ", style = "display: block;"),
-                    shinyDirButton(
-                      "run_project_dir_btn",
-                      "Browse...",
-                      "Select COSERO project directory",
-                      icon = icon("folder-open"),
-                      class = "btn-default",
-                      style = "margin-top: 0px; width: 100%;"
-                    )
+                # Drag-drop zone for project directory
+                tags$div(
+                  id = "project_drag_zone",
+                  class = "drag-drop-zone",
+                  tags$p(
+                    tags$strong("Click Here to Select Project Folder", style = "font-size: 1.1em;"),
+                    tags$br(),
+                    tags$span("Opens file browser to navigate to your COSERO project", style = "font-size: 0.9em; color: #6c757d;")
                   )
                 ),
+
+                # Hidden shinyDirButton (triggered by clicking the zone)
+                shinyjs::hidden(
+                  shinyDirButton(
+                    "run_project_dir_btn",
+                    "Browse",
+                    "Select COSERO project directory",
+                    icon = icon("folder-open")
+                  )
+                ),
+
+                # Project path input
+                textInput(
+                  "run_project_path",
+                  "Project Directory:",
+                  value = normalizePath(getwd(), winslash = "/", mustWork = FALSE),
+                  placeholder = "Path to COSERO project folder"
+                ),
                 tags$p(
-                  style = "font-size: 10px; color: gray; margin-top: -10px;",
-                  "Tip: Use Browse button or copy path from Explorer - quotes and slashes (/ or \\) handled automatically"
+                  class = "input-hint",
+                  "Tip: You can also copy-paste the path directly - quotes and slashes (/ or \\) are handled automatically"
                 ),
                 uiOutput("project_validation_ui"),
                 actionButton(
@@ -111,7 +194,7 @@ ui <- fluidPage(
                 ),
                 tags$hr(),
 
-                h4("Simulation Period"),
+                tags$div(class = "subsection-header", "Simulation Period"),
                 fluidRow(
                   column(6,
                     dateInput(
@@ -171,7 +254,7 @@ ui <- fluidPage(
                 ),
                 tags$hr(),
 
-                h4("Run Configuration"),
+                tags$div(class = "subsection-header", "Run Configuration"),
                 radioButtons(
                   "run_mode",
                   "Run Mode:",
@@ -191,16 +274,10 @@ ui <- fluidPage(
                     "Comprehensive (+ long-term means)" = 3
                   ),
                   selected = 3
-                )
-                )
-              )
-            ),
+                ),
+                tags$hr(),
 
-            # Right Column - Advanced Options & Controls
-            column(6,
-              card(
-                card_header("Advanced Options"),
-                card_body(
+                tags$div(class = "subsection-header", "Advanced Options"),
                 actionButton(
                   "toggle_advanced_params",
                   "Show Advanced Parameters",
@@ -258,7 +335,7 @@ ui <- fluidPage(
                 ),
                 tags$hr(),
 
-                h4("Execution"),
+                tags$div(class = "subsection-header", "Execution"),
                 actionButton(
                   "run_cosero_btn",
                   "Run COSERO Model",
@@ -269,7 +346,7 @@ ui <- fluidPage(
                 uiOutput("run_progress_ui"),
                 tags$hr(),
 
-                h4("Results Summary"),
+                tags$div(class = "subsection-header", "Results Summary"),
                 verbatimTextOutput("run_results_summary")
                 )
               )
@@ -282,9 +359,11 @@ ui <- fluidPage(
           "Time Series",
           icon = icon("chart-line"),
 
+          tags$div(class = "section-header", "Time Series Analysis"),
+
           # Collapsible Control Panel
           tags$div(
-            style = "margin: 15px;",
+            style = "margin: 15px 0;",
             tags$button(
               id = "toggle_ts_controls",
               class = "btn btn-default btn-sm",
@@ -300,7 +379,7 @@ ui <- fluidPage(
                 style = "background-color: #f8f9fa; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1);",
                 fluidRow(
                   column(3,
-                    tags$h5("Data Selection"),
+                    tags$div(class = "subsection-header", "Data Selection"),
                     textInput(
                       "output_dir",
                       "Output Directory:",
@@ -321,7 +400,7 @@ ui <- fluidPage(
                     verbatimTextOutput("status_text")
                   ),
                   column(3,
-                    tags$h5("Display Options"),
+                    tags$div(class = "subsection-header", "Display Options"),
                     uiOutput("subbasin_selector"),
                     fluidRow(
                       column(6, actionButton("prev_subbasin", "< Prev", class = "btn-sm", style = "width: 100%;")),
@@ -332,7 +411,7 @@ ui <- fluidPage(
                     actionButton("reset_zoom", "Reset Zoom", icon = icon("refresh"))
                   ),
                   column(3,
-                    tags$h5("Storage Variables"),
+                    tags$div(class = "subsection-header", "Storage Variables"),
                     checkboxGroupInput(
                       "wb_storage_vars",
                       NULL,
@@ -345,7 +424,7 @@ ui <- fluidPage(
                     )
                   ),
                   column(3,
-                    tags$h5("Cumulative Fluxes"),
+                    tags$div(class = "subsection-header", "Cumulative Fluxes"),
                     checkboxGroupInput(
                       "wb_cumulative_vars",
                       NULL,
@@ -387,6 +466,8 @@ ui <- fluidPage(
           "Seasonality",
           icon = icon("calendar"),
 
+          tags$div(class = "section-header", "Seasonality Analysis"),
+
           # Collapsible Control Panel
           tags$div(
             style = "margin: 15px;",
@@ -405,7 +486,7 @@ ui <- fluidPage(
                 style = "background-color: #f8f9fa; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1);",
                 fluidRow(
                   column(4,
-                    tags$h5("Display Options"),
+                    tags$div(class = "subsection-header", "Display Options"),
                     uiOutput("subbasin_selector_seasonality"),
                     fluidRow(
                       column(6, actionButton("prev_subbasin_seasonality", "< Prev", class = "btn-sm", style = "width: 100%;")),
@@ -413,7 +494,7 @@ ui <- fluidPage(
                     )
                   ),
                   column(4,
-                    tags$h5("Storage Variables"),
+                    tags$div(class = "subsection-header", "Storage Variables"),
                     checkboxGroupInput(
                       "wb_storage_vars_seasonality",
                       NULL,
@@ -426,7 +507,7 @@ ui <- fluidPage(
                     )
                   ),
                   column(4,
-                    tags$h5("Status"),
+                    tags$div(class = "subsection-header", "Status"),
                     verbatimTextOutput("status_text_seasonality")
                   )
                 )
@@ -459,6 +540,8 @@ ui <- fluidPage(
           "Statistics",
           icon = icon("table"),
 
+          tags$div(class = "section-header", "Performance Statistics"),
+
           # Collapsible Control Panel
           tags$div(
             style = "margin: 15px;",
@@ -477,7 +560,7 @@ ui <- fluidPage(
                 style = "background-color: #f8f9fa; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1);",
                 fluidRow(
                   column(4,
-                    tags$h5("Display Options"),
+                    tags$div(class = "subsection-header", "Display Options"),
                     radioButtons(
                       "stats_view_mode",
                       "View Mode:",
@@ -489,7 +572,7 @@ ui <- fluidPage(
                     )
                   ),
                   column(4,
-                    tags$h5("Selection"),
+                    tags$div(class = "subsection-header", "Selection"),
                     # Shown when view_mode = "all"
                     conditionalPanel(
                       condition = "input.stats_view_mode == 'all'",
@@ -506,15 +589,13 @@ ui <- fluidPage(
                     )
                   ),
                   column(4,
-                    tags$h5("Status"),
+                    tags$div(class = "subsection-header", "Status"),
                     verbatimTextOutput("status_text_stats")
                   )
                 )
               )
             )
           ),
-
-          h3("Model Performance Metrics"),
 
           # Show plot when in "all" mode
           conditionalPanel(
@@ -530,7 +611,7 @@ ui <- fluidPage(
           conditionalPanel(
             condition = "input.stats_view_mode == 'single'",
             tags$hr(),
-            h4("Additional Information"),
+            tags$div(class = "subsection-header", "Additional Information"),
             verbatimTextOutput("stats_summary")
           )
         ),
@@ -540,7 +621,7 @@ ui <- fluidPage(
           "Export & Download",
           icon = icon("download"),
 
-          h3("Export Options"),
+          tags$div(class = "section-header", "Export Options"),
 
           fluidRow(
             column(6,
@@ -588,7 +669,12 @@ server <- function(input, output, session) {
   # COSERO Run Tab Logic ####
 
   # Directory browser setup ####
-  volumes <- c(Home = fs::path_home(), getVolumes()())
+  # Set up convenient starting locations for the file browser
+  volumes <- c(
+    "Working Directory" = normalizePath(getwd(), winslash = "/"),
+    "Home" = fs::path_home(),
+    getVolumes()()  # This adds all drive letters (C:, D:, etc.)
+  )
   shinyDirChoose(input, "run_project_dir_btn", roots = volumes, session = session)
 
   # Update text input when directory is selected via browser ####
@@ -633,26 +719,39 @@ server <- function(input, output, session) {
     normalize_path_input(input$run_project_path)
   })
 
+  # Click zone triggers file browser ####
+  observe({
+    shinyjs::runjs("
+      var dropZone = document.getElementById('project_drag_zone');
+      if (dropZone) {
+        // Click to open file browser
+        dropZone.addEventListener('click', function(e) {
+          document.getElementById('run_project_dir_btn').click();
+        });
+      }
+    ")
+  })
+
   # Project validation ####
   output$project_validation_ui <- renderUI({
     req(input$run_project_path)
 
     if (nchar(input$run_project_path) == 0) {
-      return(tags$p(style = "color: gray;", "Enter project path to validate"))
+      return(tags$p(class = "input-hint", "Enter project path to validate"))
     }
 
     project_path <- normalized_project_path()
 
     if (!dir.exists(project_path)) {
-      return(tags$p(style = "color: red;", icon("times-circle"), " Directory does not exist"))
+      return(tags$div(class = "validation-error", "Directory does not exist"))
     }
 
     exe_path <- file.path(project_path, "COSERO.exe")
     if (!file.exists(exe_path)) {
-      return(tags$p(style = "color: orange;", icon("exclamation-triangle"), " COSERO.exe not found in directory"))
+      return(tags$div(class = "validation-warning", "COSERO.exe not found in directory"))
     }
 
-    return(tags$p(style = "color: green;", icon("check-circle"), " Valid COSERO project"))
+    return(tags$div(class = "validation-success", "Valid COSERO project"))
   })
 
   # Warm start status ####
@@ -668,23 +767,23 @@ server <- function(input, output, session) {
 
         if (file.exists(statevar_input)) {
           file_info <- file.info(statevar_input)
-          return(tags$p(
-            style = "color: green; font-size: 11px;",
-            icon("check-circle"),
-            sprintf(" statevar.dmp found in input/ (modified: %s)", format(file_info$mtime, "%Y-%m-%d %H:%M"))
+          return(tags$div(
+            class = "validation-success",
+            style = "font-size: 0.9em;",
+            sprintf("statevar.dmp found in input/ (modified: %s)", format(file_info$mtime, "%Y-%m-%d %H:%M"))
           ))
         } else if (file.exists(statevar_output)) {
           file_info <- file.info(statevar_output)
-          return(tags$p(
-            style = "color: orange; font-size: 11px;",
-            icon("exclamation-triangle"),
-            sprintf(" statevar.dmp found in output/ but should be in input/ (modified: %s)", format(file_info$mtime, "%Y-%m-%d %H:%M"))
+          return(tags$div(
+            class = "validation-warning",
+            style = "font-size: 0.9em;",
+            sprintf("statevar.dmp found in output/ but should be in input/ (modified: %s)", format(file_info$mtime, "%Y-%m-%d %H:%M"))
           ))
         } else {
-          return(tags$p(
-            style = "color: red; font-size: 11px;",
-            icon("times-circle"),
-            " statevar.dmp not found in input/ or output/ folders! Warm start will fail."
+          return(tags$div(
+            class = "validation-error",
+            style = "font-size: 0.9em;",
+            "statevar.dmp not found in input/ or output/ folders! Warm start will fail."
           ))
         }
       }

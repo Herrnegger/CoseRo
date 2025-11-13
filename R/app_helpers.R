@@ -71,11 +71,38 @@ NAMES_WATER_BALANCE <- list(
 
 # 1. Data Processing Functions ####
 
-#' Prepare subbasin data for plotting
-#' @param result Output from read_cosero_output()
-#' @param subbasin_id Subbasin ID (e.g., "0001" or 1)
-#' @param date_range Vector of c(start_date, end_date) as Date objects
-#' @return List with filtered datasets for all panels
+#' Prepare Subbasin Data for Plotting
+#'
+#' Extracts and filters all relevant data for a specific subbasin from COSERO outputs.
+#' Prepares data for discharge, precipitation, runoff components, water balance, and glacier panels.
+#'
+#' @param result Output list from read_cosero_output()
+#' @param subbasin_id Subbasin ID as character (e.g., "0001") or numeric (e.g., 1)
+#' @param date_range Optional vector of c(start_date, end_date) as Date objects for filtering
+#'
+#' @return List containing:
+#'   \item{discharge}{Discharge data (Q_obs, Q_sim) for the subbasin}
+#'   \item{precipitation}{Precipitation data (PRAIN, PSNOW) for the subbasin}
+#'   \item{runoff_components}{Runoff components (QAB*) for the subbasin}
+#'   \item{water_balance}{Water balance variables for the subbasin}
+#'   \item{glacier}{Glacier melt data for the subbasin}
+#'   \item{statistics}{Performance statistics for the subbasin}
+#'   \item{subbasin_id}{Formatted subbasin ID}
+#'
+#' @export
+#' @examples
+#' \dontrun{
+#' # Read COSERO outputs
+#' outputs <- read_cosero_output("path/to/output")
+#'
+#' # Prepare data for subbasin 1
+#' sb_data <- prepare_subbasin_data(outputs, 1)
+#'
+#' # Prepare with date filtering
+#' sb_data <- prepare_subbasin_data(outputs, "0001",
+#'                                   date_range = c(as.Date("2015-01-01"),
+#'                                                  as.Date("2015-12-31")))
+#' }
 prepare_subbasin_data <- function(result, subbasin_id, date_range = NULL) {
   # Format subbasin ID
   if (is.numeric(subbasin_id)) {
@@ -279,9 +306,23 @@ calculate_cumulative <- function(data, vars) {
 
 # 2. Plotting Functions ####
 
-#' Create discharge plot (Panel 1)
-#' @param data Discharge data with Q_obs and Q_sim columns
+#' Create Discharge Time Series Plot
+#'
+#' Creates an interactive plotly time series showing observed and simulated discharge.
+#'
+#' @param data Data frame with Date, Q_obs, and Q_sim columns
+#'
 #' @return Plotly object
+#' @export
+#' @examples
+#' \dontrun{
+#' # Prepare subbasin data
+#' sb_data <- prepare_subbasin_data(outputs, 1)
+#'
+#' # Create discharge plot
+#' p <- plot_discharge(sb_data$discharge)
+#' p
+#' }
 plot_discharge <- function(data) {
   if (is.null(data) || nrow(data) == 0) {
     return(plotly_empty(text = "No discharge data available"))
@@ -324,10 +365,24 @@ plot_discharge <- function(data) {
   return(p)
 }
 
-#' Create precipitation plot (Panel 2)
-#' @param data Precipitation data with PRAIN and PSNOW columns
-#' @param separate Logical, if TRUE show PRAIN and PSNOW separately
+#' Create Precipitation Time Series Plot
+#'
+#' Creates an interactive plotly chart showing rainfall and snowfall.
+#' Can show as stacked bars (combined) or separate bars.
+#'
+#' @param data Data frame with Date, PRAIN, and PSNOW columns
+#' @param separate Logical. If TRUE, shows rain and snow as separate bars; if FALSE, stacked.
+#'
 #' @return Plotly object
+#' @export
+#' @examples
+#' \dontrun{
+#' # Create precipitation plot (stacked)
+#' p <- plot_precipitation(sb_data$precipitation)
+#'
+#' # Create precipitation plot (separate)
+#' p <- plot_precipitation(sb_data$precipitation, separate = TRUE)
+#' }
 plot_precipitation <- function(data, separate = FALSE) {
   if (is.null(data) || nrow(data) == 0) {
     return(plotly_empty(text = "No precipitation data available"))
@@ -399,10 +454,24 @@ plot_precipitation <- function(data, separate = FALSE) {
   return(p)
 }
 
-#' Create runoff components plot (Panel 3)
-#' @param data Runoff components data with QAB columns
-#' @param glacier_data Optional glacier data with glacmelt column
+#' Create Runoff Components Time Series Plot
+#'
+#' Creates an interactive plotly chart showing different runoff components (surface, subsurface, baseflow).
+#' Optionally includes glacier melt contribution.
+#'
+#' @param data Data frame with Date and QAB* columns (runoff components)
+#' @param glacier_data Optional data frame with glacmelt column
+#'
 #' @return Plotly object
+#' @export
+#' @examples
+#' \dontrun{
+#' # Create runoff components plot
+#' p <- plot_runoff_components(sb_data$runoff_components)
+#'
+#' # Include glacier melt
+#' p <- plot_runoff_components(sb_data$runoff_components, sb_data$glacier)
+#' }
 plot_runoff_components <- function(data, glacier_data = NULL) {
   if (is.null(data) || nrow(data) == 0) {
     return(plotly_empty(text = "No runoff components data available"))
@@ -472,11 +541,29 @@ plot_runoff_components <- function(data, glacier_data = NULL) {
   return(p)
 }
 
-#' Create water balance plot (Panel 4)
-#' @param data Water balance data
-#' @param selected_vars Character vector of variables to plot
-#' @param show_cumulative Logical, if TRUE calculate and show cumulative variables
+#' Create Water Balance Time Series Plot
+#'
+#' Creates an interactive plotly chart showing water balance components including
+#' storage states (soil moisture, groundwater, snow) and cumulative fluxes (P, ET, Q).
+#'
+#' @param data Data frame with Date and water balance columns
+#' @param selected_vars Character vector of variable names to plot (default: c("BW0", "BW3", "SWW"))
+#' @param show_cumulative Logical. If TRUE, calculates and shows cumulative flux variables.
+#'
 #' @return Plotly object
+#' @export
+#' @examples
+#' \dontrun{
+#' # Create water balance plot with default variables
+#' p <- plot_water_balance(sb_data$water_balance)
+#'
+#' # Plot specific variables
+#' p <- plot_water_balance(sb_data$water_balance,
+#'                          selected_vars = c("BW0", "SWW", "P_cum"))
+#'
+#' # Without cumulative variables
+#' p <- plot_water_balance(sb_data$water_balance, show_cumulative = FALSE)
+#' }
 plot_water_balance <- function(data, selected_vars = NULL, show_cumulative = TRUE) {
   if (is.null(data) || nrow(data) == 0) {
     return(plotly_empty(text = "No water balance data available"))

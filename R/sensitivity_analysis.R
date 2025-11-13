@@ -11,41 +11,186 @@ library(ggplot2)
 library(sensobol)
 library(hydroGOF)
 library(parallel)
-library(pbapply)  # For progress bars in parallel
+library(doSNOW)    # For progress updates in parallel
+library(foreach)
 
 # Note: COSERO functions loaded from package
 # (run_cosero, read_cosero_output, read_defaults, etc.)
+
+# Helper Functions #####
+
+#' Display Progress for Ensemble Runs
+#'
+#' @param current Current run number
+#' @param total Total number of runs
+#' @param start_time Start time of ensemble
+#' @param run_type Type of run ("Simulation" or other label)
+#' @param quiet Suppress output
+display_progress <- function(current, total, start_time, run_type = "Simulation", quiet = FALSE) {
+  if (quiet) return(invisible(NULL))
+
+  # Calculate progress
+  pct <- round(100 * current / total, 1)
+
+  # Calculate time remaining
+  elapsed <- as.numeric(difftime(Sys.time(), start_time, units = "secs"))
+  avg_per_run <- elapsed / current
+  remaining <- avg_per_run * (total - current)
+
+  # Format time
+  format_time <- function(seconds) {
+    if (seconds < 60) {
+      return(sprintf("%.0fs", seconds))
+    } else if (seconds < 3600) {
+      mins <- floor(seconds / 60)
+      secs <- seconds %% 60
+      return(sprintf("%dm %02.0fs", mins, secs))
+    } else {
+      hours <- floor(seconds / 3600)
+      mins <- floor((seconds %% 3600) / 60)
+      return(sprintf("%dh %02dm", hours, mins))
+    }
+  }
+
+  # Create progress message
+  msg <- sprintf("\r[%s %d/%d] (%.1f%%) - Elapsed: %s - Est. remaining: %s          ",
+                 run_type, current, total, pct,
+                 format_time(elapsed),
+                 format_time(remaining))
+
+  cat(msg)
+  flush.console()
+
+  # Newline on completion
+  if (current == total) {
+    cat("\n")
+  }
+}
+
+#' Format Time Duration
+#'
+#' @param seconds Time in seconds
+#' @return Formatted string
+format_time_duration <- function(seconds) {
+  if (seconds < 60) {
+    return(sprintf("%.1fs", seconds))
+  } else if (seconds < 3600) {
+    mins <- floor(seconds / 60)
+    secs <- seconds %% 60
+    return(sprintf("%dm %02.0fs", mins, secs))
+  } else {
+    hours <- floor(seconds / 3600)
+    mins <- floor((seconds %% 3600) / 60)
+    return(sprintf("%dh %02dm", hours, mins))
+  }
+}
+
+#' Find Parameter Column with Case-Insensitive Matching
+#'
+#' Searches for a parameter name in column names, handling:
+#' - Case insensitivity (TCOR, TCor, tcor all match)
+#' - Optional trailing underscore (TCOR_ vs TCOR)
+#' - Monthly variants (TCOR matches TCor1, TCor2, ..., TCor12)
+#'
+#' @param param_name Parameter name to search for
+#' @param col_names Column names to search in
+#' @param return_all If TRUE, return all monthly variants (1-12); if FALSE, return first match
+#' @return Character vector of matching column names (empty if none found)
+find_parameter_column <- function(param_name, col_names, return_all = FALSE) {
+  # Try direct match with case insensitivity and underscore variants
+  patterns <- c(
+    paste0("^", param_name, "_$"),  # Exact match with underscore
+    paste0("^", param_name, "$")    # Exact match without underscore
+  )
+
+  for (pattern in patterns) {
+    matches <- grep(pattern, col_names, ignore.case = TRUE, value = TRUE)
+    if (length(matches) > 0) {
+      return(matches[1])  # Return first match
+    }
+  }
+
+  # Check for monthly variants (parameter1-12)
+  # Remove trailing underscore from param_name if present
+  base_param <- sub("_$", "", param_name)
+
+  monthly_matches <- character()
+  for (month in 1:12) {
+    monthly_patterns <- c(
+      paste0("^", base_param, month, "_$"),
+      paste0("^", base_param, month, "$")
+    )
+    for (pattern in monthly_patterns) {
+      matches <- grep(pattern, col_names, ignore.case = TRUE, value = TRUE)
+      if (length(matches) > 0) {
+        monthly_matches <- c(monthly_matches, matches[1])
+        break
+      }
+    }
+  }
+
+  if (length(monthly_matches) > 0) {
+    if (return_all) {
+      return(monthly_matches)  # Return all 12 months
+    } else {
+      return(monthly_matches[1])  # Return first month only
+    }
+  }
+
+  return(character(0))  # No match found
+}
 
 # 2 Parameter Setup #####
 
 #' Create Custom Parameter Bounds
 #'
-#' Create parameter bounds manually without using CSV file
+#' Create parameter bounds manually without using CSV file. This function defines
+#' the sampling ranges and modification types for sensitivity analysis parameters.
 #'
-#' @param parameters Vector of parameter names
-#' @param min Vector of minimum values (same length as parameters)
-#' @param max Vector of maximum values (same length as parameters)
-#' @param modification_type Vector of modification types: "absval", "relchg", or "abschg" (same length as parameters)
+#' @param parameters Vector of parameter names (e.g., c("BETA", "CTMAX", "TAB1"))
+#' @param min Vector of minimum physical values (same length as parameters)
+#' @param max Vector of maximum physical values (same length as parameters)
+#' @param modification_type Vector of modification types (same length as parameters):
+#'   \itemize{
+#'     \item "relchg" - Relative change (multiply original by factor, preserves spatial patterns)
+#'     \item "abschg" - Absolute change (add value to original, preserves spatial differences)
+#'   }
 #' @param default Vector of default values (optional, same length as parameters)
 #' @param description Vector of parameter descriptions (optional)
 #' @param category Vector of parameter categories (optional)
-#' @return Tibble with parameter bounds in the same format as CSV file
+#' @param sample_min Vector of minimum sampling values for Sobol (optional)
+#' @param sample_max Vector of maximum sampling values for Sobol (optional)
+#'
+#' @return Tibble with parameter bounds containing columns: parameter, description, min, max,
+#'   default, modification_type, category, sample_min, sample_max
+#'
+#' @export
 #' @examples
+#' \dontrun{
 #' # Create custom bounds for 3 parameters
 #' custom_bounds <- create_custom_bounds(
 #'   parameters = c("BETA", "CTMAX", "TAB1"),
 #'   min = c(0.1, 2, 0.1),
 #'   max = c(10, 12, 5),
-#'   modification_type = c("absval", "absval", "relchg"),
+#'   modification_type = c("relchg", "relchg", "abschg"),
 #'   default = c(4.5, 5, 1)
 #' )
+#'
+#' # Use in sensitivity analysis
+#' sobol_samples <- generate_sobol_samples(
+#'   par_bounds = create_sobol_bounds(custom_bounds),
+#'   n = 100
+#' )
+#' }
 create_custom_bounds <- function(parameters,
                                   min,
                                   max,
                                   modification_type,
                                   default = NULL,
                                   description = NULL,
-                                  category = NULL) {
+                                  category = NULL,
+                                  sample_min = NULL,
+                                  sample_max = NULL) {
 
   # Validate inputs
   n_params <- length(parameters)
@@ -61,7 +206,7 @@ create_custom_bounds <- function(parameters,
   }
 
   # Validate modification types
-  valid_types <- c("absval", "relchg", "abschg")
+  valid_types <- c("relchg", "abschg")
   invalid_types <- modification_type[!modification_type %in% valid_types]
   if (length(invalid_types) > 0) {
     stop("Invalid modification_type: ", paste(invalid_types, collapse = ", "),
@@ -75,9 +220,17 @@ create_custom_bounds <- function(parameters,
          paste(parameters[invalid_idx], collapse = ", "))
   }
 
+  # Set sampling ranges (for Sobol)
+  if (is.null(sample_min)) {
+    sample_min <- ifelse(modification_type == "relchg", 0.5, min)
+  }
+  if (is.null(sample_max)) {
+    sample_max <- ifelse(modification_type == "relchg", 2.0, max)
+  }
+
   # Set defaults for optional parameters
   if (is.null(default)) {
-    default <- (min + max) / 2  # Use midpoint as default
+    default <- ifelse(modification_type == "relchg", 1.0, (min + max) / 2)
   } else if (length(default) != n_params) {
     stop("Length of 'default' must match length of 'parameters'")
   }
@@ -102,7 +255,9 @@ create_custom_bounds <- function(parameters,
     max = max,
     default = default,
     modification_type = modification_type,
-    category = category
+    category = category,
+    sample_min = sample_min,
+    sample_max = sample_max
   )
 
   return(bounds)
@@ -110,8 +265,9 @@ create_custom_bounds <- function(parameters,
 
 #' Load COSERO Parameter Bounds
 #'
-#' Load parameter bounds from CSV file or use custom bounds.
-#' Custom bounds take precedence over CSV file.
+#' Load parameter bounds from CSV file or use custom bounds for sensitivity analysis.
+#' Custom bounds take precedence over CSV file. This function is the first step in
+#' setting up a sensitivity analysis workflow.
 #'
 #' @param bounds_file Path to parameter bounds CSV file (NULL = use package default)
 #' @param parameters Vector of parameter names to include (NULL = all)
@@ -119,8 +275,13 @@ create_custom_bounds <- function(parameters,
 #' @param custom_min Vector of minimum values for custom bounds (optional)
 #' @param custom_max Vector of maximum values for custom bounds (optional)
 #' @param custom_modification_type Vector of modification types for custom bounds (optional)
-#' @return Tibble with parameter bounds
+#'
+#' @return Tibble with parameter bounds containing columns: parameter, description, min, max,
+#'   default, modification_type, category, sample_min, sample_max
+#'
+#' @export
 #' @examples
+#' \dontrun{
 #' # Load from package default CSV
 #' bounds <- load_parameter_bounds(parameters = c("BETA", "CTMAX"))
 #'
@@ -132,7 +293,7 @@ create_custom_bounds <- function(parameters,
 #'   parameters = c("BETA", "CTMAX"),
 #'   min = c(0.5, 3),
 #'   max = c(8, 10),
-#'   modification_type = c("absval", "absval")
+#'   modification_type = c("relchg", "relchg")
 #' )
 #' bounds <- load_parameter_bounds(custom_bounds = custom)
 #'
@@ -141,8 +302,9 @@ create_custom_bounds <- function(parameters,
 #'   parameters = c("BETA", "CTMAX"),
 #'   custom_min = c(0.5, 3),
 #'   custom_max = c(8, 10),
-#'   custom_modification_type = c("absval", "absval")
+#'   custom_modification_type = c("relchg", "relchg")
 #' )
+#' }
 load_parameter_bounds <- function(bounds_file = NULL,
                                    parameters = NULL,
                                    custom_bounds = NULL,
@@ -196,6 +358,14 @@ load_parameter_bounds <- function(bounds_file = NULL,
     bounds <- bounds %>% filter(parameter %in% parameters)
   }
 
+  # Add sample_min/sample_max if missing
+  if (!"sample_min" %in% colnames(bounds)) {
+    bounds$sample_min <- ifelse(bounds$modification_type == "relchg", 0.5, bounds$min)
+  }
+  if (!"sample_max" %in% colnames(bounds)) {
+    bounds$sample_max <- ifelse(bounds$modification_type == "relchg", 2.0, bounds$max)
+  }
+
   cat("Loading parameter bounds from CSV (", nrow(bounds), " parameters)\n")
   return(bounds)
 }
@@ -205,14 +375,15 @@ load_parameter_bounds <- function(bounds_file = NULL,
 #' @param par_bounds Tibble from load_parameter_bounds()
 #' @return Named tibble with min/max rows for sobol_matrices()
 create_sobol_bounds <- function(par_bounds) {
-  bounds_matrix <- tibble::tibble(
-    min = par_bounds$min,
-    max = par_bounds$max
+  # Use sample_min/sample_max for Sobol sampling (not physical min/max)
+  bounds_matrix <- data.frame(
+    min = par_bounds$sample_min,
+    max = par_bounds$sample_max,
+    row.names = par_bounds$parameter
   )
 
-  # Transpose to have parameters as columns
+  # Transpose to have parameters as columns, min/max as rows
   bounds_t <- as.data.frame(t(bounds_matrix))
-  colnames(bounds_t) <- par_bounds$parameter
 
   return(as_tibble(bounds_t))
 }
@@ -221,10 +392,34 @@ create_sobol_bounds <- function(par_bounds) {
 
 #' Generate Sobol Parameter Sets
 #'
-#' @param par_bounds Parameter bounds from create_sobol_bounds()
-#' @param n Sample size (total runs = n * (2 + n_params))
-#' @param order Sobol order ("first" or "second")
-#' @return List with sobol_matrix (raw) and parameter_sets (scaled)
+#' Generates Sobol quasi-random parameter samples for global sensitivity analysis.
+#' Uses the sensobol package to create space-filling parameter combinations.
+#'
+#' @param par_bounds Parameter bounds tibble from create_sobol_bounds()
+#' @param n Sample size (total runs = n * (k + 2), where k is number of parameters)
+#' @param order Sobol order: "first" for first-order indices only, "second" for first and total-order
+#'
+#' @return List containing:
+#'   \item{sobol_matrix}{Raw Sobol matrices}
+#'   \item{parameter_sets}{Scaled parameter sets (tibble with n*(k+2) rows)}
+#'   \item{n}{Base sample size}
+#'   \item{par_names}{Parameter names}
+#'
+#' @export
+#' @examples
+#' \dontrun{
+#' # Load parameter bounds
+#' bounds <- load_parameter_bounds(parameters = c("BETA", "CTMAX", "TAB1"))
+#'
+#' # Create Sobol bounds
+#' sobol_bounds <- create_sobol_bounds(bounds)
+#'
+#' # Generate 100 Sobol samples (300 total runs for 3 parameters)
+#' samples <- generate_sobol_samples(sobol_bounds, n = 100)
+#'
+#' # Check number of parameter sets
+#' nrow(samples$parameter_sets)  # 500 = 100 * (3 + 2)
+#' }
 generate_sobol_samples <- function(par_bounds, n = 50, order = "first") {
   par_names <- colnames(par_bounds)
 
@@ -248,15 +443,41 @@ generate_sobol_samples <- function(par_bounds, n = 50, order = "first") {
 
 # 4 Ensemble Execution #####
 
-#' Run COSERO Ensemble with Parameter Sets
+#' Run COSERO Ensemble with Parameter Sets (Sequential)
 #'
-#' @param project_path Path to COSERO project
-#' @param parameter_sets Tibble with parameter combinations (from generate_sobol_samples)
-#' @param par_bounds Parameter bounds table with modification types
-#' @param base_settings List of base COSERO settings
+#' Runs multiple COSERO simulations sequentially with different parameter sets.
+#' For parallel execution, use run_cosero_ensemble_parallel().
+#'
+#' @param project_path Path to COSERO project directory
+#' @param parameter_sets Tibble with parameter combinations from generate_sobol_samples()
+#' @param par_bounds Parameter bounds table with modification types from load_parameter_bounds()
+#' @param base_settings List of base COSERO settings (e.g., STARTDATE, ENDDATE, SPINUP)
 #' @param par_file Path to parameter file to modify (NULL = read from defaults.txt)
-#' @param quiet Suppress output
-#' @return List with results and parameters
+#' @param quiet Logical. If TRUE, suppresses progress messages.
+#'
+#' @return List containing:
+#'   \item{results}{List of COSERO output data for each run}
+#'   \item{parameter_sets}{Original parameter sets used}
+#'   \item{runtime_minutes}{Total runtime in minutes}
+#'
+#' @export
+#' @examples
+#' \dontrun{
+#' # Set up sensitivity analysis
+#' bounds <- load_parameter_bounds(parameters = c("BETA", "CTMAX"))
+#' sobol_bounds <- create_sobol_bounds(bounds)
+#' samples <- generate_sobol_samples(sobol_bounds, n = 50)
+#'
+#' # Run ensemble
+#' results <- run_cosero_ensemble(
+#'   project_path = "path/to/project",
+#'   parameter_sets = samples$parameter_sets,
+#'   par_bounds = bounds
+#' )
+#'
+#' # Extract performance metrics
+#' nse <- extract_cosero_metrics(results, subbasin_id = "0001", metric = "NSE")
+#' }
 run_cosero_ensemble <- function(project_path,
                                 parameter_sets,
                                 par_bounds,
@@ -288,27 +509,56 @@ run_cosero_ensemble <- function(project_path,
   n_runs <- nrow(parameter_sets)
   results <- vector("list", n_runs)
 
-  if (!quiet) cat("Running", n_runs, "COSERO simulations...\n")
-
-  # Backup original parameter file
-  backup_file <- paste0(par_file, ".backup_", format(Sys.time(), "%Y%m%d_%H%M%S"))
+  # Create backup folder for parameter files
+  backup_dir <- file.path(dirname(par_file), "parameterfile_backup")
+  if (!dir.exists(backup_dir)) dir.create(backup_dir, recursive = TRUE)
+  backup_file <- file.path(backup_dir, paste0(basename(par_file), ".backup_", format(Sys.time(), "%Y%m%d_%H%M%S")))
   file.copy(par_file, backup_file)
 
-  # Read original parameter values once
-  original_values <- read_parameter_file(par_file, names(parameter_sets))
+  # Read original parameter values once (detect format) - always quiet
+  original_values <- tryCatch({
+    read_parameter_table(par_file, names(parameter_sets), zone_id = NULL, quiet = TRUE)
+  }, error = function(e) {
+    read_parameter_file(par_file, names(parameter_sets))
+  })
+
+  # Check if using tabular format (used for modify_parameter_table fallback)
+  # Don't pre-load - just detect format
+  param_file_structure <- tryCatch({
+    # Just check if it's tabular format, don't load the data
+    test_read <- readLines(par_file, n = 3)
+    if (length(test_read) >= 2 && grepl("\t", test_read[2])) {
+      list(is_tabular = TRUE)
+    } else {
+      list(is_tabular = FALSE)
+    }
+  }, error = function(e) {
+    list(is_tabular = FALSE)
+  })
 
   start_time <- Sys.time()
 
-  for (i in 1:n_runs) {
-    if (!quiet && i %% 10 == 0) {
-      cat("  Run", i, "of", n_runs, "\n")
-    }
+  # Report initial message once
+  if (!quiet) {
+    cat(sprintf("\nStarting %d COSERO simulations (sequential)\n", n_runs))
+    param_names_str <- paste(names(parameter_sets), collapse = ", ")
+    cat(sprintf("Parameters: %s\n\n", param_names_str))
+  }
 
+  for (i in 1:n_runs) {
     # Restore original file for each run
     file.copy(backup_file, par_file, overwrite = TRUE)
 
-    # Modify parameters in para.txt
-    modify_parameter_file(par_file, parameter_sets[i, ], par_bounds, original_values)
+    # Modify parameters (try tabular format first, fall back to simple format)
+    if (param_file_structure$is_tabular) {
+      tryCatch({
+        modify_parameter_table(par_file, parameter_sets[i, ], par_bounds, original_values, quiet = TRUE)
+      }, error = function(e) {
+        modify_parameter_file(par_file, parameter_sets[i, ], par_bounds, original_values)
+      })
+    } else {
+      modify_parameter_file(par_file, parameter_sets[i, ], par_bounds, original_values)
+    }
 
     # Run COSERO
     tryCatch({
@@ -319,17 +569,26 @@ run_cosero_ensemble <- function(project_path,
         read_outputs = TRUE
       )
       results[[i]] <- result
+
     }, error = function(e) {
       warning("Run ", i, " failed: ", e$message)
       results[[i]] <- list(success = FALSE, error = e$message)
     })
+
+    # Display progress after completing run
+    if (!quiet) {
+      display_progress(i, n_runs, start_time, "Run")
+    }
   }
 
   # Restore original parameter file
   file.copy(backup_file, par_file, overwrite = TRUE)
 
   runtime <- difftime(Sys.time(), start_time, units = "mins")
-  if (!quiet) cat("Ensemble completed in", round(runtime, 2), "minutes\n")
+  if (!quiet) {
+    cat(sprintf("\n✓ Ensemble completed in %s\n", format_time_duration(as.numeric(runtime) * 60)))
+    cat(sprintf("  Average per run: %s\n", format_time_duration(runtime * 60 / n_runs)))
+  }
 
   return(list(
     results = results,
@@ -348,7 +607,8 @@ read_parameter_file <- function(par_file, param_names) {
   values <- list()
 
   for (param_name in param_names) {
-    param_idx <- grep(paste0("^", param_name, "\\b"), lines)
+    # Case-insensitive search
+    param_idx <- grep(paste0("^", param_name, "\\b"), lines, ignore.case = TRUE)
 
     if (length(param_idx) > 0) {
       value_idx <- param_idx[1] + 1
@@ -373,38 +633,58 @@ modify_parameter_file <- function(par_file, params, par_bounds, original_values)
   for (param_name in names(params)) {
     sampled_value <- params[[param_name]]
 
-    # Get modification type
-    mod_type <- par_bounds$modification_type[par_bounds$parameter == param_name]
+    # Get modification type (case-insensitive)
+    mod_type_idx <- which(par_bounds$parameter == param_name)
+    if (length(mod_type_idx) == 0) {
+      mod_type_idx <- which(tolower(par_bounds$parameter) == tolower(param_name))
+    }
+
+    if (length(mod_type_idx) == 0) {
+      warning("Modification type not found for ", param_name)
+      next
+    }
+
+    mod_type <- par_bounds$modification_type[mod_type_idx[1]]
 
     # Calculate final value based on modification type
-    if (mod_type == "absval") {
-      # Replace with absolute value
-      final_value <- sampled_value
-    } else if (mod_type == "relchg") {
-      # Multiply original by sampled_value (direct multiplier)
+    if (mod_type == "relchg") {
+      # Multiply original by sampled_value (preserves spatial pattern)
       original <- original_values[[param_name]]
       if (!is.null(original)) {
         final_value <- original * sampled_value
       } else {
-        warning("Original value not found for ", param_name, ", using sampled value")
-        final_value <- sampled_value
+        stop("Original value not found for ", param_name)
       }
     } else if (mod_type == "abschg") {
-      # Add sampled_value to original value
+      # Add sampled_value to original value (preserves spatial differences)
       original <- original_values[[param_name]]
       if (!is.null(original)) {
         final_value <- original + sampled_value
       } else {
-        warning("Original value not found for ", param_name, ", using sampled value")
-        final_value <- sampled_value
+        stop("Original value not found for ", param_name)
       }
     } else {
-      # Default: use sampled value
-      final_value <- sampled_value
+      stop("Unknown modification type: ", mod_type, ". Use 'relchg' or 'abschg'.")
     }
 
-    # Find parameter line and update
-    param_idx <- grep(paste0("^", param_name, "\\b"), lines)
+    # Apply physical bounds as safeguards
+    param_min <- par_bounds$min[mod_type_idx[1]]
+    param_max <- par_bounds$max[mod_type_idx[1]]
+
+    if (length(param_min) > 0 && length(param_max) > 0) {
+      # Clip to physical bounds
+      final_value_orig <- final_value
+      final_value <- max(param_min, min(param_max, final_value))
+
+      # Warn if clipping occurred
+      if (abs(final_value - final_value_orig) > 1e-10) {
+        warning(sprintf("Parameter %s: value %.3f clipped to physical bounds [%.3f, %.3f] -> %.3f",
+                        param_name, final_value_orig, param_min, param_max, final_value))
+      }
+    }
+
+    # Find parameter line and update (case-insensitive)
+    param_idx <- grep(paste0("^", param_name, "\\b"), lines, ignore.case = TRUE)
 
     if (length(param_idx) > 0) {
       value_idx <- param_idx[1] + 1
@@ -415,6 +695,272 @@ modify_parameter_file <- function(par_file, params, par_bounds, original_values)
   }
 
   writeLines(lines, par_file)
+}
+
+#' Read Parameter Values from Tabular File
+#'
+#' @param par_file Path to parameter file (tabular format with zones)
+#' @param param_names Vector of parameter names to read
+#' @param zone_id Zone ID to extract parameters from (default: first zone). Use "all" to read all zones.
+#' @return If zone_id is specified: Named list of parameter values.
+#'         If zone_id = "all": Data frame with columns NZ_ (zone ID) and one column per parameter
+read_parameter_table <- function(par_file, param_names, zone_id = NULL, quiet = FALSE) {
+  # Use the existing reader from cosero_readers.R
+  param_data <- read_cosero_parameters(par_file, skip_lines = 1, quiet = quiet)
+
+  # If zone_id = "all", return data frame with all zones
+  if (!is.null(zone_id) && zone_id == "all") {
+    result <- data.frame(NZ_ = param_data$NZ_)
+
+    for (param_name in param_names) {
+      param_col <- find_parameter_column(param_name, colnames(param_data), return_all = FALSE)
+
+      if (length(param_col) > 0) {
+        result[[param_name]] <- param_data[[param_col]]
+      } else {
+        warning("Parameter ", param_name, " not found in file")
+        result[[param_name]] <- NA
+      }
+    }
+
+    if (!quiet) cat(sprintf("Successfully read parameters for %d zones/subbasins\n", nrow(result)))
+    return(result)
+  }
+
+  # Single zone behavior (original)
+  if (is.null(zone_id)) {
+    zone_id <- param_data$NZ_[1]
+  }
+
+  zone_data <- param_data[param_data$NZ_ == zone_id, ]
+
+  if (nrow(zone_data) == 0) {
+    stop("Zone ", zone_id, " not found in parameter file")
+  }
+
+  values <- list()
+  for (param_name in param_names) {
+    param_col <- find_parameter_column(param_name, colnames(param_data), return_all = FALSE)
+
+    if (length(param_col) > 0) {
+      values[[param_name]] <- zone_data[[param_col]][1]
+    } else {
+      warning("Parameter ", param_name, " not found in file")
+    }
+  }
+
+  return(values)
+}
+
+#' Modify COSERO Parameter File (Tabular Format) - Fast Version
+#'
+#' Uses pre-loaded parameter data to avoid repeated file reads
+#'
+#' @param par_file Path to parameter file
+#' @param params Named vector/list of sampled parameter values
+#' @param par_bounds Parameter bounds table with modification types
+#' @param original_values Original parameter values from file
+#' @param param_structure Pre-loaded parameter file structure (from ensemble function)
+#' @param zones Vector of zone IDs to modify (NULL = all zones)
+#' @param quiet Suppress messages
+modify_parameter_table_fast <- function(par_file, params, par_bounds, original_values,
+                                        param_structure, zones = NULL, quiet = FALSE) {
+  # Reset working copy from original (fast - no file I/O!)
+  first_line <- param_structure$first_line
+
+  # Reset working data to original state (overwrites previous modifications)
+  # This is MUCH faster than re-reading from disk!
+  param_structure$param_data_working[] <- param_structure$param_data_original
+  param_data <- param_structure$param_data_working
+
+  # Modify parameters (same logic as modify_parameter_table)
+  for (param_name in names(params)) {
+    sampled_value <- params[[param_name]]
+
+    # Use case-insensitive matching and check for monthly variants
+    param_cols <- find_parameter_column(param_name, colnames(param_data), return_all = TRUE)
+
+    if (length(param_cols) == 0) {
+      warning("Parameter ", param_name, " not found in file")
+      next
+    }
+
+    # Get modification type
+    mod_type_idx <- which(par_bounds$parameter == param_name)
+    if (length(mod_type_idx) == 0) {
+      mod_type_idx <- which(tolower(par_bounds$parameter) == tolower(param_name))
+    }
+
+    if (length(mod_type_idx) == 0) {
+      warning("Modification type not found for ", param_name)
+      next
+    }
+
+    mod_type <- par_bounds$modification_type[mod_type_idx[1]]
+    param_min <- par_bounds$min[mod_type_idx[1]]
+    param_max <- par_bounds$max[mod_type_idx[1]]
+
+    # Determine which zones to modify
+    if (is.null(zones)) {
+      zone_mask <- rep(TRUE, nrow(param_data))
+    } else {
+      zone_mask <- param_data$NZ_ %in% zones
+    }
+
+    # Apply modification to ALL matched columns
+    for (param_col in param_cols) {
+      if (mod_type == "relchg") {
+        param_data[zone_mask, param_col] <- param_data[zone_mask, param_col] * sampled_value
+      } else if (mod_type == "abschg") {
+        param_data[zone_mask, param_col] <- param_data[zone_mask, param_col] + sampled_value
+      } else {
+        stop("Unknown modification type: ", mod_type, ". Use 'relchg' or 'abschg'.")
+      }
+
+      # Apply physical bounds
+      if (length(param_min) > 0 && length(param_max) > 0) {
+        param_data[zone_mask, param_col] <- pmax(param_min, pmin(param_max, param_data[zone_mask, param_col]))
+      }
+    }
+
+    # Report modifications (only if not quiet and multiple columns)
+    if (!quiet && length(param_cols) > 1) {
+      cat(sprintf("Modified %d monthly variants of %s: %s\n",
+                  length(param_cols), param_name, paste(param_cols, collapse = ", ")))
+    }
+  }
+
+  # Write back to file (only write operation per run!)
+  writeLines(first_line, par_file)
+  suppressWarnings({
+    write.table(
+      param_data,
+      file = par_file,
+      append = TRUE,
+      sep = "\t",
+      row.names = FALSE,
+      col.names = TRUE,
+      quote = FALSE,
+      na = ""
+    )
+  })
+}
+
+#' Modify COSERO Parameter File (Tabular Format)
+#'
+#' @param par_file Path to parameter file
+#' @param params Named vector/list of sampled parameter values
+#' @param par_bounds Parameter bounds table with modification types
+#' @param original_values Original parameter values from file
+#' @param zones Vector of zone IDs to modify (NULL = all zones)
+#' @param quiet Suppress messages
+modify_parameter_table <- function(par_file, params, par_bounds, original_values, zones = NULL, quiet = FALSE) {
+  # Read first line (project info)
+  first_line <- readLines(par_file, n = 1)
+
+  # Read parameter table (skip first line)
+  param_data <- read.table(
+    par_file,
+    header = TRUE,
+    sep = "\t",
+    skip = 1,
+    stringsAsFactors = FALSE,
+    check.names = FALSE,
+    comment.char = ""
+  )
+
+  # Modify parameters
+  for (param_name in names(params)) {
+    sampled_value <- params[[param_name]]
+
+    # Use case-insensitive matching and check for monthly variants
+    # This returns ALL monthly columns if they exist (e.g., TCor1-TCor12)
+    param_cols <- find_parameter_column(param_name, colnames(param_data), return_all = TRUE)
+
+    if (length(param_cols) == 0) {
+      warning("Parameter ", param_name, " not found in file")
+      next
+    }
+
+    # Get modification type (case-insensitive match in par_bounds)
+    # First try exact match, then case-insensitive
+    mod_type_idx <- which(par_bounds$parameter == param_name)
+    if (length(mod_type_idx) == 0) {
+      mod_type_idx <- which(tolower(par_bounds$parameter) == tolower(param_name))
+    }
+
+    if (length(mod_type_idx) == 0) {
+      warning("Modification type not found for ", param_name)
+      next
+    }
+
+    mod_type <- par_bounds$modification_type[mod_type_idx[1]]
+
+    # Get bounds (case-insensitive match)
+    param_min <- par_bounds$min[mod_type_idx[1]]
+    param_max <- par_bounds$max[mod_type_idx[1]]
+
+    # Determine which zones to modify
+    if (is.null(zones)) {
+      zone_mask <- rep(TRUE, nrow(param_data))
+    } else {
+      zone_mask <- param_data$NZ_ %in% zones
+    }
+
+    # Apply modification to ALL matched columns (e.g., all 12 months)
+    for (param_col in param_cols) {
+      # Calculate final value based on modification type
+      if (mod_type == "relchg") {
+        # Multiply original by sampled_value (preserves spatial pattern)
+        param_data[zone_mask, param_col] <- param_data[zone_mask, param_col] * sampled_value
+      } else if (mod_type == "abschg") {
+        # Add sampled_value to original value (preserves spatial differences)
+        param_data[zone_mask, param_col] <- param_data[zone_mask, param_col] + sampled_value
+      } else {
+        stop("Unknown modification type: ", mod_type, ". Use 'relchg' or 'abschg'.")
+      }
+
+      # Apply physical bounds as safeguards
+      if (length(param_min) > 0 && length(param_max) > 0) {
+        # Clip values to physical bounds
+        param_data[zone_mask, param_col] <- pmax(param_min, pmin(param_max, param_data[zone_mask, param_col]))
+
+        # Warn if clipping occurred
+        n_clipped_min <- sum(param_data[zone_mask, param_col] <= param_min + 1e-10)
+        n_clipped_max <- sum(param_data[zone_mask, param_col] >= param_max - 1e-10)
+
+        if (n_clipped_min > 0 || n_clipped_max > 0) {
+          warning(sprintf("Parameter %s (column %s): %d zones clipped to min (%.3f), %d zones clipped to max (%.3f)",
+                          param_name, param_col, n_clipped_min, param_min, n_clipped_max, param_max))
+        }
+      }
+    }
+
+    # Report how many columns were modified
+    if (!quiet && length(param_cols) > 1) {
+      cat(sprintf("Modified %d monthly variants of %s: %s\n",
+                  length(param_cols), param_name, paste(param_cols, collapse = ", ")))
+    }
+  }
+
+  # Write back to file
+  # Write first line
+  writeLines(first_line, par_file)
+
+  # Append parameter table with column names
+  # Suppress expected warning about appending column names
+  suppressWarnings({
+    write.table(
+      param_data,
+      file = par_file,
+      append = TRUE,
+      sep = "\t",
+      row.names = FALSE,
+      col.names = TRUE,
+      quote = FALSE,
+      na = ""
+    )
+  })
 }
 
 #' Run COSERO Ensemble in Parallel
@@ -442,11 +988,6 @@ run_cosero_ensemble_parallel <- function(project_path,
 
   n_runs <- nrow(parameter_sets)
 
-  if (!quiet) {
-    cat("Running", n_runs, "COSERO simulations in parallel\n")
-    cat("Using", n_cores, "cores\n")
-  }
-
   # Create temp directory for parallel runs
   if (is.null(temp_dir)) {
     temp_dir <- file.path(tempdir(), "cosero_parallel")
@@ -467,8 +1008,12 @@ run_cosero_ensemble_parallel <- function(project_path,
     stop("Parameter file not found: ", par_file)
   }
 
-  # Read original parameter values
-  original_values <- read_parameter_file(par_file, names(parameter_sets))
+  # Read original parameter values (detect format) - always quiet
+  original_values <- tryCatch({
+    read_parameter_table(par_file, names(parameter_sets), zone_id = NULL, quiet = TRUE)
+  }, error = function(e) {
+    read_parameter_file(par_file, names(parameter_sets))
+  })
 
   # Split runs into chunks for parallel processing
   run_indices <- 1:n_runs
@@ -484,7 +1029,8 @@ run_cosero_ensemble_parallel <- function(project_path,
   # Export necessary objects and functions to cluster
   clusterExport(cl, c("project_path", "parameter_sets", "par_bounds", "base_settings",
                       "par_filename", "original_values", "temp_dir",
-                      "modify_parameter_file", "read_parameter_file"),
+                      "modify_parameter_file", "modify_parameter_table",
+                      "read_parameter_file", "read_parameter_table", "find_parameter_column"),
                 envir = environment())
 
   # Load required libraries and package on each worker
@@ -495,30 +1041,80 @@ run_cosero_ensemble_parallel <- function(project_path,
     library(stringr)
     library(lubridate)
     library(data.table)
-    library(COSERO)  # Load package functions
+
+    # Try to load COSERO package (works for installed package)
+    if (requireNamespace("COSERO", quietly = TRUE)) {
+      library(COSERO)
+    } else {
+      # If not installed, try devtools::load_all() for development
+      if (requireNamespace("devtools", quietly = TRUE)) {
+        # Assume package is in working directory or parent
+        pkg_path <- getwd()
+        if (!file.exists(file.path(pkg_path, "DESCRIPTION"))) {
+          pkg_path <- dirname(pkg_path)
+        }
+        devtools::load_all(pkg_path, quiet = TRUE)
+      }
+    }
   })
 
-  # Parallel worker function
-  worker_function <- function(run_ids) {
-    worker_results <- vector("list", length(run_ids))
+  # Run parallel jobs with live progress updates
+  if (!quiet) {
+    cat(sprintf("\nStarting %d COSERO simulations (parallel)\n", n_runs))
+    cat(sprintf("Using %d cores\n\n", n_cores))
 
-    # Create unique temp project for this worker
-    worker_id <- Sys.getpid()
-    worker_project_full <- file.path(temp_dir, paste0("worker_", worker_id))
+    # Setup progress function for live updates
+    progress_start <- Sys.time()
+    progress <- function(n) {
+      display_progress(n, n_runs, progress_start, "Run", quiet = FALSE)
+    }
+    opts <- list(progress = progress)
+  } else {
+    opts <- list()
+  }
 
-    # Copy entire project to temp location
-    tryCatch({
-      # Create the temp worker directory
-      dir.create(worker_project_full, recursive = TRUE, showWarnings = FALSE)
+  parallel_start <- Sys.time()
 
-      # Copy all contents from project_path to worker_project_full
-      project_files <- list.files(project_path, full.names = TRUE, all.files = FALSE, recursive = FALSE)
-      file.copy(from = project_files, to = worker_project_full, recursive = TRUE, overwrite = TRUE)
-    }, error = function(e) {
-      stop("Failed to copy project to temp location: ", e$message)
-    })
+  # Register cluster with doSNOW for progress tracking
+  registerDoSNOW(cl)
 
-    # Get worker parameter file path
+  # Pre-create worker directories (once per core, not per run)
+  # Only create as many as needed (don't create 4 workers for 3 runs)
+  n_workers <- min(n_cores, n_runs)
+  worker_dirs <- file.path(temp_dir, paste0("worker_", seq_len(n_workers)))
+
+  if (!quiet) cat("Preparing", n_workers, "worker directories...\n")
+  prep_start <- Sys.time()
+
+  # Parallelize the worker directory setup itself!
+  clusterExport(cl, c("worker_dirs", "project_path"), envir = environment())
+  parLapply(cl, worker_dirs, function(wdir) {
+    if (dir.exists(wdir)) unlink(wdir, recursive = TRUE)
+    dir.create(wdir, recursive = TRUE, showWarnings = FALSE)
+
+    # Copy project once per worker
+    project_files <- list.files(project_path, full.names = TRUE, all.files = FALSE, recursive = FALSE)
+    file.copy(from = project_files, to = wdir, recursive = TRUE, overwrite = TRUE)
+    return(TRUE)
+  })
+
+  prep_time <- difftime(Sys.time(), prep_start, units = "secs")
+  if (!quiet) cat(sprintf("Worker setup completed in %.1fs\n\n", prep_time))
+
+  # Export worker_dirs to workers
+  clusterExport(cl, c("worker_dirs"), envir = environment())
+
+  # Run in parallel with foreach and live progress
+  results <- foreach(
+    i = 1:n_runs,
+    .packages = c("dplyr", "readr", "tibble", "stringr", "lubridate", "data.table"),
+    .options.snow = opts
+  ) %dopar% {
+    # Identify which worker this is (1-based index)
+    worker_idx <- (i %% length(worker_dirs)) + 1
+    if (worker_idx > length(worker_dirs)) worker_idx <- 1
+
+    worker_project_full <- worker_dirs[worker_idx]
     worker_par_file <- file.path(worker_project_full, "input", par_filename)
 
     # Check if parameter file exists
@@ -526,81 +1122,70 @@ run_cosero_ensemble_parallel <- function(project_path,
       stop("Parameter file not found in worker project: ", worker_par_file)
     }
 
-    # Backup original parameter file
-    backup_file <- paste0(worker_par_file, ".backup")
-    file.copy(worker_par_file, backup_file, overwrite = TRUE)
-
-    for (idx in seq_along(run_ids)) {
-      run_i <- run_ids[idx]
-
+    tryCatch({
+      # Modify parameters (try tabular format first, fall back to simple format)
       tryCatch({
-        # Restore original parameter file
-        file.copy(backup_file, worker_par_file, overwrite = TRUE)
-
-        # Modify parameters
-        modify_parameter_file(worker_par_file, parameter_sets[run_i, ],
-                             par_bounds, original_values)
-
-        # Run COSERO
-        result <- run_cosero(
-          project_path = worker_project_full,
-          defaults_settings = base_settings,
-          quiet = TRUE,
-          read_outputs = TRUE
-        )
-        worker_results[[idx]] <- result
-
+        modify_parameter_table(worker_par_file, parameter_sets[i, ],
+                              par_bounds, original_values, quiet = TRUE)
       }, error = function(e) {
-        # Provide detailed error information
-        error_msg <- paste0(
-          "Run ", run_i, " failed: ", e$message,
-          "\nWorker project: ", worker_project_full,
-          "\nParameter file: ", worker_par_file,
-          "\nFile exists: ", file.exists(worker_par_file)
-        )
-        warning(error_msg)
-        worker_results[[idx]] <- list(success = FALSE, error = error_msg, run_id = run_i)
+        modify_parameter_file(worker_par_file, parameter_sets[i, ],
+                             par_bounds, original_values)
       })
-    }
 
-    # Cleanup temp project
-    unlink(worker_project_full, recursive = TRUE)
+      # Run COSERO
+      result <- run_cosero(
+        project_path = worker_project_full,
+        defaults_settings = base_settings,
+        quiet = TRUE,
+        read_outputs = TRUE
+      )
 
-    return(worker_results)
+      return(result)
+
+    }, error = function(e) {
+      # Provide detailed error information
+      error_msg <- paste0(
+        "Run ", i, " failed: ", e$message,
+        "\nWorker project: ", worker_project_full,
+        "\nParameter file: ", worker_par_file,
+        "\nFile exists: ", file.exists(worker_par_file)
+      )
+      warning(error_msg)
+      return(list(success = FALSE, error = error_msg, run_id = i))
+    })
   }
 
-  # Run parallel jobs with progress bar using pbapply
-  if (!quiet) {
-    cat(sprintf("\n[%s] Starting %d simulations on %d cores\n",
-                format(Sys.time(), "%H:%M:%S"), n_runs, n_cores))
-    cat("Progress: [==>] indicates completed chunks\n\n")
-
-    # Use pblapply for progress bar
-    results_chunks <- pbapply::pblapply(chunks, worker_function, cl = cl)
-
-    cat("\n")
-  } else {
-    results_chunks <- parallel::parLapplyLB(cl, chunks, worker_function)
+  # Cleanup worker directories after all runs complete
+  for (wdir in worker_dirs) {
+    if (dir.exists(wdir)) unlink(wdir, recursive = TRUE)
   }
 
-  # Flatten results
-  results <- unlist(results_chunks, recursive = FALSE)
+  parallel_time <- as.numeric(difftime(Sys.time(), parallel_start, units = "secs"))
 
   # Cleanup
   stopCluster(cl)
   on.exit()
-  unlink(temp_dir, recursive = TRUE)
 
   runtime <- difftime(Sys.time(), start_time, units = "mins")
   if (!quiet) {
-    cat("\nEnsemble completed in", round(runtime, 2), "minutes\n")
-    cat("Average time per run:", round(runtime * 60 / n_runs, 1), "seconds\n")
+    cat(sprintf("\n✓ Ensemble completed in %s\n", format_time_duration(as.numeric(runtime) * 60)))
+    cat(sprintf("  Average per run: %s\n", format_time_duration(runtime * 60 / n_runs)))
+
+    # Calculate efficiency
+    avg_run_time <- runtime * 60 / n_runs
+    est_sequential_time <- avg_run_time * n_runs
+    actual_speedup <- est_sequential_time / parallel_time
+    efficiency <- (actual_speedup / n_cores) * 100
+
+    cat(sprintf("  Parallel efficiency: %.0f%% (speedup: %.2fx / ideal: %dx)\n",
+                efficiency, actual_speedup, n_cores))
   }
 
   return(list(
     results = results,
     parameter_sets = parameter_sets,
     runtime_minutes = as.numeric(runtime),
+    parallel_time_seconds = parallel_time,
     n_cores = n_cores
   ))
 }
@@ -649,43 +1234,170 @@ extract_ensemble_output <- function(ensemble_results,
   return(output_list)
 }
 
-#' Calculate Performance Metrics for Ensemble
+#' Extract Pre-calculated Metrics from COSERO Statistics
 #'
-#' @param ensemble_results Results from run_cosero_ensemble()
-#' @param observed Observed data vector
-#' @param metric Performance metric ("NSE", "KGE", "RMSE")
-#' @return Vector of metric values
-calculate_ensemble_metrics <- function(ensemble_results, observed, metric = "KGE") {
+#' Extracts performance metrics (NSE, KGE, etc.) that were pre-calculated by COSERO
+#' and stored in statistics.txt. This is the recommended approach for standard metrics
+#' as it is faster and guaranteed to match COSERO's internal evaluation (including
+#' proper spin-up handling).
+#'
+#' @param ensemble_results Results from run_cosero_ensemble() or run_cosero_ensemble_parallel()
+#' @param subbasin_id Subbasin ID to extract metrics for (e.g., "001" or 1)
+#' @param metric Performance metric to extract ("NSE", "KGE", "BIAS", "RMSE", etc.)
+#'               Must be a column name in the statistics data frame
+#' @param warn_nan If TRUE, warns when metrics are NaN (no observed data for subbasin)
+#' @return Numeric vector of metric values for each ensemble run
+#' @export
+#' @examples
+#' \dontrun{
+#' # Run ensemble
+#' results <- run_cosero_ensemble_parallel(project_path, parameter_sets, n_cores = 4)
+#'
+#' # Extract NSE for subbasin 001
+#' nse_values <- extract_cosero_metrics(results, subbasin_id = "001", metric = "NSE")
+#'
+#' # Use in sensitivity analysis
+#' sobol_indices <- calculate_sobol_indices(nse_values, sobol_samples)
+#' plot_sobol(sobol_indices)
+#' }
+extract_cosero_metrics <- function(ensemble_results, subbasin_id = "001",
+                                   metric = "NSE", warn_nan = TRUE) {
 
   n_runs <- length(ensemble_results$results)
   metrics <- numeric(n_runs)
 
+  # Format subbasin ID consistently (always ensure 4-digit format)
+  if (is.numeric(subbasin_id)) {
+    sb_id_num <- subbasin_id
+  } else {
+    sb_id_num <- as.numeric(subbasin_id)
+  }
+  sb_id_str <- sprintf("%04d", sb_id_num)  # Always 4-digit format
+
   for (i in 1:n_runs) {
     result <- ensemble_results$results[[i]]
 
-    if (result$success && !is.null(result$output_data)) {
-      simulated <- result$output_data$runoff$value
+    if (result$success && !is.null(result$output_data) &&
+        !is.null(result$output_data$statistics)) {
 
-      # Match length with observed
-      n_obs <- length(observed)
-      if (length(simulated) > n_obs) {
-        simulated <- simulated[1:n_obs]
+      stats <- result$output_data$statistics
+
+      # Filter for specific subbasin (handle both string and numeric ID formats)
+      sb_stats <- stats[stats$sb == sb_id_str | stats$sb == sb_id_num, ]
+
+      if (nrow(sb_stats) > 0 && metric %in% colnames(sb_stats)) {
+        metrics[i] <- sb_stats[[metric]][1]
+      } else {
+        metrics[i] <- NA
       }
+    } else {
+      metrics[i] <- NA
+    }
+  }
 
-      # Calculate metric
-      metrics[i] <- tryCatch({
-        if (metric == "KGE") {
-          hydroGOF::KGE(simulated, observed)
-        } else if (metric == "NSE") {
-          hydroGOF::NSE(simulated, observed)
-        } else if (metric == "RMSE") {
-          hydroGOF::rmse(simulated, observed)
+  # Check for NaN values (indicates no observed data)
+  n_nan <- sum(is.nan(metrics))
+  if (warn_nan && n_nan > 0) {
+    warning(sprintf("Subbasin %s: %d/%d runs have NaN %s (no observed data available)",
+                    subbasin_id, n_nan, n_runs, metric))
+  }
+
+  return(metrics)
+}
+
+#' Calculate Performance Metrics for Ensemble (Custom Calculation)
+#'
+#' Calculates performance metrics by comparing simulated (QSIM) against observed (QOBS) discharge
+#' from COSERO results. Automatically applies spin-up period from defaults_settings.
+#'
+#' For standard metrics (NSE, KGE) already calculated by COSERO, use extract_cosero_metrics()
+#' instead - it's faster and guaranteed to match COSERO's evaluation.
+#'
+#' @param ensemble_results Results from run_cosero_ensemble() or run_cosero_ensemble_parallel()
+#' @param subbasin_id Subbasin ID to calculate metrics for (e.g., "001" or 1)
+#' @param metric Performance metric ("NSE", "KGE", "RMSE", "PBIAS")
+#' @param spinup Spin-up period in timesteps (optional). If NULL, reads from defaults_settings$SPINUP
+#' @return Vector of metric values
+#' @export
+#' @examples
+#' \dontrun{
+#' # Calculate PBIAS (auto-detects spin-up from settings)
+#' pbias <- calculate_ensemble_metrics(results, subbasin_id = "001", metric = "PBIAS")
+#'
+#' # Override spin-up period
+#' pbias <- calculate_ensemble_metrics(results, subbasin_id = "001", metric = "PBIAS", spinup = NULL)
+#' }
+calculate_ensemble_metrics <- function(ensemble_results,
+                                       subbasin_id = "001",
+                                       metric = "KGE",
+                                       spinup = NULL) {
+
+  n_runs <- length(ensemble_results$results)
+  metrics <- numeric(n_runs)
+
+  # Format subbasin ID (always ensure 4-digit format)
+  if (is.numeric(subbasin_id)) {
+    sb_id_num <- subbasin_id
+  } else {
+    sb_id_num <- as.numeric(subbasin_id)
+  }
+  sb_id <- sprintf("%04d", sb_id_num)  # Always 4-digit format
+
+  # Column names
+  qsim_col <- paste0("QSIM_", sb_id)
+  qobs_col <- paste0("QOBS_", sb_id)
+
+  for (i in 1:n_runs) {
+    result <- ensemble_results$results[[i]]
+
+    if (result$success && !is.null(result$output_data) &&
+        !is.null(result$output_data$runoff)) {
+
+      runoff <- result$output_data$runoff
+
+      # Extract simulated and observed discharge
+      if (qsim_col %in% colnames(runoff) && qobs_col %in% colnames(runoff)) {
+        simulated <- runoff[[qsim_col]]
+        observed <- runoff[[qobs_col]]
+
+        # Get spin-up duration (with override option)
+        if (!is.null(spinup)) {
+          # User-provided override
+          spinup_duration <- as.numeric(spinup)
         } else {
-          stop("Unknown metric: ", metric)
+          # Try to read from output_data$defaults_settings (character -> numeric)
+          spinup_duration <- 0
+          if (!is.null(result$output_data$defaults_settings) &&
+              !is.null(result$output_data$defaults_settings$SPINUP)) {
+            spinup_duration <- as.numeric(result$output_data$defaults_settings$SPINUP)
+          }
         }
-      }, error = function(e) {
-        NA
-      })
+
+        # Apply spin-up exclusion to both simulated and observed
+        if (spinup_duration > 0 && length(simulated) > spinup_duration) {
+          simulated <- simulated[(spinup_duration + 1):length(simulated)]
+          observed <- observed[(spinup_duration + 1):length(observed)]
+        }
+
+        # Calculate metric
+        metrics[i] <- tryCatch({
+          if (metric == "KGE") {
+            hydroGOF::KGE(simulated, observed)
+          } else if (metric == "NSE") {
+            hydroGOF::NSE(simulated, observed)
+          } else if (metric == "RMSE") {
+            hydroGOF::rmse(simulated, observed)
+          } else if (metric == "PBIAS") {
+            hydroGOF::pbias(simulated, observed)
+          } else {
+            stop("Unknown metric: ", metric)
+          }
+        }, error = function(e) {
+          NA
+        })
+      } else {
+        metrics[i] <- NA
+      }
     } else {
       metrics[i] <- NA
     }
@@ -722,10 +1434,35 @@ aggregate_to_annual <- function(data) {
 
 #' Calculate Sobol Sensitivity Indices
 #'
-#' @param Y Output vector (length = n_runs)
-#' @param sobol_samples Sobol samples from generate_sobol_samples()
-#' @param boot Bootstrap resamples (default: 100)
-#' @return Sobol indices object
+#' Calculates first-order and total-order Sobol sensitivity indices from
+#' model outputs and parameter samples. Uses bootstrap for uncertainty estimation.
+#'
+#' @param Y Numeric vector of model outputs (length = nrow(parameter_sets))
+#' @param sobol_samples List from generate_sobol_samples() containing parameter sets
+#' @param boot Logical. If TRUE, performs bootstrap for confidence intervals.
+#' @param R Integer. Number of bootstrap resamples (default: 100)
+#'
+#' @return Sobol indices object from sensobol package containing:
+#'   \item{results}{Data frame with sensitivity indices (Si, Ti) and confidence intervals}
+#'   \item{...}{Other sensobol output fields}
+#'
+#' @export
+#' @examples
+#' \dontrun{
+#' # After running ensemble and extracting metrics
+#' nse <- extract_cosero_metrics(results, subbasin_id = "0001", metric = "NSE")
+#'
+#' # Calculate sensitivity indices
+#' sobol_ind <- calculate_sobol_indices(
+#'   Y = nse,
+#'   sobol_samples = samples,
+#'   boot = TRUE,
+#'   R = 100
+#' )
+#'
+#' # Plot results
+#' plot_sobol(sobol_ind)
+#' }
 calculate_sobol_indices <- function(Y, sobol_samples, boot = TRUE, R = 100) {
 
   # Remove NA values
