@@ -3,6 +3,11 @@
 # Author: COSERO R Interface
 # Date: 2025-09-25
 
+#' @importFrom data.table fread
+#' @importFrom dplyr filter mutate select arrange group_by summarise
+#' @importFrom lubridate ymd_hm year month day hour minute
+NULL
+
 # 1 Load Libraries #####
 library(data.table)
 library(dplyr)
@@ -107,6 +112,7 @@ read_cosero_output <- function(output_dir, defaults_file = NULL, quiet = FALSE) 
 }
 
 # 2.1 OUTPUTTYPE Detection #####
+#' @export
 detect_outputtype <- function(output_dir) {
   has_monitor <- file.exists(file.path(output_dir, "monitor.txt"))
   has_var_met <- file.exists(file.path(output_dir, "var_MET.txt"))
@@ -116,6 +122,7 @@ detect_outputtype <- function(output_dir) {
   return(1)
 }
 
+#' @export
 detect_subbasins <- function(output_dir) {
   monitor_files <- list.files(output_dir, pattern = "^monitor_sb\\d+\\.txt$")
   if (length(monitor_files) > 0) {
@@ -698,6 +705,7 @@ read_simple_timeseries <- function(file_path, skip = 1, quiet = FALSE) {
 }
 
 # 8.1 Wrappers for existing readers
+#' @export
 read_runoff <- function(output_dir, quiet = FALSE) {
   file <- file.path(output_dir, "COSERO.runoff")
   if (!file.exists(file)) return(NULL)
@@ -705,6 +713,7 @@ read_runoff <- function(output_dir, quiet = FALSE) {
   read_cosero_runoff(file, quiet = quiet)
 }
 
+#' @export
 read_precipitation <- function(output_dir, quiet = FALSE) {
   file <- file.path(output_dir, "COSERO.prec")
   if (!file.exists(file)) return(NULL)
@@ -714,6 +723,7 @@ read_precipitation <- function(output_dir, quiet = FALSE) {
   read_cosero_precipitation(file, quiet = quiet)
 }
 
+#' @export
 read_plus <- function(output_dir, quiet = FALSE) {
   file <- file.path(output_dir, "COSERO.plus")
   if (!file.exists(file)) return(NULL)
@@ -724,6 +734,7 @@ read_plus <- function(output_dir, quiet = FALSE) {
   return(df)
 }
 
+#' @export
 read_plus1 <- function(output_dir, quiet = FALSE) {
   file <- file.path(output_dir, "COSERO.plus1")
   if (!file.exists(file)) return(NULL)
@@ -768,6 +779,7 @@ read_plus1 <- function(output_dir, quiet = FALSE) {
   return(df)
 }
 
+#' @export
 read_statistics <- function(output_dir, quiet = FALSE) {
   file <- file.path(output_dir, "statistics.txt")
   if (!file.exists(file)) return(NULL)
@@ -775,6 +787,7 @@ read_statistics <- function(output_dir, quiet = FALSE) {
   read_cosero_statistics(file, quiet = quiet)
 }
 
+#' @export
 read_topology <- function(output_dir, quiet = FALSE) {
   file <- file.path(output_dir, "topology.txt")
   if (!file.exists(file)) return(NULL)
@@ -792,6 +805,7 @@ read_topology <- function(output_dir, quiet = FALSE) {
 }
 
 # 8.2 OUTPUTTYPE 2 readers
+#' @export
 read_var_glac <- function(output_dir, quiet = FALSE) {
   file <- file.path(output_dir, "var_glac.txt")
   if (!file.exists(file)) return(NULL)

@@ -973,6 +973,7 @@ modify_parameter_table <- function(par_file, params, par_bounds, original_values
 #' @param temp_dir Directory for temporary project copies (NULL = use system temp)
 #' @param quiet Suppress output
 #' @return List with results and parameters
+#' @export
 run_cosero_ensemble_parallel <- function(project_path,
                                          parameter_sets,
                                          par_bounds,

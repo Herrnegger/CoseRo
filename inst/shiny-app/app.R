@@ -23,6 +23,22 @@ library(shinyjs)
 # Note: Functions loaded from COSERO package
 # (run_cosero, read_cosero_output, plotting functions, etc.)
 
+# Load COSERO package functions
+# Try to load installed package first, otherwise source from R/ directory
+if (requireNamespace("COSERO", quietly = TRUE)) {
+  library(COSERO)
+} else {
+  # Fallback: source from package directory
+  # Get the app directory and navigate to package R/ folder
+  app_dir <- getwd()
+  pkg_dir <- normalizePath(file.path(app_dir, "../.."), mustWork = FALSE)
+
+  # Source all R files needed by the app
+  source(file.path(pkg_dir, "R/app_helpers.R"))
+  source(file.path(pkg_dir, "R/cosero_readers.R"))
+  source(file.path(pkg_dir, "R/cosero_run.R"))
+}
+
 # Default output directory (current working directory's output folder)
 default_output_dir <- normalizePath(file.path(getwd(), "output"), winslash = "/", mustWork = FALSE)
 

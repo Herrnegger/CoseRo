@@ -470,6 +470,7 @@ execute_cosero <- function(project_path, exe_name, commands_file, capture_output
 #'   \item{execution_time}{POSIXct timestamp of execution}
 #'   \item{runtime_seconds}{Numeric runtime in seconds}
 #'
+#' @export
 #' @examples
 #' \dontrun{
 #' # Basic run with defaults
