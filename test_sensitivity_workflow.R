@@ -179,96 +179,175 @@ plot_parameter_comparison <- function(original_vals, modified_vals, param_name,
     warning(sprintf("%s: Original and modified values are identical", param_name))
   }
 
-  # Warn if sample size too small
-  if (length(modified_vals) < 20) {
-    cat(sprintf("    [INFO] Only %d samples for %s - using side-by-side boxplots for clarity\n",
-                length(modified_vals), param_name))
-  }
-
   # Set up plot device if saving
   if (!is.null(save_file)) {
-    png(save_file, width = 800, height = 600, res = 100)
+    png(save_file, width = 1200, height = 800, res = 120)
+  } else {
+    # For screen display, set larger window
+    dev.new(width = 12, height = 8, noRStudioGD = TRUE)
   }
+
+  # Set margins for better layout
+  par(mar = c(5, 5, 4, 2), bg = "white")
 
   # Create title
-  title_text <- paste("Parameter:", param_name)
+  title_text <- param_name
   if (!is.null(step_label)) {
-    title_text <- paste(step_label, "-", title_text)
+    title_text <- paste(step_label, "-", param_name)
   }
 
-  # If sample size is small (< 20), use boxplots instead of histograms
+  # For small samples, use violin-style plots with overlaid points
   if (length(modified_vals) < 20) {
-    # Create side-by-side boxplots for better clarity with small samples
-    boxplot(list(Original = original_vals, Modified = modified_vals),
-            main = title_text,
-            ylab = paste(param_name, "Value"),
-            col = c("lightblue", "orange"),
-            border = c("darkblue", "darkorange"),
-            las = 1,
-            notch = FALSE,
-            outline = TRUE)
+    cat(sprintf("    [INFO] %d samples for %s - using detailed comparison plot\n",
+                length(modified_vals), param_name))
 
-    # Add horizontal lines for bounds
-    abline(h = param_bounds$min, col = "red", lty = 2, lwd = 2)
-    abline(h = param_bounds$max, col = "red", lty = 2, lwd = 2)
+    # Prepare data for plotting
+    all_data <- data.frame(
+      value = c(original_vals, modified_vals),
+      group = factor(rep(c("Original", "Modified"),
+                        c(length(original_vals), length(modified_vals))))
+    )
 
-    # Add text labels for bounds
-    text(x = 2.4, y = param_bounds$min, labels = sprintf("Min = %.1f", param_bounds$min),
-         col = "red", cex = 0.8, pos = 3)
-    text(x = 2.4, y = param_bounds$max, labels = sprintf("Max = %.1f", param_bounds$max),
-         col = "red", cex = 0.8, pos = 1)
+    # Calculate y-axis limits
+    y_range <- range(c(original_vals, modified_vals, param_bounds$min, param_bounds$max), na.rm = TRUE)
+    y_margin <- diff(y_range) * 0.1
+    y_lim <- y_range + c(-y_margin, y_margin)
 
-    # Add sample size info
-    mtext(sprintf("n_original = %d, n_modified = %d",
-                  length(original_vals), length(modified_vals)),
-          side = 3, line = 0.5, cex = 0.9)
+    # Create empty plot
+    plot(1, type = "n", xlim = c(0.5, 2.5), ylim = y_lim,
+         xlab = "", ylab = param_name, xaxt = "n",
+         main = title_text, cex.main = 1.5, cex.lab = 1.3,
+         las = 1, bty = "l")
+
+    # Add subtle grid
+    abline(h = axTicks(2), col = "gray95", lwd = 1)
+
+    # Add bounds as shaded region
+    rect(0.5, param_bounds$min, 2.5, param_bounds$max,
+         col = rgb(0, 1, 0, 0.05), border = NA)
+    abline(h = param_bounds$min, col = "#d62728", lty = 2, lwd = 2.5)
+    abline(h = param_bounds$max, col = "#d62728", lty = 2, lwd = 2.5)
+
+    # Plot boxplots with enhanced styling
+    boxplot(value ~ group, data = all_data, add = TRUE, at = c(1, 2),
+            col = c("#4a90d9", "#ff8c42"), border = c("#2e5c8a", "#cc6f33"),
+            boxwex = 0.4, outline = FALSE, axes = FALSE, lwd = 2)
+
+    # Overlay individual points with jitter
+    set.seed(123)
+    points(jitter(rep(1, length(original_vals)), amount = 0.08), original_vals,
+           pch = 21, bg = "#4a90d9", col = "#2e5c8a", cex = 1.8, lwd = 1.5)
+    points(jitter(rep(2, length(modified_vals)), amount = 0.08), modified_vals,
+           pch = 21, bg = "#ff8c42", col = "#cc6f33", cex = 1.8, lwd = 1.5)
+
+    # Add mean lines
+    segments(0.8, mean(original_vals, na.rm = TRUE), 1.2, mean(original_vals, na.rm = TRUE),
+             col = "#2e5c8a", lwd = 3)
+    segments(1.8, mean(modified_vals, na.rm = TRUE), 2.2, mean(modified_vals, na.rm = TRUE),
+             col = "#cc6f33", lwd = 3)
+
+    # Add x-axis labels
+    axis(1, at = c(1, 2), labels = c("Original", "Modified"), cex.axis = 1.2, tick = FALSE)
+
+    # Add legend with statistics
+    legend("topright",
+           legend = c(
+             sprintf("Original: %.2f ± %.2f (n=%d)",
+                    mean(original_vals, na.rm = TRUE), sd(original_vals, na.rm = TRUE),
+                    length(original_vals)),
+             sprintf("Modified: %.2f ± %.2f (n=%d)",
+                    mean(modified_vals, na.rm = TRUE), sd(modified_vals, na.rm = TRUE),
+                    length(modified_vals)),
+             sprintf("Bounds: [%.2f, %.2f]", param_bounds$min, param_bounds$max)
+           ),
+           fill = c("#4a90d9", "#ff8c42", rgb(0, 1, 0, 0.2)),
+           border = c("#2e5c8a", "#cc6f33", "#d62728"),
+           bty = "n", cex = 1.1)
 
     # Add modification info if available
     if (!is.null(sample_value)) {
-      mtext(sprintf("Sample value applied: %.3f (%s)",
-                    sample_value, param_bounds$modification_type),
-            side = 3, line = -1, cex = 0.9, col = "darkgreen")
+      mtext(sprintf("Modification: %s = %.3f", param_bounds$modification_type, sample_value),
+            side = 3, line = 0.5, cex = 1.1, col = "#2ca02c")
     }
 
-    # Add grid for easier reading
-    grid(nx = NA, ny = NULL, col = "gray90", lty = 1)
-
   } else {
-    # For larger samples, use histogram
-    n_breaks <- max(10, min(30, ceiling(length(original_vals) / 5)))
+    # For larger samples, use enhanced histograms with density overlay
+    n_breaks <- max(15, min(40, ceiling(length(original_vals) / 10)))
 
     all_vals <- c(original_vals, modified_vals, param_bounds$min, param_bounds$max)
     x_range <- range(all_vals, na.rm = TRUE)
-    x_margin <- diff(x_range) * 0.05
-    x_range <- x_range + c(-x_margin, x_margin)
+    x_margin <- diff(x_range) * 0.08
+    x_lim <- x_range + c(-x_margin, x_margin)
 
+    # Create histogram for original values
+    hist_orig <- hist(original_vals, breaks = n_breaks, plot = FALSE)
+    hist_mod <- hist(modified_vals, breaks = n_breaks, plot = FALSE)
+
+    # Set y-axis limit to accommodate both histograms
+    y_max <- max(c(hist_orig$counts, hist_mod$counts)) * 1.15
+
+    # Plot original histogram
     hist(original_vals,
          main = title_text,
-         xlab = paste(param_name, "Value"),
+         xlab = param_name,
          ylab = "Frequency",
-         col = rgb(0.2, 0.6, 0.8, 0.5),
-         border = "darkblue",
-         xlim = x_range,
+         col = "#4a90d9",
+         border = "#2e5c8a",
+         xlim = x_lim,
+         ylim = c(0, y_max),
          breaks = n_breaks,
-         las = 1)
+         las = 1,
+         cex.main = 1.5,
+         cex.lab = 1.3,
+         cex.axis = 1.1,
+         lwd = 1.5)
 
+    # Overlay modified histogram with transparency
     hist(modified_vals,
-         col = rgb(0.9, 0.6, 0.0, 0.5),
-         border = "darkorange",
+         col = rgb(1, 0.55, 0.26, 0.7),
+         border = "#cc6f33",
          breaks = n_breaks,
-         add = TRUE)
+         add = TRUE,
+         lwd = 1.5)
 
-    abline(v = param_bounds$min, col = "red", lty = 2, lwd = 2)
-    abline(v = param_bounds$max, col = "red", lty = 2, lwd = 2)
+    # Add bounds as vertical lines with shading
+    abline(v = param_bounds$min, col = "#d62728", lty = 2, lwd = 3)
+    abline(v = param_bounds$max, col = "#d62728", lty = 2, lwd = 3)
 
+    # Add bound labels
+    text(param_bounds$min, y_max * 0.95,
+         labels = sprintf("Min\n%.2f", param_bounds$min),
+         col = "#d62728", cex = 1.1, pos = 4, font = 2)
+    text(param_bounds$max, y_max * 0.95,
+         labels = sprintf("Max\n%.2f", param_bounds$max),
+         col = "#d62728", cex = 1.1, pos = 2, font = 2)
+
+    # Add mean lines
+    abline(v = mean(original_vals, na.rm = TRUE), col = "#2e5c8a", lwd = 3, lty = 1)
+    abline(v = mean(modified_vals, na.rm = TRUE), col = "#cc6f33", lwd = 3, lty = 1)
+
+    # Enhanced legend
     legend("topright",
-           legend = c("Original", "Modified", "Bounds"),
-           fill = c(rgb(0.2, 0.6, 0.8, 0.5), rgb(0.9, 0.6, 0.0, 0.5), NA),
-           border = c("darkblue", "darkorange", NA),
-           lty = c(NA, NA, 2),
-           col = c(NA, NA, "red"),
-           lwd = c(NA, NA, 2),
-           bty = "n")
+           legend = c(
+             sprintf("Original (μ=%.2f, σ=%.2f)",
+                    mean(original_vals, na.rm = TRUE), sd(original_vals, na.rm = TRUE)),
+             sprintf("Modified (μ=%.2f, σ=%.2f)",
+                    mean(modified_vals, na.rm = TRUE), sd(modified_vals, na.rm = TRUE)),
+             "Physical bounds"
+           ),
+           fill = c("#4a90d9", rgb(1, 0.55, 0.26, 0.7), NA),
+           border = c("#2e5c8a", "#cc6f33", NA),
+           lty = c(1, 1, 2),
+           col = c("#2e5c8a", "#cc6f33", "#d62728"),
+           lwd = c(3, 3, 3),
+           bty = "n",
+           cex = 1.1)
+
+    # Add sample info
+    if (!is.null(sample_value)) {
+      mtext(sprintf("Modification: %s = %.3f", param_bounds$modification_type, sample_value),
+            side = 3, line = 0.5, cex = 1.1, col = "#2ca02c")
+    }
   }
 
   # Check if any clipping occurred and add warning
@@ -276,8 +355,8 @@ plot_parameter_comparison <- function(original_vals, modified_vals, param_name,
   n_clipped_high <- sum(modified_vals >= param_bounds$max, na.rm = TRUE)
 
   if (n_clipped_low > 0 || n_clipped_high > 0) {
-    mtext(sprintf("⚠ WARNING: %d values clipped!", n_clipped_low + n_clipped_high),
-          side = 1, line = 4, col = "red", font = 2, cex = 1.1)
+    mtext(sprintf("⚠ WARNING: %d values clipped to bounds!", n_clipped_low + n_clipped_high),
+          side = 1, line = 4, col = "#d62728", font = 2, cex = 1.2)
   }
 
   # Close device if saving
