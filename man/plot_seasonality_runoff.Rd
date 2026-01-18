@@ -6,6 +6,12 @@
 \usage{
 plot_seasonality_runoff(monthly_data)
 }
+\arguments{
+\item{monthly_data}{Monthly aggregated runoff components data}
+}
+\value{
+A plotly object
+}
 \description{
 Plot seasonality - Runoff Components
 }

@@ -23,6 +23,22 @@ library(shinyjs)
 # Note: Functions loaded from COSERO package
 # (run_cosero, read_cosero_output, plotting functions, etc.)
 
+# Load COSERO package functions
+# Try to load installed package first, otherwise source from R/ directory
+if (requireNamespace("COSERO", quietly = TRUE)) {
+  library(COSERO)
+} else {
+  # Fallback: source from package directory
+  # Get the app directory and navigate to package R/ folder
+  app_dir <- getwd()
+  pkg_dir <- normalizePath(file.path(app_dir, "../.."), mustWork = FALSE)
+
+  # Source all R files needed by the app
+  source(file.path(pkg_dir, "R/app_helpers.R"))
+  source(file.path(pkg_dir, "R/cosero_readers.R"))
+  source(file.path(pkg_dir, "R/cosero_run.R"))
+}
+
 # Default output directory (current working directory's output folder)
 default_output_dir <- normalizePath(file.path(getwd(), "output"), winslash = "/", mustWork = FALSE)
 
@@ -192,6 +208,52 @@ ui <- fluidPage(
                   icon = icon("sync"),
                   class = "btn-sm"
                 ),
+                tags$hr(),
+
+                tags$div(class = "subsection-header", "Custom Parameter File (Optional)"),
+                tags$p(
+                  class = "input-hint",
+                  "Leave empty to use default para.txt from project. Or specify a custom parameter file to temporarily use instead."
+                ),
+
+                # Drag-drop zone for parameter file
+                tags$div(
+                  id = "param_file_drag_zone",
+                  class = "drag-drop-zone",
+                  style = "padding: 15px;",
+                  tags$p(
+                    tags$strong("Click to Select Custom Parameter File", style = "font-size: 0.95em;"),
+                    tags$br(),
+                    tags$span("Optional: Select a .txt parameter file", style = "font-size: 0.85em; color: #6c757d;")
+                  )
+                ),
+
+                # Hidden shinyFilesButton
+                shinyjs::hidden(
+                  shinyFilesButton(
+                    "param_file_btn",
+                    "Browse",
+                    "Select parameter file",
+                    icon = icon("file"),
+                    multiple = FALSE
+                  )
+                ),
+
+                # Parameter file path input
+                textInput(
+                  "param_file_path",
+                  "Parameter File Path:",
+                  value = "",
+                  placeholder = "Optional: Path to custom parameter file (leave empty for default)"
+                ),
+                actionButton(
+                  "clear_param_file",
+                  "Clear Selection",
+                  icon = icon("times"),
+                  class = "btn-sm btn-warning",
+                  style = "margin-top: -10px; margin-bottom: 10px;"
+                ),
+                uiOutput("param_file_validation_ui"),
                 tags$hr(),
 
                 tags$div(class = "subsection-header", "Simulation Period"),
@@ -677,6 +739,10 @@ server <- function(input, output, session) {
   )
   shinyDirChoose(input, "run_project_dir_btn", roots = volumes, session = session)
 
+  # Parameter file browser setup ####
+  shinyFileChoose(input, "param_file_btn", roots = volumes, session = session,
+                  filetypes = c("txt"))
+
   # Update text input when directory is selected via browser ####
   observeEvent(input$run_project_dir_btn, {
     if (!is.null(input$run_project_dir_btn) && !is.integer(input$run_project_dir_btn)) {
@@ -685,6 +751,21 @@ server <- function(input, output, session) {
         updateTextInput(session, "run_project_path", value = dir_path)
       }
     }
+  })
+
+  # Update text input when parameter file is selected via browser ####
+  observeEvent(input$param_file_btn, {
+    if (!is.null(input$param_file_btn) && !is.integer(input$param_file_btn)) {
+      file_path <- parseFilePaths(volumes, input$param_file_btn)
+      if (nrow(file_path) > 0) {
+        updateTextInput(session, "param_file_path", value = as.character(file_path$datapath))
+      }
+    }
+  })
+
+  # Clear parameter file selection ####
+  observeEvent(input$clear_param_file, {
+    updateTextInput(session, "param_file_path", value = "")
   })
 
   # Auto-update Output Directory when Project Directory changes ####
@@ -729,6 +810,14 @@ server <- function(input, output, session) {
           document.getElementById('run_project_dir_btn').click();
         });
       }
+
+      var paramDropZone = document.getElementById('param_file_drag_zone');
+      if (paramDropZone) {
+        // Click to open parameter file browser
+        paramDropZone.addEventListener('click', function(e) {
+          document.getElementById('param_file_btn').click();
+        });
+      }
     ")
   })
 
@@ -752,6 +841,51 @@ server <- function(input, output, session) {
     }
 
     return(tags$div(class = "validation-success", "Valid COSERO project"))
+  })
+
+  # Parameter file validation ####
+  output$param_file_validation_ui <- renderUI({
+    # If no parameter file specified, that's OK (will use default)
+    if (is.null(input$param_file_path) || nchar(input$param_file_path) == 0) {
+      return(tags$p(
+        class = "input-hint",
+        style = "font-size: 0.85em; margin-top: -5px;",
+        "No custom parameter file selected. Will use default para.txt from project."
+      ))
+    }
+
+    # Normalize the path
+    param_path <- normalize_path_input(input$param_file_path)
+
+    # Check if file exists
+    if (!file.exists(param_path)) {
+      return(tags$div(
+        class = "validation-error",
+        style = "font-size: 0.9em;",
+        "Parameter file does not exist"
+      ))
+    }
+
+    # Check if it's a .txt file
+    if (!grepl("\\.txt$", param_path, ignore.case = TRUE)) {
+      return(tags$div(
+        class = "validation-warning",
+        style = "font-size: 0.9em;",
+        "Warning: Parameter file should have .txt extension"
+      ))
+    }
+
+    # Show success with file info
+    file_info <- file.info(param_path)
+    file_size_kb <- round(file_info$size / 1024, 2)
+
+    return(tags$div(
+      class = "validation-success",
+      style = "font-size: 0.9em;",
+      sprintf("Valid parameter file (%s KB, modified: %s)",
+              file_size_kb,
+              format(file_info$mtime, "%Y-%m-%d %H:%M"))
+    ))
   })
 
   # Warm start status ####
@@ -915,6 +1049,24 @@ server <- function(input, output, session) {
     rv$run_in_progress <- TRUE
     rv$run_result <- NULL
 
+    # Handle custom parameter file if specified
+    custom_param_file <- NULL
+
+    if (!is.null(input$param_file_path) && nchar(input$param_file_path) > 0) {
+      custom_param_file <- normalize_path_input(input$param_file_path)
+
+      # Validate custom parameter file exists
+      if (!file.exists(custom_param_file)) {
+        rv$run_in_progress <- FALSE
+        showNotification(
+          "Custom parameter file does not exist. Please check the path.",
+          type = "error",
+          duration = 8
+        )
+        return()
+      }
+    }
+
     # Build settings
     settings <- list(
       STARTDATE = format_cosero_date(
@@ -941,8 +1093,36 @@ server <- function(input, output, session) {
       tryCatch({
         incProgress(0.05, detail = "Preparing configuration...")
 
+        # Handle custom parameter file - modify PARAFILE setting in run_cosero
+        if (!is.null(custom_param_file)) {
+          incProgress(0.02, detail = "Setting up custom parameter file...")
+
+          # Simply pass the custom parameter file name to run_cosero via settings
+          # This will override the PARAFILE setting from defaults.txt
+          settings$PARAFILE <- basename(custom_param_file)
+
+          # Copy the custom file to the input directory (in case it's not already there)
+          input_dir <- file.path(project_path, "input")
+          target_param_file <- file.path(input_dir, basename(custom_param_file))
+
+          # Only copy if source and target are different
+          if (normalizePath(custom_param_file, winslash = "/", mustWork = FALSE) !=
+              normalizePath(target_param_file, winslash = "/", mustWork = FALSE)) {
+            file.copy(custom_param_file, target_param_file, overwrite = TRUE)
+            cat("Copied custom parameter file to input directory:", basename(custom_param_file), "\n")
+          } else {
+            cat("Custom parameter file already in input directory:", basename(custom_param_file), "\n")
+          }
+
+          showNotification(
+            paste0("Using custom parameter file: ", basename(custom_param_file)),
+            type = "message",
+            duration = 5
+          )
+        }
+
         # Show execution message
-        incProgress(0.05, detail = "Executing COSERO (this may take a while)...")
+        incProgress(0.03, detail = "Executing COSERO (this may take a while)...")
 
         result <- run_cosero(
           project_path = project_path,
@@ -964,9 +1144,14 @@ server <- function(input, output, session) {
           output_dir <- file.path(project_path, "output")
           updateTextInput(session, "output_dir", value = output_dir)
 
+          success_msg <- paste0("COSERO run completed in ", round(result$runtime, 2), " seconds! ",
+                               "Go to Time Series tab and click 'Load Data' to view results.")
+          if (!is.null(custom_param_file)) {
+            success_msg <- paste0(success_msg, " (Used custom parameter file)")
+          }
+
           showNotification(
-            paste0("COSERO run completed in ", round(result$runtime, 2), " seconds! ",
-                   "Go to Time Series tab and click 'Load Data' to view results."),
+            success_msg,
             type = "message",
             duration = 10
           )

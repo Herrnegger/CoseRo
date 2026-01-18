@@ -3,6 +3,11 @@
 # Author: COSERO R Interface
 # Date: 2025-10-28
 
+#' @importFrom dplyr filter mutate select arrange group_by summarise
+#' @importFrom lubridate ymd_hm year month day hour minute
+#' @importFrom plotly plot_ly add_trace layout
+NULL
+
 library(dplyr)
 library(lubridate)
 library(plotly)
@@ -695,6 +700,7 @@ detect_timestep <- function(data) {
 #' @param spinup_timesteps Number of initial timesteps to exclude
 #' @return List with monthly aggregated data for each panel
 #' @details Fluxes (P, ET, Q) are summed, states (BW0, BW3, SWW) are averaged
+#' @export
 prepare_seasonality_data <- function(subbasin_data, spinup_timesteps = 0) {
   result <- list()
 
@@ -851,6 +857,9 @@ prepare_seasonality_data <- function(subbasin_data, spinup_timesteps = 0) {
 }
 
 #' Plot seasonality - Discharge
+#' @param monthly_data Monthly aggregated discharge data
+#' @return A plotly object
+#' @export
 plot_seasonality_discharge <- function(monthly_data) {
   if (is.null(monthly_data) || nrow(monthly_data) == 0) {
     return(plotly_empty(text = "No discharge data available"))
@@ -893,6 +902,9 @@ plot_seasonality_discharge <- function(monthly_data) {
 }
 
 #' Plot seasonality - Precipitation + ET
+#' @param monthly_data Monthly aggregated precipitation data
+#' @return A plotly object
+#' @export
 plot_seasonality_precipitation <- function(monthly_data) {
   if (is.null(monthly_data) || nrow(monthly_data) == 0) {
     return(plotly_empty(text = "No precipitation data available"))
@@ -946,6 +958,9 @@ plot_seasonality_precipitation <- function(monthly_data) {
 }
 
 #' Plot seasonality - Runoff Components
+#' @param monthly_data Monthly aggregated runoff components data
+#' @return A plotly object
+#' @export
 plot_seasonality_runoff <- function(monthly_data) {
   if (is.null(monthly_data) || nrow(monthly_data) == 0) {
     return(plotly_empty(text = "No runoff components data available"))
@@ -1001,6 +1016,8 @@ plot_seasonality_runoff <- function(monthly_data) {
 #' @param monthly_data Monthly aggregated data with state variables
 #' @param selected_vars Optional vector of variables to plot (default: all available states)
 #' @details Shows only state variables (BW0, BW3, SWW) as monthly means
+#' @return A plotly object
+#' @export
 plot_seasonality_water_balance <- function(monthly_data, selected_vars = NULL) {
   if (is.null(monthly_data) || nrow(monthly_data) == 0) {
     return(plotly_empty(text = "No water balance data available"))
@@ -1068,6 +1085,8 @@ plot_seasonality_water_balance <- function(monthly_data, selected_vars = NULL) {
 #' @param filename Output filename
 #' @param width Width in pixels
 #' @param height Height in pixels
+#' @return Logical indicating success
+#' @export
 export_plot_png <- function(plot, filename, width = 1200, height = 400) {
   tryCatch({
     # Try kaleido first (preferred method for plotly)
@@ -1114,6 +1133,7 @@ export_plot_png <- function(plot, filename, width = 1200, height = 400) {
 #'
 #' @param path Raw path string from user input
 #' @return Normalized path string with consistent separators
+#' @export
 #' @examples
 #' normalize_path_input('"D:\\Projects\\COSERO"')  # Returns: D:/Projects/COSERO
 #' normalize_path_input("D:/Projects/COSERO")      # Returns: D:/Projects/COSERO
@@ -1140,6 +1160,7 @@ normalize_path_input <- function(path) {
 #' Read COSERO defaults.txt with safe fallbacks
 #' @param project_path Path to COSERO project directory
 #' @return List of defaults with fallback values
+#' @export
 read_cosero_defaults_safe <- function(project_path) {
   # Default fallback values
   defaults <- list(
@@ -1185,6 +1206,7 @@ read_cosero_defaults_safe <- function(project_path) {
 #' Parse COSERO date string to components
 #' @param date_string String in format "YYYY MM DD HH MM" or vector c(YYYY, MM, DD, HH, MM)
 #' @return List with date, hour, minute
+#' @export
 parse_cosero_date <- function(date_string) {
   # Handle both string and vector formats
   if (is.character(date_string) && length(date_string) == 1) {
@@ -1224,6 +1246,7 @@ parse_cosero_date <- function(date_string) {
 #' @param hour Hour (0-23)
 #' @param minute Minute (0-59)
 #' @return String in format "YYYY MM DD HH MM"
+#' @export
 format_cosero_date <- function(date, hour = 0, minute = 0) {
   sprintf("%d %d %d %d %d",
           year(date), month(date), day(date),

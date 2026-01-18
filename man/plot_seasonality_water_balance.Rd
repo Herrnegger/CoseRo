@@ -11,6 +11,9 @@ plot_seasonality_water_balance(monthly_data, selected_vars = NULL)
 
 \item{selected_vars}{Optional vector of variables to plot (default: all available states)}
 }
+\value{
+A plotly object
+}
 \description{
 Plot seasonality - Water Balance States
 }

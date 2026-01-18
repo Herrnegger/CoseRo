@@ -15,6 +15,9 @@ export_plot_png(plot, filename, width = 1200, height = 400)
 
 \item{height}{Height in pixels}
 }
+\value{
+Logical indicating success
+}
 \description{
 Export plot as PNG
 }

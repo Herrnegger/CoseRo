@@ -6,6 +6,12 @@
 \usage{
 plot_seasonality_precipitation(monthly_data)
 }
+\arguments{
+\item{monthly_data}{Monthly aggregated precipitation data}
+}
+\value{
+A plotly object
+}
 \description{
 Plot seasonality - Precipitation + ET
 }

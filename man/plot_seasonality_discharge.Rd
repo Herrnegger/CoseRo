@@ -6,6 +6,12 @@
 \usage{
 plot_seasonality_discharge(monthly_data)
 }
+\arguments{
+\item{monthly_data}{Monthly aggregated discharge data}
+}
+\value{
+A plotly object
+}
 \description{
 Plot seasonality - Discharge
 }

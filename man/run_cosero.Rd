@@ -14,7 +14,8 @@ run_cosero(
   quiet = FALSE,
   statevar_source = 1,
   tmmon_option = 1,
-  auto_answers = NULL
+  auto_answers = NULL,
+  disable_backups = FALSE
 )
 }
 \arguments{

@@ -9,7 +9,8 @@ plot_dotty(
   Y,
   y_label = "Output",
   n_col = 3,
-  reference_line = NULL
+  reference_line = NULL,
+  y_min = NULL
 )
 }
 \arguments{
@@ -22,6 +23,8 @@ plot_dotty(
 \item{n_col}{Number of columns in facet}
 
 \item{reference_line}{Reference line value (optional)}
+
+\item{y_min}{Minimum Y-axis value (e.g., 0 to start from zero)}
 }
 \value{
 ggplot object

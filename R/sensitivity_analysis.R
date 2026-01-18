@@ -579,10 +579,41 @@ run_cosero_ensemble <- function(project_path,
     if (!quiet) {
       display_progress(i, n_runs, start_time, "Run")
     }
+
+    # MEMORY MANAGEMENT: Clean up every 50 simulations to prevent memory accumulation
+    if (i %% 50 == 0) {
+      # Close any orphaned graphics devices
+      tryCatch({
+        while (dev.cur() > 1) dev.off()
+      }, error = function(e) invisible(NULL))
+
+      # Close any open file connections
+      tryCatch({
+        closeAllConnections()
+      }, error = function(e) invisible(NULL))
+
+      # Force garbage collection to free unused memory
+      gc(full = TRUE)
+
+      if (!quiet) {
+        cat(sprintf("\n  [Memory cleanup at run %d/%d]\n", i, n_runs))
+      }
+    }
   }
 
   # Restore original parameter file
   file.copy(backup_file, par_file, overwrite = TRUE)
+
+  # FINAL MEMORY CLEANUP: Ensure all resources are freed
+  tryCatch({
+    while (dev.cur() > 1) dev.off()
+  }, error = function(e) invisible(NULL))
+
+  tryCatch({
+    closeAllConnections()
+  }, error = function(e) invisible(NULL))
+
+  gc(full = TRUE)
 
   runtime <- difftime(Sys.time(), start_time, units = "mins")
   if (!quiet) {
@@ -704,6 +735,7 @@ modify_parameter_file <- function(par_file, params, par_bounds, original_values)
 #' @param zone_id Zone ID to extract parameters from (default: first zone). Use "all" to read all zones.
 #' @return If zone_id is specified: Named list of parameter values.
 #'         If zone_id = "all": Data frame with columns NZ_ (zone ID) and one column per parameter
+#' @export
 read_parameter_table <- function(par_file, param_names, zone_id = NULL, quiet = FALSE) {
   # Use the existing reader from cosero_readers.R
   param_data <- read_cosero_parameters(par_file, skip_lines = 1, quiet = quiet)
@@ -854,6 +886,7 @@ modify_parameter_table_fast <- function(par_file, params, par_bounds, original_v
 #' @param original_values Original parameter values from file
 #' @param zones Vector of zone IDs to modify (NULL = all zones)
 #' @param quiet Suppress messages
+#' @export
 modify_parameter_table <- function(par_file, params, par_bounds, original_values, zones = NULL, quiet = FALSE) {
   # Read first line (project info)
   first_line <- readLines(par_file, n = 1)
@@ -973,6 +1006,7 @@ modify_parameter_table <- function(par_file, params, par_bounds, original_values
 #' @param temp_dir Directory for temporary project copies (NULL = use system temp)
 #' @param quiet Suppress output
 #' @return List with results and parameters
+#' @export
 run_cosero_ensemble_parallel <- function(project_path,
                                          parameter_sets,
                                          par_bounds,
@@ -1033,6 +1067,12 @@ run_cosero_ensemble_parallel <- function(project_path,
                       "read_parameter_file", "read_parameter_table", "find_parameter_column"),
                 envir = environment())
 
+  # Get package path for workers to load from
+  pkg_source_path <- getwd()
+
+  # Export package path to cluster
+  clusterExport(cl, c("pkg_source_path"), envir = environment())
+
   # Load required libraries and package on each worker
   clusterEvalQ(cl, {
     library(dplyr)
@@ -1048,12 +1088,10 @@ run_cosero_ensemble_parallel <- function(project_path,
     } else {
       # If not installed, try devtools::load_all() for development
       if (requireNamespace("devtools", quietly = TRUE)) {
-        # Assume package is in working directory or parent
-        pkg_path <- getwd()
-        if (!file.exists(file.path(pkg_path, "DESCRIPTION"))) {
-          pkg_path <- dirname(pkg_path)
-        }
-        devtools::load_all(pkg_path, quiet = TRUE)
+        # Use the exported pkg_source_path from parent environment
+        devtools::load_all(pkg_source_path, quiet = TRUE)
+      } else {
+        stop("COSERO package not installed and devtools not available")
       }
     }
   })
@@ -1078,93 +1116,240 @@ run_cosero_ensemble_parallel <- function(project_path,
   # Register cluster with doSNOW for progress tracking
   registerDoSNOW(cl)
 
-  # Pre-create worker directories (once per core, not per run)
-  # Only create as many as needed (don't create 4 workers for 3 runs)
+  # SCALABLE BATCHED HYBRID FIX:
+  # - Create worker pool (n_cores directories)
+  # - Process runs in small batches to maintain parallelism
+  # - Each batch processed truly in parallel across workers
+  # - Batch size chosen to balance parallelism vs overhead
+
   n_workers <- min(n_cores, n_runs)
   worker_dirs <- file.path(temp_dir, paste0("worker_", seq_len(n_workers)))
 
-  if (!quiet) cat("Preparing", n_workers, "worker directories...\n")
+  # Determine batch size based on total runs
+  # Small batches = more parallelism, large batches = less overhead
+  if (n_runs <= 100) {
+    batch_size <- 4  # For n=25 (275 runs): 69 batches of 4
+  } else if (n_runs <= 500) {
+    batch_size <- 10  # For n=100 (1100 runs): 110 batches of 10
+  } else {
+    batch_size <- 25  # For n=500 (5500 runs): 220 batches of 25
+  }
+
+  n_batches <- ceiling(n_runs / batch_size)
+
+  if (!quiet) {
+    cat("Preparing", n_workers, "worker directories...\n")
+    cat(sprintf("Will process %d runs in %d batches of ~%d runs each\n",
+                n_runs, n_batches, batch_size))
+  }
+
   prep_start <- Sys.time()
 
-  # Parallelize the worker directory setup itself!
-  clusterExport(cl, c("worker_dirs", "project_path"), envir = environment())
-  parLapply(cl, worker_dirs, function(wdir) {
+  # Create worker directories
+  for (w in 1:n_workers) {
+    wdir <- worker_dirs[w]
+
     if (dir.exists(wdir)) unlink(wdir, recursive = TRUE)
     dir.create(wdir, recursive = TRUE, showWarnings = FALSE)
 
-    # Copy project once per worker
-    project_files <- list.files(project_path, full.names = TRUE, all.files = FALSE, recursive = FALSE)
-    file.copy(from = project_files, to = wdir, recursive = TRUE, overwrite = TRUE)
-    return(TRUE)
-  })
+    # Use robocopy for binary file integrity (file.copy corrupts large .bin files)
+    if (.Platform$OS.type == "windows") {
+      src <- normalizePath(project_path, winslash = "\\", mustWork = TRUE)
+      dst <- normalizePath(wdir, winslash = "\\", mustWork = FALSE)
+
+      # robocopy: /E=subdirs, /XJ=no junctions, /MT:8=8 threads, quiet flags
+      cmd <- sprintf('robocopy "%s" "%s" /E /XJ /MT:8 /NFL /NDL /NJH /NJS /NC /NS /NP', src, dst)
+      exit_code <- system(cmd, intern=FALSE, ignore.stdout=TRUE, show.output.on.console=FALSE)
+
+      # robocopy codes: 0-7=success, 8+=error
+      if (exit_code >= 8) {
+        stop(sprintf("robocopy failed (exit code %d) copying to: %s", exit_code, wdir))
+      }
+    } else {
+      # Unix: prefer rsync if available, fallback to cp
+      if (Sys.which("rsync") != "") {
+        system(sprintf('rsync -a "%s/" "%s/"', project_path, wdir))
+      } else {
+        system(sprintf('cp -r "%s"/* "%s"/', project_path, wdir))
+      }
+    }
+
+    if (!quiet) cat(sprintf("  Worker %d/%d ready\n", w, n_workers))
+  }
 
   prep_time <- difftime(Sys.time(), prep_start, units = "secs")
   if (!quiet) cat(sprintf("Worker setup completed in %.1fs\n\n", prep_time))
 
-  # Export worker_dirs to workers
+  # Export to workers
   clusterExport(cl, c("worker_dirs"), envir = environment())
 
-  # Run in parallel with foreach and live progress
-  results <- foreach(
-    i = 1:n_runs,
-    .packages = c("dplyr", "readr", "tibble", "stringr", "lubridate", "data.table"),
-    .options.snow = opts
-  ) %dopar% {
-    # Identify which worker this is (1-based index)
-    worker_idx <- (i %% length(worker_dirs)) + 1
-    if (worker_idx > length(worker_dirs)) worker_idx <- 1
+  # Process in batches for scalability
+  # KEY FIX: Ensure each run in a batch uses a UNIQUE worker (no conflicts)
+  if (!quiet) cat(sprintf("Starting %d runs in %d batches...\n\n", n_runs, n_batches))
 
-    worker_project_full <- worker_dirs[worker_idx]
-    worker_par_file <- file.path(worker_project_full, "input", par_filename)
+  all_results <- vector("list", n_runs)
+  completed_count <- 0
 
-    # Check if parameter file exists
-    if (!file.exists(worker_par_file)) {
-      stop("Parameter file not found in worker project: ", worker_par_file)
+  for (batch_idx in 1:n_batches) {
+    start_idx <- (batch_idx - 1) * batch_size + 1
+    end_idx <- min(batch_idx * batch_size, n_runs)
+    batch_run_ids <- start_idx:end_idx
+    batch_size_actual <- length(batch_run_ids)
+
+    # Process this batch in parallel
+    # CRITICAL FIX: Use index within batch (0, 1, 2, 3) not global run ID
+    batch_results <- foreach(
+      batch_position = seq_along(batch_run_ids),
+      .packages = c("dplyr", "readr", "tibble", "stringr", "lubridate", "data.table")
+    ) %dopar% {
+      # Get the actual run ID
+      i <- batch_run_ids[batch_position]
+
+      # Assign worker based on position IN BATCH (ensures no conflicts within batch)
+      worker_idx <- ((batch_position - 1) %% length(worker_dirs)) + 1
+      worker_dir <- worker_dirs[worker_idx]
+      worker_par_file <- file.path(worker_dir, "input", par_filename)
+
+      tryCatch({
+        # Modify parameters
+        tryCatch({
+          modify_parameter_table(worker_par_file, parameter_sets[i, ],
+                              par_bounds, original_values, quiet = TRUE)
+        }, error = function(e) {
+          modify_parameter_file(worker_par_file, parameter_sets[i, ],
+                               par_bounds, original_values)
+        })
+
+        # Run COSERO
+        result <- run_cosero(
+          project_path = worker_dir,
+          defaults_settings = base_settings,
+          quiet = TRUE,
+          read_outputs = TRUE
+        )
+
+        return(result)
+
+      }, error = function(e) {
+        error_msg <- paste0("Run ", i, " failed: ", e$message)
+        warning(error_msg)
+        return(list(success = FALSE, error = error_msg, run_id = i))
+      })
     }
 
+    # Store batch results
+    all_results[batch_run_ids] <- batch_results
+
+    # CRITICAL: Cleanup between batches to prevent file handle issues
+    rm(batch_results)
+
+    # Only close non-cluster connections (don't close the parallel cluster!)
     tryCatch({
-      # Modify parameters (try tabular format first, fall back to simple format)
-      tryCatch({
-        modify_parameter_table(worker_par_file, parameter_sets[i, ],
-                              par_bounds, original_values, quiet = TRUE)
-      }, error = function(e) {
-        modify_parameter_file(worker_par_file, parameter_sets[i, ],
-                             par_bounds, original_values)
-      })
+      # Get all connections
+      all_cons <- showConnections(all = TRUE)
+      if (nrow(all_cons) > 0) {
+        # Close file connections but NOT socket connections (cluster uses those)
+        for (i in 1:nrow(all_cons)) {
+          con_class <- all_cons[i, "class"]
+          if (con_class %in% c("file", "textConnection")) {
+            con_num <- as.integer(rownames(all_cons)[i])
+            tryCatch(close(getConnection(con_num)), error = function(e) invisible(NULL))
+          }
+        }
+      }
+    }, error = function(e) invisible(NULL))
 
-      # Run COSERO
-      result <- run_cosero(
-        project_path = worker_project_full,
-        defaults_settings = base_settings,
-        quiet = TRUE,
-        read_outputs = TRUE
-      )
+    gc(full = TRUE)
 
-      return(result)
+    # Small delay to ensure all file handles are released
+    Sys.sleep(0.5)
 
-    }, error = function(e) {
-      # Provide detailed error information
-      error_msg <- paste0(
-        "Run ", i, " failed: ", e$message,
-        "\nWorker project: ", worker_project_full,
-        "\nParameter file: ", worker_par_file,
-        "\nFile exists: ", file.exists(worker_par_file)
-      )
-      warning(error_msg)
-      return(list(success = FALSE, error = error_msg, run_id = i))
-    })
+    completed_count <- completed_count + batch_size_actual
+    if (!quiet) {
+      cat(sprintf("  Completed %d/%d runs (batch %d/%d)\n",
+                  completed_count, n_runs, batch_idx, n_batches))
+    }
   }
 
-  # Cleanup worker directories after all runs complete
-  for (wdir in worker_dirs) {
-    if (dir.exists(wdir)) unlink(wdir, recursive = TRUE)
-  }
+  results <- all_results
 
   parallel_time <- as.numeric(difftime(Sys.time(), parallel_start, units = "secs"))
 
-  # Cleanup
+  # CRITICAL MEMORY CLEANUP STEP 1: Stop cluster IMMEDIATELY to free worker memory
+  if (!quiet) cat("\nCleaning up parallel workers...\n")
   stopCluster(cl)
   on.exit()
+
+  # CRITICAL MEMORY CLEANUP STEP 2: Remove SOME large output data
+  # KEEP runoff data (needed for NSE/KGE calculation)
+  # Remove other large time series arrays
+  if (!quiet) cat("Pruning non-essential output data from results...\n")
+  for (i in seq_along(results)) {
+    if (!is.null(results[[i]]$output_data)) {
+      # DON'T remove runoff - it's needed for calculate_ensemble_metrics()
+      # Remove other large arrays to save memory
+      if (!is.null(results[[i]]$output_data$evapotranspiration)) {
+        results[[i]]$output_data$evapotranspiration <- NULL
+      }
+      if (!is.null(results[[i]]$output_data$soil_moisture)) {
+        results[[i]]$output_data$soil_moisture <- NULL
+      }
+      if (!is.null(results[[i]]$output_data$snow)) {
+        results[[i]]$output_data$snow <- NULL
+      }
+      if (!is.null(results[[i]]$output_data$groundwater)) {
+        results[[i]]$output_data$groundwater <- NULL
+      }
+    }
+  }
+
+  # CRITICAL MEMORY CLEANUP STEP 3: Force aggressive garbage collection
+  if (!quiet) cat("Running garbage collection...\n")
+  for (iter in 1:3) {
+    gc(full = TRUE)
+    Sys.sleep(0.2)  # Give system time to release memory
+  }
+
+  # CRITICAL MEMORY CLEANUP STEP 4: Close all connections
+  tryCatch({
+    closeAllConnections()
+  }, error = function(e) invisible(NULL))
+
+  # CRITICAL MEMORY CLEANUP STEP 5: Close any orphaned graphics devices
+  tryCatch({
+    while (dev.cur() > 1) dev.off()
+  }, error = function(e) invisible(NULL))
+
+  # CRITICAL MEMORY CLEANUP STEP 6: Cleanup run directories
+  if (!quiet) cat("Removing run directories...\n")
+  # Clean up in batches to avoid overwhelming the file system
+  cleanup_batch_size <- 50
+  n_cleanup_batches <- ceiling(length(worker_dirs) / cleanup_batch_size)
+
+  for (batch_idx in 1:n_cleanup_batches) {
+    start_idx <- (batch_idx - 1) * cleanup_batch_size + 1
+    end_idx <- min(batch_idx * cleanup_batch_size, length(worker_dirs))
+
+    for (i in start_idx:end_idx) {
+      wdir <- worker_dirs[i]
+      if (dir.exists(wdir)) {
+        tryCatch({
+          unlink(wdir, recursive = TRUE, force = TRUE)
+        }, error = function(e) {
+          # If removal fails, try again after short delay
+          Sys.sleep(0.1)
+          unlink(wdir, recursive = TRUE, force = TRUE)
+        })
+      }
+    }
+
+    if (!quiet && n_cleanup_batches > 1) {
+      cat(sprintf("  Cleanup batch %d/%d complete\n", batch_idx, n_cleanup_batches))
+    }
+  }
+
+  # Final garbage collection before returning
+  gc(full = TRUE)
 
   runtime <- difftime(Sys.time(), start_time, units = "mins")
   if (!quiet) {
@@ -1180,6 +1365,8 @@ run_cosero_ensemble_parallel <- function(project_path,
     cat(sprintf("  Parallel efficiency: %.0f%% (speedup: %.2fx / ideal: %dx)\n",
                 efficiency, actual_speedup, n_cores))
   }
+
+  if (!quiet) cat("✓ Memory cleanup complete\n\n")
 
   return(list(
     results = results,
@@ -1505,9 +1692,10 @@ plot_sobol <- function(sobol_indices, title = "Sobol Sensitivity Indices") {
 #' @param y_label Y-axis label
 #' @param n_col Number of columns in facet
 #' @param reference_line Reference line value (optional)
+#' @param y_min Minimum Y-axis value (e.g., 0 to start from zero)
 #' @return ggplot object
 plot_dotty <- function(parameter_sets, Y, y_label = "Output",
-                       n_col = 3, reference_line = NULL) {
+                       n_col = 3, reference_line = NULL, y_min = NULL) {
 
   dotty_data <- parameter_sets %>%
     mutate(output = Y) %>%
@@ -1523,9 +1711,15 @@ plot_dotty <- function(parameter_sets, Y, y_label = "Output",
       strip.background = element_rect(fill = "lightgray")
     )
 
+  # Set Y-axis minimum if specified
+  if (!is.null(y_min)) {
+    y_max <- max(Y, na.rm = TRUE)
+    p <- p + coord_cartesian(ylim = c(y_min, y_max))
+  }
+
   if (!is.null(reference_line)) {
     p <- p + geom_hline(yintercept = reference_line,
-                       linetype = "dashed", color = "red", size = 1)
+                       linetype = "dashed", color = "red", linewidth = 1)
   }
 
   return(p)
@@ -1533,24 +1727,104 @@ plot_dotty <- function(parameter_sets, Y, y_label = "Output",
 
 #' Plot Ensemble Uncertainty
 #'
-#' @param ensemble_output List of time series from extract_ensemble_output()
-#' @param observed Observed data frame with date and value
-#' @return ggplot object
-plot_ensemble_uncertainty <- function(ensemble_output, observed = NULL) {
+#' Visualizes ensemble uncertainty by plotting median and quantile ranges
+#' across multiple model runs. Works directly with output from
+#' run_cosero_ensemble() or run_cosero_ensemble_parallel().
+#'
+#' @param ensemble_output Output from run_cosero_ensemble_parallel() or
+#'   run_cosero_ensemble(), or a list of individual run results
+#' @param observed Optional data frame with observed data containing 'date'
+#'   and 'value' columns
+#' @param subbasin_id Subbasin identifier (e.g., "0001"). Default is "0001"
+#' @param variable Variable to plot (e.g., "QSIM", "QOBS"). Default is "QSIM"
+#'
+#' @return ggplot object showing median (blue line), 50% confidence interval
+#'   (dark gray ribbon), and 90% confidence interval (light gray ribbon)
+#'
+#' @export
+#' @examples
+#' \dontrun{
+#' # After running ensemble
+#' results <- run_cosero_ensemble_parallel(...)
+#'
+#' # Plot uncertainty for subbasin 0001
+#' p <- plot_ensemble_uncertainty(results, subbasin_id = "0001")
+#' print(p)
+#'
+#' # With observed data
+#' obs <- data.frame(date = dates, value = observed_discharge)
+#' p <- plot_ensemble_uncertainty(results, observed = obs, subbasin_id = "0001")
+#' }
+plot_ensemble_uncertainty <- function(ensemble_output, observed = NULL,
+                                      subbasin_id = "0001", variable = "QSIM") {
+
+  # Check if ensemble_output is the output from run_cosero_ensemble_parallel/run_cosero_ensemble
+  if (!is.null(ensemble_output$results)) {
+    results_list <- ensemble_output$results
+  } else {
+    # Assume it's already a list of results
+    results_list <- ensemble_output
+  }
+
+  n_runs <- length(results_list)
+
+  # Extract timeseries data from each run
+  timeseries_list <- vector("list", n_runs)
+  dates <- NULL
+  n_time <- NULL
+
+  for (i in 1:n_runs) {
+    result <- results_list[[i]]
+
+    if (result$success && !is.null(result$output_data) &&
+        !is.null(result$output_data$runoff)) {
+
+      runoff <- result$output_data$runoff
+
+      # Construct column name based on variable and subbasin_id
+      col_name <- paste0(variable, "_", subbasin_id)
+
+      if (col_name %in% colnames(runoff)) {
+        timeseries_list[[i]] <- runoff[[col_name]]
+
+        # Get dates from first successful run
+        if (is.null(dates)) {
+          if ("date" %in% colnames(runoff)) {
+            dates <- runoff$date
+          } else {
+            # Construct dates from yyyy, mm, dd columns
+            dates <- as.Date(paste(runoff$yyyy, runoff$mm, runoff$dd, sep = "-"))
+          }
+          n_time <- length(dates)
+        }
+      } else {
+        warning(sprintf("Run %d: Column '%s' not found in runoff data", i, col_name))
+        timeseries_list[[i]] <- NA
+      }
+    } else {
+      timeseries_list[[i]] <- NA
+    }
+  }
+
+  # Check if we got any valid data
+  n_valid <- sum(sapply(timeseries_list, function(x) !all(is.na(x))))
+  if (n_valid == 0) {
+    stop("No valid timeseries data found in ensemble output. Check subbasin_id and variable.")
+  }
+
+  if (is.null(dates)) {
+    stop("Could not extract dates from ensemble output")
+  }
 
   # Convert list to matrix
-  n_time <- length(ensemble_output[[1]]$value)
-  n_runs <- length(ensemble_output)
-
   output_matrix <- matrix(NA, nrow = n_time, ncol = n_runs)
   for (i in 1:n_runs) {
-    if (!is.na(ensemble_output[[i]])[1]) {
-      output_matrix[, i] <- ensemble_output[[i]]$value
+    if (!all(is.na(timeseries_list[[i]]))) {
+      output_matrix[, i] <- timeseries_list[[i]]
     }
   }
 
   # Calculate quantiles
-  dates <- ensemble_output[[1]]$date
   stats <- data.frame(
     date = dates,
     median = apply(output_matrix, 1, median, na.rm = TRUE),
@@ -1560,16 +1834,24 @@ plot_ensemble_uncertainty <- function(ensemble_output, observed = NULL) {
     q95 = apply(output_matrix, 1, quantile, 0.95, na.rm = TRUE)
   )
 
+  # Create plot
   p <- ggplot(stats, aes(x = date)) +
     geom_ribbon(aes(ymin = q05, ymax = q95), fill = "gray80", alpha = 0.5) +
     geom_ribbon(aes(ymin = q25, ymax = q75), fill = "gray60", alpha = 0.5) +
-    geom_line(aes(y = median), color = "blue", size = 1) +
+    geom_line(aes(y = median), color = "blue", linewidth = 1) +
     theme_bw() +
-    labs(x = "Date", y = "Value", title = "Ensemble Uncertainty")
+    labs(x = "Date",
+         y = paste0(variable, " (Subbasin ", subbasin_id, ")"),
+         title = paste0("Ensemble Uncertainty (", n_valid, "/", n_runs, " runs)"))
 
+  # Add observed data if provided
   if (!is.null(observed)) {
-    p <- p + geom_line(data = observed, aes(x = date, y = value),
-                      color = "black", size = 1.2)
+    if (is.data.frame(observed) && "date" %in% colnames(observed) && "value" %in% colnames(observed)) {
+      p <- p + geom_line(data = observed, aes(x = date, y = value),
+                        color = "black", linewidth = 1.2)
+    } else {
+      warning("Observed data must be a data frame with 'date' and 'value' columns")
+    }
   }
 
   return(p)
