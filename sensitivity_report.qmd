@@ -2,14 +2,16 @@
 title: "Sensitivity Analysis of COSERO Hydrological Model Parameters"
 subtitle: "A Comprehensive Framework for Parameter Identification and Model Calibration"
 author: "Ahmed Fiaz"
-affiliation: "University of Natural Resources and Life Sciences, Vienna (BOKU)"
 date: today
 format:
   pdf:
-    toc: true
+    toc: false
     toc-depth: 3
     number-sections: true
     colorlinks: true
+    linkcolor: "blue"
+    urlcolor: "blue"
+    citecolor: "blue"
     geometry:
       - top=2.5cm
       - bottom=2.5cm
@@ -18,7 +20,78 @@ format:
     fontsize: 12pt
     linestretch: 1.5
     fig-pos: 'H'
+    fig-dpi: 300
     keep-tex: false
+    include-in-header:
+      text: |
+        \usepackage{titling}
+        \usepackage{float}
+        \usepackage{xcolor}
+        \usepackage{tcolorbox}
+        \usepackage{fancyhdr}
+        \usepackage{sectsty}
+        \usepackage{etoolbox}
+        \usepackage{tikz}
+        \usepackage{graphicx}
+
+        % Define custom colors
+        \definecolor{bokublue}{RGB}{0, 83, 155}
+        \definecolor{bokugreen}{RGB}{0, 128, 0}
+        \definecolor{lightblue}{RGB}{230, 242, 255}
+        \definecolor{lightgray}{RGB}{245, 245, 245}
+        \definecolor{accentblue}{RGB}{51, 122, 183}
+
+        % Section headings in color
+        \allsectionsfont{\color{bokublue}}
+
+        % Custom title page with decorative elements
+        \pretitle{\begin{center}\vspace*{1.5cm}
+          \tikz[remember picture,overlay] {
+            \draw[bokublue, line width=2pt] ([yshift=-1cm]current page.north west) -- ([yshift=-1cm]current page.north east);
+            \draw[bokublue, line width=1pt] ([yshift=-1.3cm]current page.north west) -- ([yshift=-1.3cm]current page.north east);
+          }
+          \color{bokublue}\LARGE\bfseries}
+
+        % Subtitle styling
+        \newcommand{\thesubtitle}{A Comprehensive Framework for Parameter Identification and Model Calibration}
+        \posttitle{\par\end{center}\vskip 1em{\begin{center}\Large\itshape\color{gray}\thesubtitle\end{center}}\vskip 1.5em}
+
+        \preauthor{\begin{center}\large\vskip 2em\color{black}}
+        \postauthor{\par\vskip 0.5em{\normalsize\color{gray} Matriculation Number: 12340635}\par\vskip 1.5em{\normalsize\color{bokublue}\bfseries University of Natural Resources and Life Sciences, Vienna (BOKU)}\par\vskip 2em{\normalsize\textbf{Course:} Structural Exercises}\par\vskip 0.3em{\normalsize\textbf{Course Number:} LAWI301058}\par\vskip 2em{\normalsize\textbf{Supervisor:} Mathew Herrnegger}\end{center}\vskip 2em}
+        \predate{\begin{center}\normalsize\color{gray}}
+        \postdate{\par\end{center}\vfill}
+
+        % Fancy headers
+        \pagestyle{fancy}
+        \fancyhf{}
+        \fancyhead[L]{\small\color{gray}\leftmark}
+        \fancyhead[R]{\small\color{gray}COSERO Sensitivity Analysis}
+        \fancyfoot[C]{\thepage}
+        \renewcommand{\headrulewidth}{0.4pt}
+        \renewcommand{\footrulewidth}{0pt}
+
+        % Code block styling
+        \tcbuselibrary{listings,breakable,skins}
+
+        % Highlight boxes for important content
+        \newtcolorbox{infobox}{
+          colback=lightblue,
+          colframe=bokublue,
+          fonttitle=\bfseries,
+          title=Note,
+          breakable
+        }
+
+        % Custom quote style
+        \AtBeginEnvironment{quote}{\itshape\color{gray}}
+
+    include-before-body:
+      text: |
+        \thispagestyle{empty}
+        \newpage
+        \thispagestyle{empty}
+        \tableofcontents
+        \newpage
   html:
     toc: true
     toc-depth: 3
