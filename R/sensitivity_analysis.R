@@ -11,7 +11,7 @@ library(ggplot2)
 library(sensobol)
 library(hydroGOF)
 library(parallel)
-library(doSNOW)    # For progress updates in parallel
+#library(doSNOW)    # For progress updates in parallel
 library(foreach)
 
 # Note: COSERO functions loaded from package
