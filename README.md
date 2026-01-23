@@ -13,6 +13,7 @@
 - ✅ **Fast Output Reading**: Efficiently read and parse 13+ different COSERO output file formats
 - ✅ **Interactive Visualization**: Modern Shiny web application with 5 analysis tabs
 - ✅ **Sensitivity Analysis**: Sobol-based global sensitivity analysis framework with parallel computing
+- ✅ **Input Data Preprocessing**: Convert SPARTACUS gridded climate data to COSERO input format
 - ✅ **Flexible Usage**: Use as scripting library OR interactive GUI
 
 ## Important Notice
@@ -71,7 +72,7 @@ Once published, install directly from GitHub:
 install.packages("remotes")
 
 # Install COSERO package
-remotes::install_github("yourusername/COSERO-R")
+remotes::install_github("Herrnegger/COSERO-R")
 ```
 
 ### System Requirements
@@ -83,6 +84,8 @@ remotes::install_github("yourusername/COSERO-R")
   - Core: shiny, bslib, plotly, dplyr, tidyr, lubridate, data.table
   - Analysis: sensobol, hydroGOF, parallel, pbapply
   - Visualization: ggplot2, DT
+  - Spatial: terra, sf, exactextractr (for SPARTACUS preprocessing)
+  - Parallel: future, furrr (for parallel data processing)
 
 ## Usage
 
@@ -329,6 +332,58 @@ export_sensitivity_results(
 - Parallel execution with progress tracking
 - Works with all COSERO performance metrics (NSE, KGE, BIAS, RMSE, etc.)
 
+#### SPARTACUS Data Preprocessing
+
+The package includes functions to preprocess SPARTACUS gridded climate data (GeoSphere Austria) into COSERO meteorological input format:
+
+```r
+library(COSERO)
+library(sf)
+
+# Load your modeling zones (must have a zone ID column)
+zones <- st_read("path/to/model_zones.shp")
+
+# Process precipitation data
+# Input: SPARTACUS2-DAILY_RR_YYYY.nc files
+# Output: P_NZ_[start_year]_[end_year].txt
+write_spartacus_precip(
+  nc_dir = "data/SPARTACUS_Daily/RR",
+  output_dir = "output/cosero_input",
+  model_zones = zones,
+  nz_col = "NZ",      # Column name with zone IDs
+  n_cores = 4         # Parallel processing (NULL = auto-detect)
+)
+
+# Process temperature data (calculates Tmean from Tmin and Tmax)
+# Input: SPARTACUS2-DAILY_TN_YYYY.nc and SPARTACUS2-DAILY_TX_YYYY.nc files
+# Output: T_NZ_[start_year]_[end_year].txt
+write_spartacus_temp(
+  tmin_dir = "data/SPARTACUS_Daily/TN",
+  tmax_dir = "data/SPARTACUS_Daily/TX",
+  output_dir = "output/cosero_input",
+  model_zones = zones,
+  nz_col = "NZ",
+  n_cores = 4
+)
+```
+
+**Key Features:**
+- Fast area-weighted spatial aggregation using `exactextractr`
+- Parallel processing with batched execution for memory efficiency
+- Handles 10+ years of daily 1km data in minutes
+- Output format: YYYY MM DD HH mm NZ1 NZ2 ... NZn (COSERO meteorological input)
+- Pixel-level temperature calculation (Tmean = (Tmin + Tmax) / 2) before spatial aggregation
+- Automatic CRS reprojection if needed
+
+**SPARTACUS Dataset:**
+- Source: GeoSphere Austria (https://doi.org/10.60669/m6w8-s545)
+- Spatial Resolution: 1 km
+- Temporal Resolution: Daily (1961-present)
+- Temporal Extent: 1961 to present (updated daily)
+- Coverage: Austria
+- Projection: ETRS89 (EPSG:4258)
+- Parameters: Precipitation (RR), Min Temperature (TN), Max Temperature (TX)
+
 ### 3. Understanding COSERO Output Types
 
 COSERO generates different sets of output files based on the OUTPUTTYPE setting:
@@ -365,6 +420,7 @@ COSERO/
 │   ├── cosero_run.R           # run_cosero() and execution functions
 │   ├── cosero_readers.R       # read_cosero_output() and readers
 │   ├── sensitivity_analysis.R # Sensitivity analysis framework
+│   ├── spartacus_preprocessing.R # SPARTACUS climate data preprocessing
 │   ├── app_helpers.R          # Plotting and data processing
 │   └── launch_app.R           # launch_cosero_app()
 │
@@ -405,6 +461,12 @@ COSERO/
 | `validate_cosero_defaults()` | Validate configuration parameters |
 | `show_cosero_defaults()` | Display available configuration parameters |
 
+### Input Data Preprocessing
+| Function | Description |
+|----------|-------------|
+| `write_spartacus_precip()` | Convert SPARTACUS precipitation NetCDF to COSERO input format |
+| `write_spartacus_temp()` | Convert SPARTACUS Tmin/Tmax NetCDF to COSERO Tmean input format |
+
 ### Sensitivity Analysis (Under Testing)
 | Function | Description |
 |----------|-------------|
@@ -436,6 +498,10 @@ Access detailed function documentation from R:
 ?read_defaults                # Read configuration
 ?modify_defaults              # Modify configuration
 ?validate_cosero_defaults     # Validate settings
+
+# Input data preprocessing
+?write_spartacus_precip       # SPARTACUS precipitation preprocessing
+?write_spartacus_temp         # SPARTACUS temperature preprocessing
 
 # Data extraction
 ?get_subbasin_data           # Extract subbasin discharge

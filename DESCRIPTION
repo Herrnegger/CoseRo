@@ -3,13 +3,14 @@ Type: Package
 Title: R Interface and Shiny Application for the COSERO Hydrological Model
 Version: 0.1.0
 Authors@R: c(
-    person("COSERO", "Development Team", email = "your.email@example.com", role = c("aut", "cre"))
+    person("Mathew", "Herrnegger", role = c("aut", "cre")),
+    person("Ahmed", "Fiaz", role = "aut")
     )
 Description: Provides a complete R interface for the COSERO hydrological model,
     including automated model execution, fast output reading, interactive Shiny
     visualization app, and Sobol-based global sensitivity analysis framework.
     Users can run COSERO simulations programmatically or through a modern web GUI.
-License: MIT + file LICENSE
+License: GPL (>= 3)
 Encoding: UTF-8
 LazyData: true
 Depends:
@@ -34,7 +35,12 @@ Imports:
     sensobol (>= 1.1.0),
     hydroGOF (>= 0.4.0),
     parallel,
-    pbapply (>= 1.5.0)
+    pbapply (>= 1.5.0),
+    terra (>= 1.7.0),
+    sf (>= 1.0.0),
+    exactextractr (>= 0.9.0),
+    future (>= 1.33.0),
+    furrr (>= 0.3.0)
 Suggests:
     testthat (>= 3.0.0),
     knitr,
