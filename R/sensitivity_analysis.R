@@ -1,6 +1,5 @@
 # COSERO Sensitivity Analysis
 # Sobol-based global sensitivity analysis for COSERO parameters
-# Author: COSERO R Interface
 # Date: 2025-11-04
 
 # 1 Load Libraries #####
