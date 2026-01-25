@@ -1252,5 +1252,3 @@ format_cosero_date <- function(date, hour = 0, minute = 0) {
           year(date), month(date), day(date),
           as.integer(hour), as.integer(minute))
 }
-
-cat("COSERO Visualization Helper Functions loaded\n")

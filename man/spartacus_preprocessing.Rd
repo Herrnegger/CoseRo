@@ -4,7 +4,43 @@
 \alias{spartacus_preprocessing}
 \title{SPARTACUS Data Preprocessing for COSERO}
 \description{
-Functions to extract SPARTACUS gridded climate data (precipitation and temperature)
-and write them in COSERO meteorological input format.
+High-performance extraction of SPARTACUS gridded climate data for Austria.
+Uses a sparse weight matrix approach that maps modeling zones directly to
+raw NetCDF memory layout for extremely fast, RAM-efficient processing.
+}
+\details{
+\strong{IMPORTANT: These functions are specifically designed for SPARTACUS NetCDF files
+from GeoSphere Austria. They will NOT work with other gridded datasets due to
+the hardcoded filename patterns and the raw cell index mapping logic.}
+\subsection{The Sparse Weight Matrix Approach}{
+
+The key innovation is building a sparse weight matrix that maps directly to
+the raw (unflipped) NetCDF storage layout. This avoids expensive raster
+transformations during processing:
+\enumerate{
+\item SPARTACUS NetCDF files store data top-to-bottom (row 0 = north),
+but \code{exactextractr} works with standard GIS orientation (row 0 = south).
+Flipping large rasters for each timestep is slow and memory-intensive.
+\item We flip the raster ONCE to get correct cell-polygon overlaps,
+then mathematically transform those cell indices back to raw NetCDF positions.
+The formula reverses the row order: \code{raw_row = (nrows - 1) - flipped_row}
+\item A sparse matrix W where \code{W[zone, cell] = coverage_fraction}.
+Computing zonal means becomes a single matrix multiplication:
+\code{zonal_means = W \%*\% cell_values} - highly optimized by the Matrix package.
+}
+
+This approach is ~10x faster than traditional methods because:
+\itemize{
+\item We extract only the cells we need (not the entire grid)
+\item Sparse matrix algebra replaces nested loops
+\item No per-timestep raster transformations
+}
+
+The primary functions are:
+\itemize{
+\item \code{\link{write_spartacus_precip}}: For precipitation (RR).
+\item \code{\link{write_spartacus_temp}}: For mean temperature (from TN and TX).
+}
+}
 }
 \keyword{internal}

@@ -672,5 +672,3 @@ run_cosero <- function(project_path,
 # 6 Utility Functions #####
 # Note: Direct list format is now preferred for settings
 # Example: list(STARTDATE = "2015 1 1 0 0", ENDDATE = "2015 12 31 23 59", SPINUP = 365)
-
-cat("COSERO Core Run Interface loaded\n")

@@ -1902,4 +1902,3 @@ export_sensitivity_results <- function(output_dir,
   cat("Results exported to:", output_dir, "\n")
 }
 
-cat("COSERO Sensitivity Analysis functions loaded\n")

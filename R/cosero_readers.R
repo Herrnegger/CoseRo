@@ -978,5 +978,3 @@ read_longterm_seasonal <- function(output_dir, quiet = FALSE) {
 
   return(df)
 }
-
-# Package load message removed - users can check loaded packages with packageVersion("COSERO")

@@ -9,75 +9,56 @@ write_spartacus_precip(
   output_dir,
   model_zones,
   nz_col = "NZ",
-  n_cores = NULL
+  years = NULL,
+  n_cores = 1,
+  write_binary = FALSE
 )
 }
 \arguments{
 \item{nc_dir}{Directory containing yearly SPARTACUS precipitation NetCDF files
-(pattern: SPARTACUS2-DAILY_RR_YYYY.nc)}
+(pattern: \code{SPARTACUS2-DAILY_RR_YYYY.nc})}
 
-\item{output_dir}{Directory where the output .txt file will be saved}
+\item{output_dir}{Directory where the output files will be saved}
 
-\item{model_zones}{sf object containing modeling zones, must include a zone ID column}
+\item{model_zones}{sf object containing modeling zones (polygons)}
 
-\item{nz_col}{Name of the column with zone IDs (default: "NZ"). Output will be
-sorted by this column to ensure consistent ordering.}
+\item{nz_col}{Name of the column with zone IDs (default: "NZ")}
 
-\item{n_cores}{Number of cores for parallel processing. If NULL (default),
-uses all available cores minus 1.}
+\item{years}{Optional integer vector of years to process (default: all available)}
+
+\item{n_cores}{Number of cores for parallel processing (default: 1)}
+
+\item{write_binary}{If TRUE, also writes a Fortran-compatible binary file}
 }
 \value{
-Invisibly returns the path to the output file
+Invisibly returns a list with paths to the generated files:
+\item{txt}{Path to the text output file}
+\item{bin}{Path to the binary file (or NULL if write_binary=FALSE)}
 }
 \description{
 Processes yearly SPARTACUS precipitation NetCDF files and writes a single
-text file in COSERO meteorological input format. The function performs
-spatial aggregation by zone using area-weighted means and handles large
-datasets efficiently through parallel processing and batched I/O.
+text file in COSERO meteorological input format, and optionally a binary file.
 }
 \details{
-\strong{Output Format:}
-The output file follows COSERO's meteorological input format:
-\itemize{
-\item Rows: One per day (chronologically ordered)
-\item Columns: YYYY MM DD HH mm NZ1 NZ2 ... NZn
-\item Values: Area-weighted mean precipitation (mm) per zone
-\item Filename: \verb{P_NZ_<start_year>_<end_year>.txt}
-}
+\strong{Note}: This function only works with SPARTACUS NetCDF files from GeoSphere
+Austria. The filename pattern \code{SPARTACUS2-DAILY_RR_YYYY.nc} is required.
 
-\strong{Performance:}
-\itemize{
-\item Uses exactextractr for fast area-weighted spatial aggregation
-\item Parallel processing with batched execution to optimize CPU and memory usage
-\item High-speed disk I/O using data.table::fwrite
-\item Processes 10+ years of daily 1km data in minutes
-}
-
-\strong{SPARTACUS Data:}
-\itemize{
-\item Source: GeoSphere Austria (https://doi.org/10.60669/m6w8-s545)
-\item Spatial Resolution: 1 km
-\item Temporal Resolution: Daily
-\item Projection: ETRS89 (EPSG:4258)
-\item Coverage: Austria (1961-present)
-}
+The sparse weight matrix approach (see \code{\link{spartacus_preprocessing}})
+enables processing of 60+ years of daily data.
 }
 \examples{
 \dontrun{
 library(sf)
-zones <- st_read("model_zones.shp")
+zones <- st_read("path/to/your/zones.shp")
 
-# Process precipitation data
+# Process precipitation data using 4 cores
 write_spartacus_precip(
-  nc_dir = "data/SPARTACUS_Daily/RR",
-  output_dir = "output/cosero_input",
+  nc_dir = "path/to/precip_ncs",
+  output_dir = "output/data",
   model_zones = zones,
-  nz_col = "NZ",
-  n_cores = 4
+  years = 2020:2021,
+  n_cores = 4,
+  write_binary = TRUE
 )
 }
-
-}
-\seealso{
-\code{\link{write_spartacus_temp}} for temperature preprocessing
 }

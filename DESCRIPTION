@@ -3,8 +3,11 @@ Type: Package
 Title: R Interface and Shiny Application for the COSERO Hydrological Model
 Version: 0.1.0
 Authors@R: c(
-    person("Mathew", "Herrnegger", role = c("aut", "cre")),
-    person("Ahmed", "Fiaz", role = "aut")
+    person("Mathew", "Herrnegger", 
+           role = c("aut", "cre"), 
+           email = "mathew.herrnegger@boku.ac.at"),
+    person("Ahmed", "Fiaz", 
+           role = "aut")
     )
 Description: Provides a complete R interface for the COSERO hydrological model,
     including automated model execution, fast output reading, interactive Shiny
@@ -40,7 +43,8 @@ Imports:
     sf (>= 1.0.0),
     exactextractr (>= 0.9.0),
     future (>= 1.33.0),
-    furrr (>= 0.3.0)
+    furrr (>= 0.3.0),
+    Matrix (>= 1.5.0)
 Suggests:
     testthat (>= 3.0.0),
     knitr,

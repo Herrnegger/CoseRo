@@ -15,3 +15,4 @@
 ^DEVELOPMENT_SUMMARY\.md$
 ^.*\.backup.*$
 ^.*backup_.*$
+^dev$
