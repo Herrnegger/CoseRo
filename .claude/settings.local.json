@@ -1,7 +1,8 @@
 {
   "permissions": {
     "allow": [
-      "Bash(devtools::document)"
+      "Bash(devtools::document)",
+      "Bash(Rscript:*)"
     ],
     "deny": [],
     "ask": []
