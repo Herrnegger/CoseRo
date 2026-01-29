@@ -9,10 +9,10 @@ Authors@R: c(
     person("Ahmed", "Fiaz", 
            role = "aut")
     )
-Description: Provides a complete R interface for the COSERO hydrological model,
+Description: Provides a R interface for the COSERO hydrological model,
     including automated model execution, fast output reading, interactive Shiny
     visualization app, and Sobol-based global sensitivity analysis framework.
-    Users can run COSERO simulations programmatically or through a modern web GUI.
+    Users can run COSERO simulations programmatically or through a web GUI.
 License: GPL (>= 3)
 Encoding: UTF-8
 LazyData: true

@@ -151,14 +151,14 @@ find_parameter_column <- function(param_name, col_names, return_all = FALSE) {
 #' @param max Vector of maximum physical values (same length as parameters)
 #' @param modification_type Vector of modification types (same length as parameters):
 #'   \itemize{
-#'     \item "relchg" - Relative change (multiply original by factor, preserves spatial patterns)
-#'     \item "abschg" - Absolute change (add value to original, preserves spatial differences)
+#'     \item "relchg" - Relative change (scales original value to match sampled target relative to default)
+#'     \item "abschg" - Absolute change (shifts original value to match sampled target relative to default)
 #'   }
-#' @param default Vector of default values (optional, same length as parameters)
+#' @param default Vector of default values (required for determining modification factors)
 #' @param description Vector of parameter descriptions (optional)
 #' @param category Vector of parameter categories (optional)
-#' @param sample_min Vector of minimum sampling values for Sobol (optional)
-#' @param sample_max Vector of maximum sampling values for Sobol (optional)
+#' @param sample_min Vector of minimum sampling values (defaults to physical min)
+#' @param sample_max Vector of maximum sampling values (defaults to physical max)
 #'
 #' @return Tibble with parameter bounds containing columns: parameter, description, min, max,
 #'   default, modification_type, category, sample_min, sample_max
@@ -219,12 +219,12 @@ create_custom_bounds <- function(parameters,
          paste(parameters[invalid_idx], collapse = ", "))
   }
 
-  # Set sampling ranges (for Sobol)
+  # Set sampling ranges (for Sobol) - Defaults to physical bounds (Target Value strategy)
   if (is.null(sample_min)) {
-    sample_min <- ifelse(modification_type == "relchg", 0.5, min)
+    sample_min <- min
   }
   if (is.null(sample_max)) {
-    sample_max <- ifelse(modification_type == "relchg", 2.0, max)
+    sample_max <- max
   }
 
   # Set defaults for optional parameters
@@ -357,12 +357,12 @@ load_parameter_bounds <- function(bounds_file = NULL,
     bounds <- bounds %>% filter(parameter %in% parameters)
   }
 
-  # Add sample_min/sample_max if missing
+  # Add sample_min/sample_max if missing - Defaults to physical bounds (Target Value strategy)
   if (!"sample_min" %in% colnames(bounds)) {
-    bounds$sample_min <- ifelse(bounds$modification_type == "relchg", 0.5, bounds$min)
+    bounds$sample_min <- bounds$min
   }
   if (!"sample_max" %in% colnames(bounds)) {
-    bounds$sample_max <- ifelse(bounds$modification_type == "relchg", 2.0, bounds$max)
+    bounds$sample_max <- bounds$max
   }
 
   cat("Loading parameter bounds from CSV (", nrow(bounds), " parameters)\n")
@@ -453,6 +453,7 @@ generate_sobol_samples <- function(par_bounds, n = 50, order = "first") {
 #' @param base_settings List of base COSERO settings (e.g., STARTDATE, ENDDATE, SPINUP)
 #' @param par_file Path to parameter file to modify (NULL = read from defaults.txt)
 #' @param quiet Logical. If TRUE, suppresses progress messages.
+#' @param statevar_source State variable source: 1 = read from parameter file (default), 2 = read from statevar.dmp file (warm start)
 #'
 #' @return List containing:
 #'   \item{results}{List of COSERO output data for each run}
@@ -475,14 +476,15 @@ generate_sobol_samples <- function(par_bounds, n = 50, order = "first") {
 #' )
 #'
 #' # Extract performance metrics
-#' nse <- extract_cosero_metrics(results, subbasin_id = "0001", metric = "NSE")
+#' nse <- extract_ensemble_metrics(results, subbasin_id = "0001", metric = "NSE")
 #' }
 run_cosero_ensemble <- function(project_path,
                                 parameter_sets,
                                 par_bounds,
                                 base_settings = NULL,
                                 par_file = NULL,
-                                quiet = FALSE) {
+                                quiet = FALSE,
+                                statevar_source = 1) {
 
   # Get parameter file from defaults.txt if not specified
   if (is.null(par_file)) {
@@ -516,18 +518,29 @@ run_cosero_ensemble <- function(project_path,
 
   # Read original parameter values once (detect format) - always quiet
   original_values <- tryCatch({
-    read_parameter_table(par_file, names(parameter_sets), zone_id = NULL, quiet = TRUE)
+    read_parameter_table(par_file, names(parameter_sets), zone_id = "all", quiet = TRUE) #zone_id = NULL check MH
   }, error = function(e) {
     read_parameter_file(par_file, names(parameter_sets))
   })
 
-  # Check if using tabular format (used for modify_parameter_table fallback)
-  # Don't pre-load - just detect format
+  # Pre-load parameter structure for fast modification
   param_file_structure <- tryCatch({
-    # Just check if it's tabular format, don't load the data
     test_read <- readLines(par_file, n = 3)
     if (length(test_read) >= 2 && grepl("\t", test_read[2])) {
-      list(is_tabular = TRUE)
+      # Tabular format - pre-load structure
+      first_line <- readLines(par_file, n = 1)
+      param_data_original <- read.table(
+        par_file, header = TRUE, sep = "\t", skip = 1,
+        stringsAsFactors = FALSE, check.names = FALSE, comment.char = ""
+      )
+      param_data_working <- param_data_original
+      
+      list(
+        is_tabular = TRUE,
+        first_line = first_line,
+        param_data_original = param_data_original,
+        param_data_working = param_data_working
+      )
     } else {
       list(is_tabular = FALSE)
     }
@@ -537,25 +550,32 @@ run_cosero_ensemble <- function(project_path,
 
   start_time <- Sys.time()
 
-  # Report initial message once
+  # Report initial message
   if (!quiet) {
     cat(sprintf("\nStarting %d COSERO simulations (sequential)\n", n_runs))
     param_names_str <- paste(names(parameter_sets), collapse = ", ")
-    cat(sprintf("Parameters: %s\n\n", param_names_str))
+    cat(sprintf("Parameters: %s\n", param_names_str))
+    if (param_file_structure$is_tabular) {
+      cat("Using fast parameter modification (in-memory)\n")
+    }
+    cat("\n")
   }
 
   for (i in 1:n_runs) {
-    # Restore original file for each run
-    file.copy(backup_file, par_file, overwrite = TRUE)
-
-    # Modify parameters (try tabular format first, fall back to simple format)
+    # Modify parameters using fast or slow path
     if (param_file_structure$is_tabular) {
+      # FAST: Use pre-loaded structure (no file I/O)
       tryCatch({
-        modify_parameter_table(par_file, parameter_sets[i, ], par_bounds, original_values, quiet = TRUE)
+        modify_parameter_table_fast(par_file, parameter_sets[i, ], par_bounds, 
+                                    original_values, param_file_structure, quiet = TRUE)
       }, error = function(e) {
+        # Fallback to slow method
+        file.copy(backup_file, par_file, overwrite = TRUE)
         modify_parameter_file(par_file, parameter_sets[i, ], par_bounds, original_values)
       })
     } else {
+      # SLOW: Simple format requires file copy
+      file.copy(backup_file, par_file, overwrite = TRUE)
       modify_parameter_file(par_file, parameter_sets[i, ], par_bounds, original_values)
     }
 
@@ -565,7 +585,8 @@ run_cosero_ensemble <- function(project_path,
         project_path = project_path,
         defaults_settings = base_settings,
         quiet = TRUE,
-        read_outputs = TRUE
+        read_outputs = TRUE,
+        statevar_source = statevar_source
       )
       results[[i]] <- result
 
@@ -676,23 +697,40 @@ modify_parameter_file <- function(par_file, params, par_bounds, original_values)
 
     mod_type <- par_bounds$modification_type[mod_type_idx[1]]
 
-    # Calculate final value based on modification type
+    # Calculate final value based on modification type using Spatial Mean strategy
+    # sampled_value is the Target Value (interpreted as catchment average)
+    
+    original <- original_values[[param_name]]
+    if (is.null(original)) {
+      stop("Original value not found for ", param_name)
+    }
+    
+    # Calculate spatial mean of original values (reference for modification)
+    spatial_mean <- mean(original, na.rm = TRUE)
+    
     if (mod_type == "relchg") {
-      # Multiply original by sampled_value (preserves spatial pattern)
-      original <- original_values[[param_name]]
-      if (!is.null(original)) {
-        final_value <- original * sampled_value
+      # Spatial Mean Strategy:
+      # Calculate factor to shift spatial mean to sampled target
+      # Factor = Sampled / SpatialMean, then New = Original × Factor
+      # This ensures catchment-average equals the sampled value
+      
+      if (abs(spatial_mean) < 1e-10) {
+        warning(sprintf("Parameter %s: Spatial mean is 0, cannot calculate relative change factor. Using factor 1.0.", param_name))
+        factor <- 1.0
       } else {
-        stop("Original value not found for ", param_name)
+        factor <- sampled_value / spatial_mean
       }
+      final_value <- original * factor
+      
     } else if (mod_type == "abschg") {
-      # Add sampled_value to original value (preserves spatial differences)
-      original <- original_values[[param_name]]
-      if (!is.null(original)) {
-        final_value <- original + sampled_value
-      } else {
-        stop("Original value not found for ", param_name)
-      }
+      # Spatial Mean Strategy:
+      # Calculate offset to shift spatial mean to sampled target
+      # Offset = Sampled - SpatialMean, then New = Original + Offset
+      # This ensures catchment-average equals the sampled value
+      
+      offset <- sampled_value - spatial_mean
+      final_value <- original + offset
+      
     } else {
       stop("Unknown modification type: ", mod_type, ". Use 'relchg' or 'abschg'.")
     }
@@ -840,10 +878,26 @@ modify_parameter_table_fast <- function(par_file, params, par_bounds, original_v
 
     # Apply modification to ALL matched columns
     for (param_col in param_cols) {
+      # Calculate spatial mean of original values for this column
+      spatial_mean <- mean(param_data[zone_mask, param_col], na.rm = TRUE)
+      
       if (mod_type == "relchg") {
-        param_data[zone_mask, param_col] <- param_data[zone_mask, param_col] * sampled_value
+        # Spatial Mean Strategy:
+        # Factor = Sampled / SpatialMean ensures catchment-average equals sampled value
+        if (abs(spatial_mean) < 1e-10) {
+           warning(sprintf("Parameter %s: Spatial mean is 0, cannot calculate relative change factor. Using factor 1.0.", param_name))
+           factor <- 1.0
+        } else {
+           factor <- sampled_value / spatial_mean
+        }
+        param_data[zone_mask, param_col] <- param_data[zone_mask, param_col] * factor
+        
       } else if (mod_type == "abschg") {
-        param_data[zone_mask, param_col] <- param_data[zone_mask, param_col] + sampled_value
+        # Spatial Mean Strategy:
+        # Offset = Sampled - SpatialMean ensures catchment-average equals sampled value
+        offset <- sampled_value - spatial_mean
+        param_data[zone_mask, param_col] <- param_data[zone_mask, param_col] + offset
+        
       } else {
         stop("Unknown modification type: ", mod_type, ". Use 'relchg' or 'abschg'.")
       }
@@ -941,13 +995,27 @@ modify_parameter_table <- function(par_file, params, par_bounds, original_values
 
     # Apply modification to ALL matched columns (e.g., all 12 months)
     for (param_col in param_cols) {
+      # Calculate spatial mean of original values for this column
+      spatial_mean <- mean(param_data[zone_mask, param_col], na.rm = TRUE)
+      
       # Calculate final value based on modification type
       if (mod_type == "relchg") {
-        # Multiply original by sampled_value (preserves spatial pattern)
-        param_data[zone_mask, param_col] <- param_data[zone_mask, param_col] * sampled_value
+        # Spatial Mean Strategy:
+        # Factor = Sampled / SpatialMean ensures catchment-average equals sampled value
+         if (abs(spatial_mean) < 1e-10) {
+           warning(sprintf("Parameter %s: Spatial mean is 0, cannot calculate relative change factor. Using factor 1.0.", param_name))
+           factor <- 1.0
+        } else {
+           factor <- sampled_value / spatial_mean
+        }
+        param_data[zone_mask, param_col] <- param_data[zone_mask, param_col] * factor
+        
       } else if (mod_type == "abschg") {
-        # Add sampled_value to original value (preserves spatial differences)
-        param_data[zone_mask, param_col] <- param_data[zone_mask, param_col] + sampled_value
+        # Spatial Mean Strategy:
+        # Offset = Sampled - SpatialMean ensures catchment-average equals sampled value
+        offset <- sampled_value - spatial_mean
+        param_data[zone_mask, param_col] <- param_data[zone_mask, param_col] + offset
+        
       } else {
         stop("Unknown modification type: ", mod_type, ". Use 'relchg' or 'abschg'.")
       }
@@ -1004,6 +1072,7 @@ modify_parameter_table <- function(par_file, params, par_bounds, original_values
 #' @param n_cores Number of parallel cores (NULL = detect automatically)
 #' @param temp_dir Directory for temporary project copies (NULL = use system temp)
 #' @param quiet Suppress output
+#' @param statevar_source State variable source: 1 = read from parameter file (default), 2 = read from statevar.dmp file (warm start)
 #' @return List with results and parameters
 #' @export
 run_cosero_ensemble_parallel <- function(project_path,
@@ -1012,7 +1081,8 @@ run_cosero_ensemble_parallel <- function(project_path,
                                          base_settings = NULL,
                                          n_cores = NULL,
                                          temp_dir = NULL,
-                                         quiet = FALSE) {
+                                         quiet = FALSE,
+                                         statevar_source = 1) {
 
   # Detect cores
   if (is.null(n_cores)) {
@@ -1116,13 +1186,13 @@ run_cosero_ensemble_parallel <- function(project_path,
   registerDoSNOW(cl)
 
   # SCALABLE BATCHED HYBRID FIX:
-  # - Create worker pool (n_cores directories)
+  # - Create thread pool (n_cores directories)
   # - Process runs in small batches to maintain parallelism
-  # - Each batch processed truly in parallel across workers
+  # - Each batch processed truly in parallel across threads
   # - Batch size chosen to balance parallelism vs overhead
 
-  n_workers <- min(n_cores, n_runs)
-  worker_dirs <- file.path(temp_dir, paste0("worker_", seq_len(n_workers)))
+  n_threads <- min(n_cores, n_runs)
+  thread_dirs <- file.path(temp_dir, paste0("thread_", seq_len(n_threads)))
 
   # Determine batch size based on total runs
   # Small batches = more parallelism, large batches = less overhead
@@ -1137,16 +1207,16 @@ run_cosero_ensemble_parallel <- function(project_path,
   n_batches <- ceiling(n_runs / batch_size)
 
   if (!quiet) {
-    cat("Preparing", n_workers, "worker directories...\n")
+    cat("Preparing", n_threads, "thread directories...\n")
     cat(sprintf("Will process %d runs in %d batches of ~%d runs each\n",
                 n_runs, n_batches, batch_size))
   }
 
   prep_start <- Sys.time()
 
-  # Create worker directories
-  for (w in 1:n_workers) {
-    wdir <- worker_dirs[w]
+  # Create thread directories
+  for (w in 1:n_threads) {
+    wdir <- thread_dirs[w]
 
     if (dir.exists(wdir)) unlink(wdir, recursive = TRUE)
     dir.create(wdir, recursive = TRUE, showWarnings = FALSE)
@@ -1173,14 +1243,14 @@ run_cosero_ensemble_parallel <- function(project_path,
       }
     }
 
-    if (!quiet) cat(sprintf("  Worker %d/%d ready\n", w, n_workers))
+    if (!quiet) cat(sprintf("  Thread %d/%d ready\n", w, n_threads))
   }
 
   prep_time <- difftime(Sys.time(), prep_start, units = "secs")
-  if (!quiet) cat(sprintf("Worker setup completed in %.1fs\n\n", prep_time))
+  if (!quiet) cat(sprintf("Thread setup completed in %.1fs\n\n", prep_time))
 
-  # Export to workers
-  clusterExport(cl, c("worker_dirs"), envir = environment())
+  # Export to threads
+  clusterExport(cl, c("thread_dirs", "statevar_source"), envir = environment())
 
   # Process in batches for scalability
   # KEY FIX: Ensure each run in a batch uses a UNIQUE worker (no conflicts)
@@ -1204,27 +1274,28 @@ run_cosero_ensemble_parallel <- function(project_path,
       # Get the actual run ID
       i <- batch_run_ids[batch_position]
 
-      # Assign worker based on position IN BATCH (ensures no conflicts within batch)
-      worker_idx <- ((batch_position - 1) %% length(worker_dirs)) + 1
-      worker_dir <- worker_dirs[worker_idx]
-      worker_par_file <- file.path(worker_dir, "input", par_filename)
+      # Assign thread based on position IN BATCH (ensures no conflicts within batch)
+      thread_idx <- ((batch_position - 1) %% length(thread_dirs)) + 1
+      thread_dir <- thread_dirs[thread_idx]
+      thread_par_file <- file.path(thread_dir, "input", par_filename)
 
       tryCatch({
         # Modify parameters
         tryCatch({
-          modify_parameter_table(worker_par_file, parameter_sets[i, ],
+          modify_parameter_table(thread_par_file, parameter_sets[i, ],
                               par_bounds, original_values, quiet = TRUE)
         }, error = function(e) {
-          modify_parameter_file(worker_par_file, parameter_sets[i, ],
+          modify_parameter_file(thread_par_file, parameter_sets[i, ],
                                par_bounds, original_values)
         })
 
         # Run COSERO
         result <- run_cosero(
-          project_path = worker_dir,
+          project_path = thread_dir,
           defaults_settings = base_settings,
           quiet = TRUE,
-          read_outputs = TRUE
+          read_outputs = TRUE,
+          statevar_source = statevar_source
         )
 
         return(result)
@@ -1274,8 +1345,8 @@ run_cosero_ensemble_parallel <- function(project_path,
 
   parallel_time <- as.numeric(difftime(Sys.time(), parallel_start, units = "secs"))
 
-  # CRITICAL MEMORY CLEANUP STEP 1: Stop cluster IMMEDIATELY to free worker memory
-  if (!quiet) cat("\nCleaning up parallel workers...\n")
+  # CRITICAL MEMORY CLEANUP STEP 1: Stop cluster IMMEDIATELY to free thread memory
+  if (!quiet) cat("\nCleaning up parallel threads...\n")
   stopCluster(cl)
   on.exit()
 
@@ -1323,14 +1394,14 @@ run_cosero_ensemble_parallel <- function(project_path,
   if (!quiet) cat("Removing run directories...\n")
   # Clean up in batches to avoid overwhelming the file system
   cleanup_batch_size <- 50
-  n_cleanup_batches <- ceiling(length(worker_dirs) / cleanup_batch_size)
+  n_cleanup_batches <- ceiling(length(thread_dirs) / cleanup_batch_size)
 
   for (batch_idx in 1:n_cleanup_batches) {
     start_idx <- (batch_idx - 1) * cleanup_batch_size + 1
-    end_idx <- min(batch_idx * cleanup_batch_size, length(worker_dirs))
+    end_idx <- min(batch_idx * cleanup_batch_size, length(thread_dirs))
 
     for (i in start_idx:end_idx) {
-      wdir <- worker_dirs[i]
+      wdir <- thread_dirs[i]
       if (dir.exists(wdir)) {
         tryCatch({
           unlink(wdir, recursive = TRUE, force = TRUE)
@@ -1420,12 +1491,12 @@ extract_ensemble_output <- function(ensemble_results,
   return(output_list)
 }
 
-#' Extract Pre-calculated Metrics from COSERO Statistics
+#' Extract Pre-calculated Metrics from Ensemble Statistics
 #'
 #' Extracts performance metrics (NSE, KGE, etc.) that were pre-calculated by COSERO
-#' and stored in statistics.txt. This is the recommended approach for standard metrics
-#' as it is faster and guaranteed to match COSERO's internal evaluation (including
-#' proper spin-up handling).
+#' and stored in statistics.txt for each ensemble run. This is the recommended approach
+#' for standard metrics as it is faster and guaranteed to match COSERO's internal
+#' evaluation (including proper spin-up handling).
 #'
 #' @param ensemble_results Results from run_cosero_ensemble() or run_cosero_ensemble_parallel()
 #' @param subbasin_id Subbasin ID to extract metrics for (e.g., "001" or 1)
@@ -1440,13 +1511,13 @@ extract_ensemble_output <- function(ensemble_results,
 #' results <- run_cosero_ensemble_parallel(project_path, parameter_sets, n_cores = 4)
 #'
 #' # Extract NSE for subbasin 001
-#' nse_values <- extract_cosero_metrics(results, subbasin_id = "001", metric = "NSE")
+#' nse_values <- extract_ensemble_metrics(results, subbasin_id = "001", metric = "NSE")
 #'
 #' # Use in sensitivity analysis
 #' sobol_indices <- calculate_sobol_indices(nse_values, sobol_samples)
 #' plot_sobol(sobol_indices)
 #' }
-extract_cosero_metrics <- function(ensemble_results, subbasin_id = "001",
+extract_ensemble_metrics <- function(ensemble_results, subbasin_id = "001",
                                    metric = "NSE", warn_nan = TRUE) {
 
   n_runs <- length(ensemble_results$results)
@@ -1491,27 +1562,34 @@ extract_cosero_metrics <- function(ensemble_results, subbasin_id = "001",
   return(metrics)
 }
 
-#' Calculate Performance Metrics for Ensemble (Custom Calculation)
+#' Calculate Performance Metrics for Ensemble
 #'
-#' Calculates performance metrics by comparing simulated (QSIM) against observed (QOBS) discharge
-#' from COSERO results. Automatically applies spin-up period from defaults_settings.
+#' Calculates performance metrics by comparing simulated (QSIM) against observed (QOBS)
+#' discharge from ensemble results. The spin-up period is automatically read from
+#' defaults_settings$SPINUP (if available) or can be manually specified via the spinup parameter.
 #'
-#' For standard metrics (NSE, KGE) already calculated by COSERO, use extract_cosero_metrics()
-#' instead - it's faster and guaranteed to match COSERO's evaluation.
+#' For standard metrics (NSE, KGE, BIAS, RMSE) already calculated by COSERO, use
+#' extract_ensemble_metrics() instead - it's faster and guaranteed to match COSERO's evaluation.
 #'
 #' @param ensemble_results Results from run_cosero_ensemble() or run_cosero_ensemble_parallel()
 #' @param subbasin_id Subbasin ID to calculate metrics for (e.g., "001" or 1)
 #' @param metric Performance metric ("NSE", "KGE", "RMSE", "PBIAS")
-#' @param spinup Spin-up period in timesteps (optional). If NULL, reads from defaults_settings$SPINUP
-#' @return Vector of metric values
+#' @param spinup Spin-up period in timesteps to exclude from metric calculation. If NULL (default),
+#'               automatically reads from defaults_settings$SPINUP. Set to 0 to use all timesteps.
+#' @return Numeric vector of metric values for each ensemble run
 #' @export
 #' @examples
 #' \dontrun{
 #' # Calculate PBIAS (auto-detects spin-up from settings)
 #' pbias <- calculate_ensemble_metrics(results, subbasin_id = "001", metric = "PBIAS")
 #'
-#' # Override spin-up period
-#' pbias <- calculate_ensemble_metrics(results, subbasin_id = "001", metric = "PBIAS", spinup = NULL)
+#' # Override spin-up period to 100 timesteps
+#' pbias <- calculate_ensemble_metrics(results, subbasin_id = "001",
+#'                                     metric = "PBIAS", spinup = 100)
+#'
+#' # Use all timesteps (no spin-up exclusion)
+#' nse_no_spinup <- calculate_ensemble_metrics(results, subbasin_id = "001",
+#'                                             metric = "NSE", spinup = 0)
 #' }
 calculate_ensemble_metrics <- function(ensemble_results,
                                        subbasin_id = "001",
@@ -1636,7 +1714,7 @@ aggregate_to_annual <- function(data) {
 #' @examples
 #' \dontrun{
 #' # After running ensemble and extracting metrics
-#' nse <- extract_cosero_metrics(results, subbasin_id = "0001", metric = "NSE")
+#' nse <- extract_ensemble_metrics(results, subbasin_id = "0001", metric = "NSE")
 #'
 #' # Calculate sensitivity indices
 #' sobol_ind <- calculate_sobol_indices(

@@ -35,7 +35,7 @@ run_cosero(project_path, defaults_settings = NULL, statevar_source = 1, tmmon_op
 ### Date/Time Settings
 - `STARTDATE`: Simulation start `"year month day hour minute"` (e.g., `"2015 1 1 0 0"`)
 - `ENDDATE`: Simulation end `"year month day hour minute"` (e.g., `"2022 12 31 23 59"`)
-- `SPINUP`: Warm-up period (timesteps, typically 365)
+- `SPINUP`: Warm-up period in timesteps (minimum: 1, typically 365 for cold start, 1 for warm start)
 
 ### Output Control
 - `OUTPUTTYPE`: Output level

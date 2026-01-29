@@ -11,7 +11,8 @@ run_cosero_ensemble_parallel(
   base_settings = NULL,
   n_cores = NULL,
   temp_dir = NULL,
-  quiet = FALSE
+  quiet = FALSE,
+  statevar_source = 1
 )
 }
 \arguments{
@@ -28,6 +29,8 @@ run_cosero_ensemble_parallel(
 \item{temp_dir}{Directory for temporary project copies (NULL = use system temp)}
 
 \item{quiet}{Suppress output}
+
+\item{statevar_source}{State variable source: 1 = read from parameter file (default), 2 = read from statevar.dmp file (warm start)}
 }
 \value{
 List with results and parameters

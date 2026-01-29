@@ -39,7 +39,7 @@ if (requireNamespace("COSERO", quietly = TRUE)) {
   source(file.path(pkg_dir, "R/cosero_run.R"))
 }
 
-# Default output directory (current working directory's output folder)
+# Default output directory (will be updated in server if project_dir is passed)
 default_output_dir <- normalizePath(file.path(getwd(), "output"), winslash = "/", mustWork = FALSE)
 
 # Define bslib theme ####
@@ -440,28 +440,31 @@ ui <- fluidPage(
               wellPanel(
                 style = "background-color: #f8f9fa; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1);",
                 fluidRow(
-                  column(3,
+                  column(6,
                     tags$div(class = "subsection-header", "Data Selection"),
                     textInput(
                       "output_dir",
                       "Output Directory:",
                       value = default_output_dir
                     ),
-                    actionButton(
-                      "load_data",
-                      "Load Data",
-                      icon = icon("folder-open"),
-                      class = "btn-primary"
-                    ),
-                    checkboxInput(
-                      "use_cache",
-                      "Use cache (faster)",
-                      value = TRUE
+                    fluidRow(
+                      column(6, actionButton(
+                        "load_data",
+                        "Load Data",
+                        icon = icon("folder-open"),
+                        class = "btn-primary",
+                        style = "width: 100%;"
+                      )),
+                      column(6, checkboxInput(
+                        "use_cache",
+                        "Use cache (faster)",
+                        value = TRUE
+                      ))
                     ),
                     tags$hr(),
                     verbatimTextOutput("status_text")
                   ),
-                  column(3,
+                  column(6,
                     tags$div(class = "subsection-header", "Display Options"),
                     uiOutput("subbasin_selector"),
                     fluidRow(
@@ -470,33 +473,7 @@ ui <- fluidPage(
                     ),
                     tags$br(),
                     uiOutput("date_range_slider"),
-                    actionButton("reset_zoom", "Reset Zoom", icon = icon("refresh"))
-                  ),
-                  column(3,
-                    tags$div(class = "subsection-header", "Storage Variables"),
-                    checkboxGroupInput(
-                      "wb_storage_vars",
-                      NULL,
-                      choices = c(
-                        "Soil Moisture Top (BW0)" = "BW0",
-                        "Groundwater state (BW3)" = "BW3",
-                        "Snow Water Equiv. (SWW)" = "SWW"
-                      ),
-                      selected = c("BW0", "BW3", "SWW")
-                    )
-                  ),
-                  column(3,
-                    tags$div(class = "subsection-header", "Cumulative Fluxes"),
-                    checkboxGroupInput(
-                      "wb_cumulative_vars",
-                      NULL,
-                      choices = c(
-                        "Cumulative Precipitation" = "P_cum",
-                        "Cumulative ET" = "ETAGEB_cum",
-                        "Cumulative Runoff" = "QABGEB_cum"
-                      ),
-                      selected = c("P_cum", "ETAGEB_cum", "QABGEB_cum")
-                    )
+                    actionButton("reset_zoom", "Reset Zoom", icon = icon("refresh"), style = "width: 100%;")
                   )
                 )
               )
@@ -547,7 +524,7 @@ ui <- fluidPage(
               wellPanel(
                 style = "background-color: #f8f9fa; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1);",
                 fluidRow(
-                  column(4,
+                  column(6,
                     tags$div(class = "subsection-header", "Display Options"),
                     uiOutput("subbasin_selector_seasonality"),
                     fluidRow(
@@ -555,20 +532,7 @@ ui <- fluidPage(
                       column(6, actionButton("next_subbasin_seasonality", "Next >", class = "btn-sm", style = "width: 100%;"))
                     )
                   ),
-                  column(4,
-                    tags$div(class = "subsection-header", "Storage Variables"),
-                    checkboxGroupInput(
-                      "wb_storage_vars_seasonality",
-                      NULL,
-                      choices = c(
-                        "Soil Moisture Top (BW0)" = "BW0",
-                        "Groundwater state (BW3)" = "BW3",
-                        "Snow Water Equiv. (SWW)" = "SWW"
-                      ),
-                      selected = c("BW0", "BW3", "SWW")
-                    )
-                  ),
-                  column(4,
+                  column(6,
                     tags$div(class = "subsection-header", "Status"),
                     verbatimTextOutput("status_text_seasonality")
                   )
@@ -621,8 +585,8 @@ ui <- fluidPage(
               wellPanel(
                 style = "background-color: #f8f9fa; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1);",
                 fluidRow(
-                  column(4,
-                    tags$div(class = "subsection-header", "Display Options"),
+                  column(6,
+                    tags$div(class = "subsection-header", "Display Options & Selection"),
                     radioButtons(
                       "stats_view_mode",
                       "View Mode:",
@@ -630,11 +594,9 @@ ui <- fluidPage(
                         "All Subbasins (by Objective Function)" = "all",
                         "Single Subbasin (all metrics)" = "single"
                       ),
-                      selected = "all"
-                    )
-                  ),
-                  column(4,
-                    tags$div(class = "subsection-header", "Selection"),
+                      selected = "all",
+                      inline = FALSE
+                    ),
                     # Shown when view_mode = "all"
                     conditionalPanel(
                       condition = "input.stats_view_mode == 'all'",
@@ -650,7 +612,7 @@ ui <- fluidPage(
                       )
                     )
                   ),
-                  column(4,
+                  column(6,
                     tags$div(class = "subsection-header", "Status"),
                     verbatimTextOutput("status_text_stats")
                   )
@@ -727,6 +689,47 @@ server <- function(input, output, session) {
     run_result = NULL,
     run_in_progress = FALSE
   )
+
+  # Auto-load project if passed from launch_cosero_app() ####
+  # Track if auto-load has already been executed
+  autoload_executed <- reactiveVal(FALSE)
+
+  observe({
+    # Only run once
+    if (autoload_executed()) return()
+
+    # Read project directory from global option
+    project_dir <- getOption("cosero_project_dir", default = NULL)
+
+    if (!is.null(project_dir)) {
+      message("[COSERO] Auto-loading project: ", project_dir)
+
+      # Update output directory to point to the project
+      output_dir <- normalizePath(file.path(project_dir, "output"), winslash = "/", mustWork = FALSE)
+      message("[COSERO] Setting output directory to: ", output_dir)
+
+      # Wait for UI to fully render before updating
+      shinyjs::delay(200, {
+        # Update both the COSERO Run tab project path and Time Series tab output path
+        updateTextInput(session, "run_project_path", value = project_dir)
+        updateTextInput(session, "output_dir", value = output_dir)
+        message("[COSERO] Updated run_project_path to: ", project_dir)
+        message("[COSERO] Updated output_dir to: ", output_dir)
+      })
+
+      # Auto-trigger load data button after a longer delay
+      shinyjs::delay(1500, {
+        message("[COSERO] Triggering auto-load...")
+        shinyjs::click("load_data")
+      })
+
+      # Mark as executed
+      autoload_executed(TRUE)
+    } else {
+      message("[COSERO] No project directory provided - starting with default settings")
+      autoload_executed(TRUE)
+    }
+  })
 
   # COSERO Run Tab Logic ####
 
@@ -1544,18 +1547,6 @@ server <- function(input, output, session) {
     }
   })
 
-  # Sync water balance variables between tabs ####
-  observeEvent(input$wb_storage_vars, {
-    if (!is.null(input$wb_storage_vars_seasonality)) {
-      updateCheckboxGroupInput(session, "wb_storage_vars_seasonality", selected = input$wb_storage_vars)
-    }
-  })
-
-  observeEvent(input$wb_storage_vars_seasonality, {
-    if (!is.null(input$wb_storage_vars)) {
-      updateCheckboxGroupInput(session, "wb_storage_vars", selected = input$wb_storage_vars_seasonality)
-    }
-  })
 
   # Status text outputs for each tab ####
   output$status_text_seasonality <- renderText({
@@ -1613,22 +1604,19 @@ server <- function(input, output, session) {
     plot_runoff_components(rv$subbasin_data$runoff_components, glacier_data = rv$subbasin_data$glacier)
   })
 
-  # Plot 4: Water Balance (only updates when variables change)
+  # Plot 4: Water Balance
   output$plot_water_balance <- renderPlotly({
     req(rv$subbasin_data)
 
-    # Combine selected storage and cumulative variables
-    selected_vars <- c(input$wb_storage_vars, input$wb_cumulative_vars)
-
-    # Determine if cumulative calculation is needed
-    needs_cumulative <- any(grepl("_cum$", selected_vars))
+    # Show all storage and cumulative variables (users can toggle in plotly legend)
+    selected_vars <- c("BW0", "BW3", "SWW", "P_cum", "ETAGEB_cum", "QABGEB_cum")
 
     plot_water_balance(
       rv$subbasin_data$water_balance,
       selected_vars = selected_vars,
-      show_cumulative = needs_cumulative
+      show_cumulative = TRUE
     )
-  }) %>% bindEvent(rv$subbasin_data, input$wb_storage_vars, input$wb_cumulative_vars)
+  }) %>% bindEvent(rv$subbasin_data)
 
 
   # Objective Function Selector ####
@@ -1781,12 +1769,10 @@ server <- function(input, output, session) {
 
   output$plot_seasonality_water_balance <- renderPlotly({
     req(seasonality_data())
-    # Only pass storage variables to water balance seasonality plot
-    # P and ET are now shown in precipitation panel, states only in water balance panel
-    # Use seasonality-specific variable selector (synced with time series)
-    storage_vars <- input$wb_storage_vars_seasonality %||% input$wb_storage_vars
+    # Show all storage variables (users can toggle in plotly legend)
+    storage_vars <- c("BW0", "BW3", "SWW")
     plot_seasonality_water_balance(seasonality_data()$water_balance, storage_vars)
-  }) %>% bindEvent(seasonality_data(), input$wb_storage_vars_seasonality, input$wb_storage_vars)
+  }) %>% bindEvent(seasonality_data())
 
   # Statistics Summary ####
   output$stats_summary <- renderText({
@@ -1882,12 +1868,11 @@ server <- function(input, output, session) {
     },
     content = function(file) {
       req(rv$subbasin_data)
-      selected_vars <- c(input$wb_storage_vars, input$wb_cumulative_vars)
-      needs_cumulative <- any(grepl("_cum$", selected_vars))
+      selected_vars <- c("BW0", "BW3", "SWW", "P_cum", "ETAGEB_cum", "QABGEB_cum")
       p <- plot_water_balance(
         rv$subbasin_data$water_balance,
         selected_vars = selected_vars,
-        show_cumulative = needs_cumulative
+        show_cumulative = TRUE
       )
       success <- export_plot_png(p, file, width = 1200, height = 400)
       if (!success) {

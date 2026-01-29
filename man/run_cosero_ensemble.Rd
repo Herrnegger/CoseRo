@@ -10,7 +10,8 @@ run_cosero_ensemble(
   par_bounds,
   base_settings = NULL,
   par_file = NULL,
-  quiet = FALSE
+  quiet = FALSE,
+  statevar_source = 1
 )
 }
 \arguments{
@@ -25,6 +26,8 @@ run_cosero_ensemble(
 \item{par_file}{Path to parameter file to modify (NULL = read from defaults.txt)}
 
 \item{quiet}{Logical. If TRUE, suppresses progress messages.}
+
+\item{statevar_source}{State variable source: 1 = read from parameter file (default), 2 = read from statevar.dmp file (warm start)}
 }
 \value{
 List containing:
@@ -51,6 +54,6 @@ results <- run_cosero_ensemble(
 )
 
 # Extract performance metrics
-nse <- extract_cosero_metrics(results, subbasin_id = "0001", metric = "NSE")
+nse <- extract_ensemble_metrics(results, subbasin_id = "0001", metric = "NSE")
 }
 }

@@ -274,13 +274,27 @@ calculate_cumulative <- function(data, vars) {
     if (var %in% colnames(data)) {
       cum_var <- paste0(var, "_cum")
 
-      # Diagnostic: Check if variable values look reasonable
+      # Diagnostic: Check if variable values look suspiciously high (might already be cumulative)
+      # Use different thresholds for different variables
       var_mean <- mean(data[[var]], na.rm = TRUE)
       var_max <- max(data[[var]], na.rm = TRUE)
-      if (var_max > 100) {
+
+      # Set threshold based on variable type
+      threshold <- if (var %in% c("P", "PRAIN", "PSNOW")) {
+        500  # Precipitation: 500mm/day is extreme but possible
+      } else if (var %in% c("ET", "ETA", "ETP", "ETVEG", "ETSOIL")) {
+        20   # Evapotranspiration: >20mm/day is suspicious
+      } else if (var %in% c("Q", "QAB", "QGES")) {
+        200  # Runoff in mm: 200mm/day would be extreme
+      } else {
+        100  # Default threshold for other variables
+      }
+
+      if (var_max > threshold) {
         warning(paste0("Variable ", var, " has suspiciously high values (mean: ",
                       round(var_mean, 2), ", max: ", round(var_max, 2),
-                      "). These might already be cumulative values!"))
+                      "). These might already be cumulative values!"),
+                call. = FALSE)
       }
 
       # Extract month and year from Date column

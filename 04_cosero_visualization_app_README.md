@@ -27,11 +27,6 @@ Or from RStudio: Open `04_cosero_visualization_app.R` and click "Run App"
 - Interactive slider to zoom into specific time periods
 - Reset button to return to full date range
 
-**Water Balance Variables:**
-- Checkboxes to select storage variables (BW0, BW3, SWW)
-- Checkboxes to select cumulative fluxes (P, ET, Runoff)
-- All units in mm
-
 **Precipitation Display:**
 - Radio buttons: Combined (stacked) or Separate (PRAIN/PSNOW)
 

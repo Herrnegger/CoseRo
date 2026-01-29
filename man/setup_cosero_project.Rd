@@ -15,95 +15,42 @@ setup_cosero_project(
 )
 }
 \arguments{
-\item{project_path}{Path where the new COSERO project should be created.
-Will be created if it doesn't exist.}
+\item{project_path}{Path where the new COSERO project should be created.}
 
-\item{cosero_bin_source}{Source of COSERO binaries. Options:
-\itemize{
-\item "package" (default): Extract from inst/extdata/cosero_binaries.zip
-\item Path to existing COSERO installation folder
-\item Path to a custom zip file with binaries
-}}
+\item{cosero_bin_source}{Source of COSERO binaries:
+"package" (default), path to folder with binaries, or path to zip file.}
 
-\item{create_defaults}{Logical. Create a defaults.txt file? (default: TRUE)}
+\item{create_defaults}{Create a defaults.txt file? (default: TRUE)}
 
-\item{defaults_settings}{Optional list of settings for defaults.txt.
-If NULL, uses default values. See \code{\link{show_cosero_defaults}} for options.}
+\item{defaults_settings}{Optional list of settings for defaults.txt.}
 
-\item{template}{Character. Optional template to use:
-\itemize{
-\item "minimal": Just folders and binaries (default)
-\item "example": Include example input files (if available in package)
-}}
+\item{template}{"minimal" (folders + binaries) or "example" (if available).}
 
-\item{overwrite}{Logical. Overwrite existing files? (default: FALSE)}
+\item{overwrite}{Overwrite existing files? (default: FALSE)}
 
-\item{quiet}{Logical. Suppress progress messages? (default: FALSE)}
+\item{quiet}{Suppress progress messages? (default: FALSE)}
 }
 \value{
-Invisibly returns a list with:
-\item{project_path}{Path to created project}
-\item{input_dir}{Path to input folder}
-\item{output_dir}{Path to output folder}
-\item{defaults_file}{Path to defaults.txt (if created)}
-\item{exe_path}{Path to COSERO.exe}
-\item{files_copied}{Character vector of copied files}
+Invisibly returns a list with paths and files copied.
 }
 \description{
-Creates a complete COSERO project structure with input/output folders,
-COSERO executable, required DLL files, and optional defaults.txt configuration.
+Creates an empty COSERO project structure with binaries and configuration.
+For a working example, use \code{\link{setup_cosero_project_example}} instead.
 }
 \details{
-This function creates the standard COSERO project structure:
-\preformatted{
-project_path/
-├── COSERO.exe
-├── *.dll (required DLL files)
-├── input/
-│   └── defaults.txt (if create_defaults = TRUE)
-└── output/
+Creates basic project structure with COSERO.exe, DLLs, and empty input/output
+folders. You'll need to add input files manually. See \code{\link{show_required_files}}
+for what's needed.
 }
-
-The COSERO binaries (exe and DLL files) are extracted from the package's
-bundled zip file. If you need a different COSERO version, specify
-cosero_bin_source as a path to your custom binaries.
-}
-\section{Binary Requirements}{
-
-The package expects a zip file at \code{inst/extdata/cosero_binaries.zip}
-containing at minimum:
-\itemize{
-\item COSERO.exe
-\item Any required DLL files
-}
-}
-
 \examples{
 \dontrun{
-# Create minimal project
-setup_cosero_project("C:/cosero_projects/my_catchment")
+# Most users should use the example instead:
+setup_cosero_project_example("C:/COSERO_example")
 
-# Create project with custom dates
+# Advanced: Create empty project with custom settings
 setup_cosero_project(
-  "C:/cosero_projects/my_catchment",
-  defaults_settings = list(
-    STARTDATE = "2020 1 1 0 0",
-    ENDDATE = "2022 12 31 23 59",
-    SPINUP = 365,
-    OUTPUTTYPE = 2
-  )
-)
-
-# Use binaries from existing COSERO installation
-setup_cosero_project(
-  "C:/cosero_projects/my_catchment",
-  cosero_bin_source = "C:/COSERO/bin"
-)
-
-# Use custom binary zip
-setup_cosero_project(
-  "C:/cosero_projects/my_catchment",
-  cosero_bin_source = "C:/downloads/cosero_v2024.zip"
+  "C:/my_project",
+  defaults_settings = list(STARTDATE = "2020 1 1 0 0", OUTPUTTYPE = 2)
 )
 }
 }

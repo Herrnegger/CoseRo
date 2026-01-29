@@ -73,7 +73,7 @@ result2 <- run_cosero(
   defaults_settings = list(
     STARTDATE = "2021 1 1 0 0",
     ENDDATE = "2025 12 31 0 0",
-    SPINUP = 0,                        # No spinup needed (warm start)
+    SPINUP = 1,                        # Minimum required (warm start minimizes spinup need)
     OUTPUTTYPE = 3
   ),
   statevar_source = 2,                 # Warm start from statevar.dmp
@@ -115,7 +115,7 @@ print(stats[, c("sb", "NSE", "KGE")])  # Show performance metrics
 |-----------|---------|-------------|
 | `STARTDATE` | `"yyyy mm dd hh mm"` | Simulation start date |
 | `ENDDATE` | `"yyyy mm dd hh mm"` | Simulation end date |
-| `SPINUP` | integer | Warm-up timesteps (typically 365) |
+| `SPINUP` | integer (≥1) | Warm-up timesteps (min: 1, typically 365) |
 | `OUTPUTTYPE` | 1, 2, 3 | Output detail level |
 | `statevar_source` | 1, 2 | 1=cold start, 2=warm start |
 | `tmmon_option` | 1, 2 | 1=from file, 2=calculate |
@@ -149,7 +149,7 @@ print(stats[, c("sb", "NSE", "KGE")])  # Show performance metrics
 
 ### Workflow 2: Multi-period continuous simulation
 1. **First period**: Use `statevar_source = 1`, creates statevar.dmp
-2. **Subsequent periods**: Use `statevar_source = 2`, `SPINUP = 0`
+2. **Subsequent periods**: Use `statevar_source = 2`, `SPINUP = 1` (minimum)
 3. Each run continues from previous state
 
 ### Workflow 3: Calibration/optimization
@@ -162,7 +162,7 @@ print(stats[, c("sb", "NSE", "KGE")])  # Show performance metrics
 ## Tips
 
 - **Dates**: Use format `"year month day hour minute"` (e.g., `"2020 1 1 0 0"`)
-- **Spinup**: Typically 365 days for cold starts, 0 for warm starts
+- **Spinup**: Minimum 1 timestep (required). Typically 365 for cold starts, 1 for warm starts
 - **Speed**: Disable `read_outputs` and use `quiet = TRUE` for batch runs
 - **State files**: statevar.dmp is saved to `output/` directory after each run
 - **Backups**: Configuration backups saved to `input/parameterfile_backup/`

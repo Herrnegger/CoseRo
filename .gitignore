@@ -69,3 +69,6 @@ run_cosero_temp.bat
 .DS_Store
 Thumbs.db
 CLAUDE.md
+
+/.quarto/
+**/*.quarto_ipynb

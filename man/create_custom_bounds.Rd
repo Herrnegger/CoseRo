@@ -25,19 +25,19 @@ create_custom_bounds(
 
 \item{modification_type}{Vector of modification types (same length as parameters):
 \itemize{
-\item "relchg" - Relative change (multiply original by factor, preserves spatial patterns)
-\item "abschg" - Absolute change (add value to original, preserves spatial differences)
+\item "relchg" - Relative change (scales original value to match sampled target relative to default)
+\item "abschg" - Absolute change (shifts original value to match sampled target relative to default)
 }}
 
-\item{default}{Vector of default values (optional, same length as parameters)}
+\item{default}{Vector of default values (required for determining modification factors)}
 
 \item{description}{Vector of parameter descriptions (optional)}
 
 \item{category}{Vector of parameter categories (optional)}
 
-\item{sample_min}{Vector of minimum sampling values for Sobol (optional)}
+\item{sample_min}{Vector of minimum sampling values (defaults to physical min)}
 
-\item{sample_max}{Vector of maximum sampling values for Sobol (optional)}
+\item{sample_max}{Vector of maximum sampling values (defaults to physical max)}
 }
 \value{
 Tibble with parameter bounds containing columns: parameter, description, min, max,

@@ -2,7 +2,7 @@
 % Please edit documentation in R/sensitivity_analysis.R
 \name{calculate_ensemble_metrics}
 \alias{calculate_ensemble_metrics}
-\title{Calculate Performance Metrics for Ensemble (Custom Calculation)}
+\title{Calculate Performance Metrics for Ensemble}
 \usage{
 calculate_ensemble_metrics(
   ensemble_results,
@@ -18,25 +18,32 @@ calculate_ensemble_metrics(
 
 \item{metric}{Performance metric ("NSE", "KGE", "RMSE", "PBIAS")}
 
-\item{spinup}{Spin-up period in timesteps (optional). If NULL, reads from defaults_settings$SPINUP}
+\item{spinup}{Spin-up period in timesteps to exclude from metric calculation. If NULL (default),
+automatically reads from defaults_settings$SPINUP. Set to 0 to use all timesteps.}
 }
 \value{
-Vector of metric values
+Numeric vector of metric values for each ensemble run
 }
 \description{
-Calculates performance metrics by comparing simulated (QSIM) against observed (QOBS) discharge
-from COSERO results. Automatically applies spin-up period from defaults_settings.
+Calculates performance metrics by comparing simulated (QSIM) against observed (QOBS)
+discharge from ensemble results. The spin-up period is automatically read from
+defaults_settings$SPINUP (if available) or can be manually specified via the spinup parameter.
 }
 \details{
-For standard metrics (NSE, KGE) already calculated by COSERO, use extract_cosero_metrics()
-instead - it's faster and guaranteed to match COSERO's evaluation.
+For standard metrics (NSE, KGE, BIAS, RMSE) already calculated by COSERO, use
+extract_ensemble_metrics() instead - it's faster and guaranteed to match COSERO's evaluation.
 }
 \examples{
 \dontrun{
 # Calculate PBIAS (auto-detects spin-up from settings)
 pbias <- calculate_ensemble_metrics(results, subbasin_id = "001", metric = "PBIAS")
 
-# Override spin-up period
-pbias <- calculate_ensemble_metrics(results, subbasin_id = "001", metric = "PBIAS", spinup = NULL)
+# Override spin-up period to 100 timesteps
+pbias <- calculate_ensemble_metrics(results, subbasin_id = "001",
+                                    metric = "PBIAS", spinup = 100)
+
+# Use all timesteps (no spin-up exclusion)
+nse_no_spinup <- calculate_ensemble_metrics(results, subbasin_id = "001",
+                                            metric = "NSE", spinup = 0)
 }
 }

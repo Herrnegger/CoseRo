@@ -3,88 +3,146 @@
 # Author: COSERO R Interface
 # Date: 2025-01-25
 
-#' Setup New COSERO Project Directory
+#' Setup Working Example COSERO Project
 #'
-#' Creates a complete COSERO project structure with input/output folders,
-#' COSERO executable, required DLL files, and optional defaults.txt configuration.
+#' Creates a ready-to-run COSERO project by extracting the complete Wildalpen
+#' example catchment (includes binaries, input files, and example outputs).
 #'
-#' @param project_path Path where the new COSERO project should be created.
-#'   Will be created if it doesn't exist.
-#' @param cosero_bin_source Source of COSERO binaries. Options:
-#'   \itemize{
-#'     \item "package" (default): Extract from inst/extdata/cosero_binaries.zip
-#'     \item Path to existing COSERO installation folder
-#'     \item Path to a custom zip file with binaries
-#'   }
-#' @param create_defaults Logical. Create a defaults.txt file? (default: TRUE)
-#' @param defaults_settings Optional list of settings for defaults.txt.
-#'   If NULL, uses default values. See \code{\link{show_cosero_defaults}} for options.
-#' @param template Character. Optional template to use:
-#'   \itemize{
-#'     \item "minimal": Just folders and binaries (default)
-#'     \item "example": Include example input files (if available in package)
-#'   }
-#' @param overwrite Logical. Overwrite existing files? (default: FALSE)
-#' @param quiet Logical. Suppress progress messages? (default: FALSE)
+#' @param project_path Path where the example project should be created.
+#' @param overwrite Overwrite existing files? (default: FALSE)
 #'
-#' @return Invisibly returns a list with:
-#'   \item{project_path}{Path to created project}
-#'   \item{input_dir}{Path to input folder}
-#'   \item{output_dir}{Path to output folder}
-#'   \item{defaults_file}{Path to defaults.txt (if created)}
-#'   \item{exe_path}{Path to COSERO.exe}
-#'   \item{files_copied}{Character vector of copied files}
+#' @return Invisibly returns the project path.
 #'
 #' @details
-#' This function creates the standard COSERO project structure:
-#' \preformatted{
-#' project_path/
-#' ├── COSERO.exe
-#' ├── *.dll (required DLL files)
-#' ├── input/
-#' │   └── defaults.txt (if create_defaults = TRUE)
-#' └── output/
-#' }
-#'
-#' The COSERO binaries (exe and DLL files) are extracted from the package's
-#' bundled zip file. If you need a different COSERO version, specify
-#' cosero_bin_source as a path to your custom binaries.
-#'
-#' @section Binary Requirements:
-#' The package expects a zip file at \code{inst/extdata/cosero_binaries.zip}
-#' containing at minimum:
+#' Extracts a complete working example (Wildalpen catchment) that includes:
 #' \itemize{
-#'   \item COSERO.exe
-#'   \item Any required DLL files
+#'   \item COSERO.exe and required DLLs
+#'   \item Complete input files (defaults.txt, para.txt, meteorological data)
+#'   \item Example output files
 #' }
+#'
+#' Use this to quickly test COSERO or as a template for your own projects.
 #'
 #' @export
 #' @examples
 #' \dontrun{
-#' # Create minimal project
-#' setup_cosero_project("C:/cosero_projects/my_catchment")
+#' # Create example project
+#' setup_cosero_project_example("C:/COSERO_example")
 #'
-#' # Create project with custom dates
-#' setup_cosero_project(
-#'   "C:/cosero_projects/my_catchment",
-#'   defaults_settings = list(
-#'     STARTDATE = "2020 1 1 0 0",
-#'     ENDDATE = "2022 12 31 23 59",
-#'     SPINUP = 365,
-#'     OUTPUTTYPE = 2
-#'   )
-#' )
+#' # Run the example
+#' run_cosero("C:/COSERO_example")
+#' }
+setup_cosero_project_example <- function(project_path, overwrite = FALSE) {
+
+  if (is.null(project_path) || nchar(project_path) == 0) {
+    stop("project_path must be specified")
+  }
+
+  # Find the example zip
+  zip_path <- system.file("extdata", "COSERO_Wildalpen.zip", package = "COSERO")
+
+  if (!file.exists(zip_path)) {
+    stop(
+      "Example project zip not found at: ", zip_path, "\n",
+      "The package installation may be incomplete."
+    )
+  }
+
+  # Create project directory if needed
+  if (!dir.exists(project_path)) {
+    dir.create(project_path, recursive = TRUE)
+    cat("Created project directory:", project_path, "\n")
+  }
+
+  # Extract to temp location first (zip contains COSERO/ subfolder)
+  cat("Extracting Wildalpen example project...\n")
+  temp_extract <- file.path(tempdir(), "cosero_extract_temp")
+  if (dir.exists(temp_extract)) unlink(temp_extract, recursive = TRUE)
+
+  utils::unzip(zip_path, exdir = temp_extract)
+
+  # Move contents from COSERO/ subfolder to project_path
+  source_dir <- file.path(temp_extract, "COSERO")
+  if (!dir.exists(source_dir)) {
+    # Fallback: maybe zip structure is different
+    source_dir <- temp_extract
+  }
+
+  # Copy all files and folders
+  all_items <- list.files(source_dir, full.names = TRUE, all.files = FALSE)
+  for (item in all_items) {
+    dest_item <- file.path(project_path, basename(item))
+    if (dir.exists(item)) {
+      # Copy directory recursively
+      if (dir.exists(dest_item) && !overwrite) {
+        cat("Skipping", basename(item), "(already exists)\n")
+      } else {
+        if (dir.exists(dest_item) && overwrite) {
+          unlink(dest_item, recursive = TRUE)
+        }
+        file.copy(item, project_path, recursive = TRUE, overwrite = overwrite)
+      }
+    } else {
+      # Copy file
+      if (file.exists(dest_item) && !overwrite) {
+        cat("Skipping", basename(item), "(already exists)\n")
+      } else {
+        file.copy(item, dest_item, overwrite = overwrite)
+      }
+    }
+  }
+
+  # Cleanup
+  unlink(temp_extract, recursive = TRUE)
+
+  cat("\n=== Example Project Ready ===\n")
+  cat("Location:", project_path, "\n")
+  cat("Catchment: Wildalpen (Austria)\n")
+  cat("\nContents:\n")
+  cat("  COSERO.exe + DLLs\n")
+  cat("  Input files: defaults.txt, MetDefaults.txt, para_ini.txt,\n")
+  cat("               P/T data (ASCII & binary), Qobs.txt, radmat.par\n")
+  cat("  Example outputs already included\n")
+  cat("\nTo visualize:\n")
+  cat("  launch_cosero_app('", project_path, "')\n", sep = "")
+  cat("\nTo run new simulation:\n")
+  cat("  run_cosero('", project_path, "')\n", sep = "")
+
+  invisible(project_path)
+}
+
+
+#' Setup New COSERO Project Directory
 #'
-#' # Use binaries from existing COSERO installation
-#' setup_cosero_project(
-#'   "C:/cosero_projects/my_catchment",
-#'   cosero_bin_source = "C:/COSERO/bin"
-#' )
+#' Creates an empty COSERO project structure with binaries and configuration.
+#' For a working example, use \code{\link{setup_cosero_project_example}} instead.
 #'
-#' # Use custom binary zip
+#' @param project_path Path where the new COSERO project should be created.
+#' @param cosero_bin_source Source of COSERO binaries:
+#'   "package" (default), path to folder with binaries, or path to zip file.
+#' @param create_defaults Create a defaults.txt file? (default: TRUE)
+#' @param defaults_settings Optional list of settings for defaults.txt.
+#' @param template "minimal" (folders + binaries) or "example" (if available).
+#' @param overwrite Overwrite existing files? (default: FALSE)
+#' @param quiet Suppress progress messages? (default: FALSE)
+#'
+#' @return Invisibly returns a list with paths and files copied.
+#'
+#' @details
+#' Creates basic project structure with COSERO.exe, DLLs, and empty input/output
+#' folders. You'll need to add input files manually. See \code{\link{show_required_files}}
+#' for what's needed.
+#'
+#' @export
+#' @examples
+#' \dontrun{
+#' # Most users should use the example instead:
+#' setup_cosero_project_example("C:/COSERO_example")
+#'
+#' # Advanced: Create empty project with custom settings
 #' setup_cosero_project(
-#'   "C:/cosero_projects/my_catchment",
-#'   cosero_bin_source = "C:/downloads/cosero_v2024.zip"
+#'   "C:/my_project",
+#'   defaults_settings = list(STARTDATE = "2020 1 1 0 0", OUTPUTTYPE = 2)
 #' )
 #' }
 setup_cosero_project <- function(project_path,
@@ -183,39 +241,19 @@ setup_cosero_project <- function(project_path,
   )
 
   if (!quiet) {
-    cat("\n=== COSERO Project Setup Complete ===\n")
-    cat("Project path:", project_path, "\n")
-    cat("Executable:  ", exe_path, "\n")
-    cat("Input folder:", input_dir, "\n")
-    cat("Output folder:", output_dir, "\n")
+    cat("\n=== COSERO Project Created ===\n")
+    cat("Location:", project_path, "\n")
+    cat("Executable:", exe_path, "\n")
     if (!is.null(defaults_file)) {
-      cat("Config file: ", defaults_file, "\n")
+      cat("Config:", defaults_file, "\n")
     }
-    cat("\n=== Required Input Files ===\n")
-    cat("Add these files to:", input_dir, "\n\n")
-
-    cat("REQUIRED:\n")
-    cat("  [✓] defaults.txt          - Model configuration (already created)\n")
-    cat("  [ ] MetDefaults.txt       - Meteorological input file definitions\n")
-    cat("                              Format: ASCII (0) or Binary (1), file paths for P/T/ETP\n")
-    cat("  [ ] para.txt              - Model parameters (169 columns × NZ+2 rows)\n")
-    cat("                              Contains zone definitions, parameters, initial states\n")
-    cat("  [ ] Precipitation file    - Time series data (YYYY MM DD hh mm [values per zone])\n")
-    cat("                              Filename defined in MetDefaults.txt as PRECFILE\n")
-    cat("  [ ] Temperature file      - Time series data (same format as precipitation)\n")
-    cat("                              Filename defined in MetDefaults.txt as TEMPFILE\n")
-    cat("  [ ] Runoff observations   - Observed discharge (YYYY MM DD hh mm [Q per subbasin])\n")
-    cat("                              Filename defined in defaults.txt as DATAFILE\n")
-
-    cat("\nOPTIONAL:\n")
-    cat("  [ ] ETP file              - Potential evapotranspiration (if ETPCONTROL=1)\n")
-    cat("  [ ] Additional inflow     - External inflow data (if ADDFLUXCONT=1)\n")
-    cat("  [ ] statevar.dmp          - Initial state variables (for warm start)\n")
-
-    cat("\nNext steps:\n")
-    cat("1. Add the required input files listed above\n")
-    cat("2. Run: run_cosero('", project_path, "')\n", sep = "")
-    cat("3. Results will be saved to:", output_dir, "\n")
+    cat("\nNext: Add required input files to:", input_dir, "\n")
+    cat("  - MetDefaults.txt (meteorological file definitions)\n")
+    cat("  - para.txt (model parameters)\n")
+    cat("  - Precipitation and temperature files\n")
+    cat("  - Runoff observations (DATAFILE)\n")
+    cat("\nSee: show_required_files() for details\n")
+    cat("Or use setup_cosero_project_example() for a working template\n")
   }
 
   invisible(result)

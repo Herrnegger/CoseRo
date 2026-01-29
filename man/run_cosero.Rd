@@ -8,7 +8,6 @@ run_cosero(
   project_path,
   defaults_settings = NULL,
   exe_name = "COSERO.exe",
-  timeout = 3600,
   capture_output = TRUE,
   read_outputs = TRUE,
   quiet = FALSE,
@@ -20,12 +19,30 @@ run_cosero(
 \arguments{
 \item{project_path}{Path to COSERO project directory (must contain COSERO.exe)}
 
-\item{defaults_settings}{Named list of configuration settings to override in defaults.txt
-(e.g., STARTDATE, ENDDATE, SPINUP, OUTPUTTYPE, etc.)}
+\item{defaults_settings}{Named list of configuration settings to override in defaults.txt.
+Available settings include:
+\itemize{
+\item \strong{STARTDATE} - Simulation start date as "YYYY MM DD HH MM" (e.g., "2015 1 1 0 0")
+\item \strong{ENDDATE} - Simulation end date as "YYYY MM DD HH MM" (e.g., "2015 12 31 23 59")
+\item \strong{SPINUP} - Spin-up period in timesteps (must be >= 1)
+\item \strong{OUTPUTTYPE} - Output detail level: 1 (basic), 2 (+glacier/met), 3 (+monitor/longterm)
+\item \strong{PARAFILE} - Parameter filename (e.g., "para.txt", "para_calibrated.txt")
+\item \strong{DATAFILE} - Input data filename (e.g., "data.txt")
+\item \strong{PROJECTINFO} - Project name/description
+\item \strong{IKL} - Integer parameter
+\item \strong{NCLASS} - Number of classes
+\item \strong{SC_FLAG} - Snow cover flag (0 or 1)
+\item \strong{RUNOFFFILE} - Runoff output filename
+\item \strong{STATSFILE} - Statistics output filename
+\item \strong{OPTFILE} - Optimization output filename
+\item \strong{WRITERASTERS} - Write raster outputs
+\item \strong{OUTCONTROL} - Output control flag
+\item \strong{ADDFLUXCONT} - Additional flux control flag (0 or 1)
+\item \strong{ADDFLUXFILE} - Additional flux filename
+}
+Use \code{\link{show_cosero_defaults}} to see all available parameters.}
 
 \item{exe_name}{Name of COSERO executable (default: "COSERO.exe")}
-
-\item{timeout}{Maximum execution time in seconds (legacy parameter, currently not used)}
 
 \item{capture_output}{Whether to capture and parse model output (default: TRUE)}
 
@@ -34,15 +51,19 @@ run_cosero(
 \item{quiet}{Suppress console output except for runtime and errors (default: FALSE)}
 
 \item{statevar_source}{State variable source:
-1 = read from parameter file (default)
-2 = read from statevar.dmp file (warm start from previous run)}
+\itemize{
+\item 1 = read from parameter file (cold start, default)
+\item 2 = read from statevar.dmp file (warm start from previous run)
+}}
 
 \item{tmmon_option}{Monthly temperature option:
-1 = use TMMon from parameter file (default)
-2 = calculate TMMon from input data}
+\itemize{
+\item 1 = use TMMon values from parameter file (default)
+\item 2 = calculate TMMon from input data
+}}
 
-\item{auto_answers}{Custom automation answers for COSERO prompts (advanced users only)
-Overrides statevar_source and tmmon_option if provided}
+\item{auto_answers}{Custom automation answers for COSERO prompts (advanced users only).
+Overrides statevar_source and tmmon_option if provided.}
 }
 \value{
 List containing:
@@ -50,39 +71,69 @@ List containing:
 \item{success}{Logical indicating simulation success}
 \item{has_error}{Logical indicating if error messages were detected}
 \item{error_message}{String with error message (NULL if no error)}
-\item{output_data}{Parsed output data (if read_outputs = TRUE and successful)}
+\item{output_data}{Parsed output data (if read_outputs = TRUE and successful).
+See \code{\link{read_cosero_output}} for structure details.}
+\item{defaults_settings}{Configuration settings used for this run}
 \item{project_path}{Original project path}
 \item{execution_time}{POSIXct timestamp of execution}
 \item{runtime_seconds}{Numeric runtime in seconds}
 }
 \description{
-Main interface for executing COSERO simulation with custom settings
+Main interface for executing COSERO simulation with custom settings.
+Automatically manages configuration files, executes the model, and optionally
+reads output files.
 }
 \examples{
 \dontrun{
-# Basic run with defaults
+# Basic run with existing defaults
 result <- run_cosero("path/to/project")
 
-# Run with custom date range
-result <- run_cosero("path/to/project",
-                    defaults_settings = list(
-                      STARTDATE = "2015 1 1 0 0",
-                      ENDDATE = "2015 12 31 23 59",
-                      SPINUP = 365
-                    ))
+# Standard run with date range and spin-up
+result <- run_cosero(
+  "path/to/project",
+  defaults_settings = list(
+    STARTDATE = "1991 1 1 0 0",
+    ENDDATE = "2020 12 31 0 0",
+    SPINUP = 365,
+    OUTPUTTYPE = 1
+  )
+)
 
-# Run using existing state variables from previous run (warm start)
-result <- run_cosero("path/to/project",
-                    statevar_source = 2)
+# Use custom parameter file
+result <- run_cosero(
+  "path/to/project",
+  defaults_settings = list(
+    STARTDATE = "1991 1 1 0 0",
+    ENDDATE = "2020 12 31 0 0",
+    SPINUP = 365,
+    OUTPUTTYPE = 1,
+    PARAFILE = "para_calibrated.txt"
+  ),
+  read_outputs = TRUE,
+  quiet = FALSE
+)
 
-# Run with calculated monthly temperature
-result <- run_cosero("path/to/project",
-                    tmmon_option = 2)
+# Warm start with calculated monthly temperature
+result <- run_cosero(
+  "path/to/project",
+  defaults_settings = list(
+    STARTDATE = "1991 1 1 0 0",
+    ENDDATE = "2020 12 31 0 0",
+    SPINUP = 1,
+    OUTPUTTYPE = 1
+  ),
+  statevar_source = 2,
+  tmmon_option = 2,
+  read_outputs = FALSE,
+  quiet = TRUE
+)
 
-# Combine both options
-result <- run_cosero("path/to/project",
-                    statevar_source = 2,
-                    tmmon_option = 2)
+# Extract metrics after run
+nse <- extract_run_metrics(result, subbasin_id = "001", metric = "NSE")
+kge <- extract_run_metrics(result, subbasin_id = "001", metric = "KGE")
+
+# Launch interactive app with project
+launch_cosero_app("path/to/project")
 }
 
 }

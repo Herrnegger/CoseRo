@@ -4,9 +4,12 @@
 \alias{launch_cosero_app}
 \title{Launch COSERO Workbench Shiny Application}
 \usage{
-launch_cosero_app(launch.browser = TRUE, port = NULL, ...)
+launch_cosero_app(project_dir = NULL, launch.browser = TRUE, port = NULL, ...)
 }
 \arguments{
+\item{project_dir}{Path to COSERO project directory. If provided, the app
+will automatically load output data from this directory.}
+
 \item{launch.browser}{Logical. If TRUE (default), opens the app in your
 default web browser. If FALSE, prints the URL to access the app.}
 
@@ -24,13 +27,13 @@ COSERO model simulations and visualizing outputs.
 }
 \examples{
 \dontrun{
-# Launch the app in your browser
+# Launch with example project
+launch_cosero_app("D:/COSERO_example")
+
+# Launch without pre-loading data
 launch_cosero_app()
 
 # Launch on specific port
 launch_cosero_app(port = 3838)
-
-# Launch without opening browser (prints URL)
-launch_cosero_app(launch.browser = FALSE)
 }
 }

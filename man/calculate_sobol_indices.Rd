@@ -27,7 +27,7 @@ model outputs and parameter samples. Uses bootstrap for uncertainty estimation.
 \examples{
 \dontrun{
 # After running ensemble and extracting metrics
-nse <- extract_cosero_metrics(results, subbasin_id = "0001", metric = "NSE")
+nse <- extract_ensemble_metrics(results, subbasin_id = "0001", metric = "NSE")
 
 # Calculate sensitivity indices
 sobol_ind <- calculate_sobol_indices(
