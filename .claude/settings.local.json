@@ -8,7 +8,9 @@
       "Bash(\"C:\\\\Program Files\\\\R\\\\R-4.5.2\\\\bin\\\\Rscript.exe\" -e \"devtools::load_all\\(\\); setup_cosero_project_example\\(''D:/temp_cosero_test'', overwrite = TRUE\\)\")",
       "Bash(\"C:\\\\Program Files\\\\R\\\\R-4.5.2\\\\bin\\\\Rscript.exe\" -e \"\ndevtools::load_all\\(\\)\nsetup_cosero_project_example\\(''D:/temp/COSERO_example'', overwrite = TRUE\\)\n\")",
       "Bash(dir:*)",
-      "Bash(R.exe:*)"
+      "Bash(R.exe:*)",
+      "WebSearch",
+      "WebFetch(domain:rdrr.io)"
     ],
     "deny": [],
     "ask": []

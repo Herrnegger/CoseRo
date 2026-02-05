@@ -3,10 +3,10 @@ Type: Package
 Title: R Interface and Shiny Application for the COSERO Hydrological Model
 Version: 0.1.0
 Authors@R: c(
-    person("Mathew", "Herrnegger", 
-           role = c("aut", "cre"), 
+    person("Mathew", "Herrnegger",
+           role = c("aut", "cre"),
            email = "mathew.herrnegger@boku.ac.at"),
-    person("Ahmed", "Fiaz", 
+    person("COSERO development team",
            role = "aut")
     )
 Description: Provides a R interface for the COSERO hydrological model,
@@ -50,7 +50,8 @@ Suggests:
     knitr,
     rmarkdown,
     kaleido,
-    webshot
+    webshot,
+    rtop
 RoxygenNote: 7.3.3
 Roxygen: list(markdown = TRUE)
 VignetteBuilder: knitr

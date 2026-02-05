@@ -9,15 +9,18 @@ extract_run_metrics(run_result, subbasin_id = "001", metric = "NSE")
 \arguments{
 \item{run_result}{Result object from run_cosero()}
 
-\item{subbasin_id}{Subbasin ID to extract metrics for (e.g., "001" or 1).
-Use "all" to extract metrics for all subbasins.}
+\item{subbasin_id}{Subbasin ID(s) to extract metrics for. Can be:
+\itemize{
+\item Single ID: "001" or 1 (returns scalar)
+\item Multiple IDs: c("001", "002") (returns named vector)
+\item "all": Extract for all subbasins (returns named vector)
+}}
 
 \item{metric}{Performance metric to extract ("NSE", "KGE", "BIAS", "RMSE", etc.)
 Must be a column name in the statistics data frame}
 }
 \value{
-If subbasin_id is specified: Single numeric value for that subbasin
-If subbasin_id = "all": Named vector with metrics for all subbasins
+Single numeric value (if one subbasin) or named vector (if multiple/all)
 }
 \description{
 Extracts performance metrics (NSE, KGE, etc.) from a single COSERO run's
@@ -26,13 +29,20 @@ as it uses COSERO's pre-calculated values.
 }
 \examples{
 \dontrun{
-# Run COSERO
 result <- run_cosero("path/to/project")
 
-# Extract NSE for subbasin 001
+# Single subbasin (returns scalar)
 nse <- extract_run_metrics(result, subbasin_id = "001", metric = "NSE")
 
-# Extract KGE for all subbasins
+# Multiple subbasins (returns named vector)
+nse_multi <- extract_run_metrics(result, c("001", "002"), "NSE")
+
+# All subbasins (returns named vector)
 kge_all <- extract_run_metrics(result, subbasin_id = "all", metric = "KGE")
 }
+}
+\seealso{
+\code{\link{calculate_run_metrics}} to calculate metrics from QSIM/QOBS (slower but more flexible),
+\code{\link{extract_ensemble_metrics}} for ensemble results,
+\code{\link{calculate_ensemble_metrics}} to calculate metrics for ensembles
 }

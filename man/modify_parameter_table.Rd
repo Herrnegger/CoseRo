@@ -10,7 +10,8 @@ modify_parameter_table(
   par_bounds,
   original_values,
   zones = NULL,
-  quiet = FALSE
+  quiet = FALSE,
+  add_timestamp = FALSE
 )
 }
 \arguments{
@@ -18,14 +19,45 @@ modify_parameter_table(
 
 \item{params}{Named vector/list of sampled parameter values}
 
-\item{par_bounds}{Parameter bounds table with modification types}
+\item{par_bounds}{Parameter bounds table with modification types (from
+\code{\link{load_parameter_bounds}} or \code{\link{create_optimization_bounds}})}
 
-\item{original_values}{Original parameter values from file}
+\item{original_values}{Original parameter values from file (from \code{\link{read_parameter_table}})}
 
 \item{zones}{Vector of zone IDs to modify (NULL = all zones)}
 
 \item{quiet}{Suppress messages}
+
+\item{add_timestamp}{Add modification timestamp to file header (default FALSE for loops)}
+}
+\value{
+Invisible NULL (called for side effects - modifies file in place)
 }
 \description{
-Modify COSERO Parameter File (Tabular Format)
+Modifies parameter values in a tabular COSERO parameter file. Applies spatial
+mean strategy for parameter modification: sampled values represent catchment-average
+targets, with modifications calculated relative to the spatial mean.
+}
+\examples{
+\dontrun{
+# Load parameter bounds
+par_bounds <- load_parameter_bounds(parameters = c("BETA", "M"))
+
+# Read original values
+original_values <- read_parameter_table("para.txt", c("BETA", "M"), zone_id = "all")
+
+# Define new parameter values
+new_params <- list(BETA = 5.0, M = 250)
+
+# Modify all zones
+modify_parameter_table("para.txt", new_params, par_bounds, original_values)
+
+# Modify only specific zones with timestamp
+modify_parameter_table("para.txt", new_params, par_bounds, original_values,
+                       zones = c(1, 2, 3), add_timestamp = TRUE)
+}
+}
+\seealso{
+\code{\link{read_parameter_table}} to read original values,
+\code{\link{write_cosero_parameters}} for lower-level file writing
 }

@@ -11,6 +11,9 @@ write_spartacus_temp(
   model_zones,
   nz_col = "NZ",
   years = NULL,
+  tmean_method = c("simple", "dall_amico", "parton_logan"),
+  tmin_weight = 0.5,
+  lat = NULL,
   n_cores = 1,
   write_binary = FALSE
 )
@@ -30,6 +33,26 @@ write_spartacus_temp(
 
 \item{years}{Optional integer vector of years to process (default: all available)}
 
+\item{tmean_method}{Method for calculating Tmean from Tmin/Tmax. Options:
+\itemize{
+\item \code{"simple"} (default): Weighted average using \code{tmin_weight}.
+Formula: \code{Tmean = tmin_weight * Tmin + (1 - tmin_weight) * Tmax}
+\item \code{"dall_amico"}: Day-length adjusted weights per Dall'Amico &
+Hornsteiner (2006). Weight varies seasonally (~0.33 winter, ~0.45 summer).
+Recommended for Alpine catchments.
+\item \code{"parton_logan"}: Full diurnal curve simulation per Parton &
+Logan (1981). Most accurate but slower. Uses sinusoidal daytime and
+exponential nighttime decay with coefficients optimized for complex terrain.
+}}
+
+\item{tmin_weight}{Weight for Tmin when \code{tmean_method = "simple"} (default: 0.5).
+Common values: 0.5 (arithmetic mean), 0.6 (recommended), 0.67 (snow-focused).}
+
+\item{lat}{Latitude in decimal degrees for day-length calculation (used by
+\code{"dall_amico"} and \code{"parton_logan"} methods). If NULL (default),
+automatically calculated from the center of the model_zones bounding box
+and reported to the user. Ignored for \code{tmean_method = "simple"}.}
+
 \item{n_cores}{Number of cores for parallel processing (default: 1)}
 
 \item{write_binary}{If TRUE, also writes a Fortran-compatible binary file}
@@ -41,33 +64,66 @@ Invisibly returns a list with paths to the generated files:
 }
 \description{
 Processes yearly SPARTACUS min/max temperature NetCDF files, calculates
-pixel-wise mean temperature (Tmean = (Tmin + Tmax) / 2), and writes output
-in COSERO meteorological input format.
+pixel-wise mean temperature, and writes output in COSERO meteorological input format.
 }
 \details{
 \strong{Note}: This function only works with SPARTACUS NetCDF files from GeoSphere
 Austria. The filename patterns \code{SPARTACUS2-DAILY_TN_YYYY.nc} (Tmin) and
 \code{SPARTACUS2-DAILY_TX_YYYY.nc} (Tmax) are required.
 
-Mean temperature is calculated at the pixel level BEFORE spatial aggregation:
-\code{Tmean[pixel] = (Tmin[pixel] + Tmax[pixel]) / 2}, then aggregated to zones.
+Mean temperature is calculated at the pixel level BEFORE spatial aggregation,
+then aggregated to zones.
 
-The sparse weight matrix approach (see \code{\link{spartacus_preprocessing}})
-enables processing of 60+ years of daily data.
+\strong{Why not use simple arithmetic mean?}
+The simple mean \code{(Tmin + Tmax) / 2} assumes symmetric diurnal temperature,
+but Tmin occurs briefly before sunrise while most of the day is closer to Tmin.
+This overestimates Tmean by 0.5-2°C, significantly affecting snow accumulation.
 }
 \examples{
 \dontrun{
 library(sf)
 zones <- st_read("path/to/your/zones.shp")
 
-# Process temperature with binary output
+# Method 1: Simple weighted mean (default)
 write_spartacus_temp(
   tmin_dir = "path/to/tmin",
   tmax_dir = "path/to/tmax",
   output_dir = "output/data",
   model_zones = zones,
-  n_cores = 4,
-  write_binary = TRUE
+  tmean_method = "simple",
+  tmin_weight = 0.6,  # 60\% Tmin, 40\% Tmax
+  n_cores = 4
+)
+
+# Method 2: Dall'Amico - day-length adjusted (recommended for Alps)
+write_spartacus_temp(
+  tmin_dir = "path/to/tmin",
+  tmax_dir = "path/to/tmax",
+  output_dir = "output/data",
+  model_zones = zones,
+  tmean_method = "dall_amico",
+  n_cores = 4
+)
+
+# Method 3: Parton-Logan - full diurnal simulation (most accurate, slower)
+write_spartacus_temp(
+  tmin_dir = "path/to/tmin",
+  tmax_dir = "path/to/tmax",
+  output_dir = "output/data",
+  model_zones = zones,
+  tmean_method = "parton_logan",
+  n_cores = 4
 )
 }
+}
+\references{
+Dall'Amico, M. & Hornsteiner, M. (2006). A simple method for estimating daily
+and monthly mean temperatures from daily minima and maxima. Int. J. Climatol.
+26(13):1929-1936. \doi{10.1002/joc.1363}
+
+Parton, W.J. & Logan, J.A. (1981). A model for diurnal variation in soil and
+air temperature. Agric. Meteorol. 23:205-216. \doi{10.1016/0002-1571(81)90105-9}
+
+The sparse weight matrix approach (see \code{\link{spartacus_preprocessing}})
+enables processing of 60+ years of daily data.
 }

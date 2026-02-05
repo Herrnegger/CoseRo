@@ -94,7 +94,7 @@ Useful links:
 
 Authors:
 \itemize{
-  \item Ahmed Fiaz
+  \item COSERO development team
 }
 
 }

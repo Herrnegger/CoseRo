@@ -516,37 +516,21 @@ run_cosero_ensemble <- function(project_path,
   backup_file <- file.path(backup_dir, paste0(basename(par_file), ".backup_", format(Sys.time(), "%Y%m%d_%H%M%S")))
   file.copy(par_file, backup_file)
 
-  # Read original parameter values once (detect format) - always quiet
-  original_values <- tryCatch({
-    read_parameter_table(par_file, names(parameter_sets), zone_id = "all", quiet = TRUE) #zone_id = NULL check MH
-  }, error = function(e) {
-    read_parameter_file(par_file, names(parameter_sets))
-  })
+  # Read original parameter values once
+  original_values <- read_parameter_table(par_file, names(parameter_sets), zone_id = "all", quiet = TRUE)
 
   # Pre-load parameter structure for fast modification
-  param_file_structure <- tryCatch({
-    test_read <- readLines(par_file, n = 3)
-    if (length(test_read) >= 2 && grepl("\t", test_read[2])) {
-      # Tabular format - pre-load structure
-      first_line <- readLines(par_file, n = 1)
-      param_data_original <- read.table(
-        par_file, header = TRUE, sep = "\t", skip = 1,
-        stringsAsFactors = FALSE, check.names = FALSE, comment.char = ""
-      )
-      param_data_working <- param_data_original
-      
-      list(
-        is_tabular = TRUE,
-        first_line = first_line,
-        param_data_original = param_data_original,
-        param_data_working = param_data_working
-      )
-    } else {
-      list(is_tabular = FALSE)
-    }
-  }, error = function(e) {
-    list(is_tabular = FALSE)
-  })
+  first_line <- readLines(par_file, n = 1)
+  param_data_original <- read.table(
+    par_file, header = TRUE, sep = "\t", skip = 1,
+    stringsAsFactors = FALSE, check.names = FALSE, comment.char = ""
+  )
+
+  param_file_structure <- list(
+    first_line = first_line,
+    param_data_original = param_data_original,
+    param_data_working = param_data_original
+  )
 
   start_time <- Sys.time()
 
@@ -555,29 +539,20 @@ run_cosero_ensemble <- function(project_path,
     cat(sprintf("\nStarting %d COSERO simulations (sequential)\n", n_runs))
     param_names_str <- paste(names(parameter_sets), collapse = ", ")
     cat(sprintf("Parameters: %s\n", param_names_str))
-    if (param_file_structure$is_tabular) {
-      cat("Using fast parameter modification (in-memory)\n")
-    }
+    cat("Using fast parameter modification (in-memory)\n")
     cat("\n")
   }
 
   for (i in 1:n_runs) {
-    # Modify parameters using fast or slow path
-    if (param_file_structure$is_tabular) {
-      # FAST: Use pre-loaded structure (no file I/O)
-      tryCatch({
-        modify_parameter_table_fast(par_file, parameter_sets[i, ], par_bounds, 
-                                    original_values, param_file_structure, quiet = TRUE)
-      }, error = function(e) {
-        # Fallback to slow method
-        file.copy(backup_file, par_file, overwrite = TRUE)
-        modify_parameter_file(par_file, parameter_sets[i, ], par_bounds, original_values)
-      })
-    } else {
-      # SLOW: Simple format requires file copy
+    # Modify parameters using pre-loaded structure (fast path)
+    tryCatch({
+      modify_parameter_table_fast(par_file, parameter_sets[i, ], par_bounds,
+                                  original_values, param_file_structure, quiet = TRUE)
+    }, error = function(e) {
+      # Fallback to standard method
       file.copy(backup_file, par_file, overwrite = TRUE)
-      modify_parameter_file(par_file, parameter_sets[i, ], par_bounds, original_values)
-    }
+      modify_parameter_table(par_file, parameter_sets[i, ], par_bounds, original_values, quiet = TRUE)
+    })
 
     # Run COSERO
     tryCatch({
@@ -646,123 +621,6 @@ run_cosero_ensemble <- function(project_path,
     parameter_sets = parameter_sets,
     runtime_minutes = as.numeric(runtime)
   ))
-}
-
-#' Read Parameter Values from File
-#'
-#' @param par_file Path to para.txt
-#' @param param_names Vector of parameter names to read
-#' @return Named list of parameter values
-read_parameter_file <- function(par_file, param_names) {
-  lines <- readLines(par_file)
-  values <- list()
-
-  for (param_name in param_names) {
-    # Case-insensitive search
-    param_idx <- grep(paste0("^", param_name, "\\b"), lines, ignore.case = TRUE)
-
-    if (length(param_idx) > 0) {
-      value_idx <- param_idx[1] + 1
-      if (value_idx <= length(lines)) {
-        values[[param_name]] <- as.numeric(lines[value_idx])
-      }
-    }
-  }
-
-  return(values)
-}
-
-#' Modify COSERO Parameter File
-#'
-#' @param par_file Path to para.txt
-#' @param params Named vector/list of sampled parameter values
-#' @param par_bounds Parameter bounds table with modification types
-#' @param original_values Original parameter values from file
-modify_parameter_file <- function(par_file, params, par_bounds, original_values) {
-  lines <- readLines(par_file)
-
-  for (param_name in names(params)) {
-    sampled_value <- params[[param_name]]
-
-    # Get modification type (case-insensitive)
-    mod_type_idx <- which(par_bounds$parameter == param_name)
-    if (length(mod_type_idx) == 0) {
-      mod_type_idx <- which(tolower(par_bounds$parameter) == tolower(param_name))
-    }
-
-    if (length(mod_type_idx) == 0) {
-      warning("Modification type not found for ", param_name)
-      next
-    }
-
-    mod_type <- par_bounds$modification_type[mod_type_idx[1]]
-
-    # Calculate final value based on modification type using Spatial Mean strategy
-    # sampled_value is the Target Value (interpreted as catchment average)
-    
-    original <- original_values[[param_name]]
-    if (is.null(original)) {
-      stop("Original value not found for ", param_name)
-    }
-    
-    # Calculate spatial mean of original values (reference for modification)
-    spatial_mean <- mean(original, na.rm = TRUE)
-    
-    if (mod_type == "relchg") {
-      # Spatial Mean Strategy:
-      # Calculate factor to shift spatial mean to sampled target
-      # Factor = Sampled / SpatialMean, then New = Original × Factor
-      # This ensures catchment-average equals the sampled value
-      
-      if (abs(spatial_mean) < 1e-10) {
-        warning(sprintf("Parameter %s: Spatial mean is 0, cannot calculate relative change factor. Using factor 1.0.", param_name))
-        factor <- 1.0
-      } else {
-        factor <- sampled_value / spatial_mean
-      }
-      final_value <- original * factor
-      
-    } else if (mod_type == "abschg") {
-      # Spatial Mean Strategy:
-      # Calculate offset to shift spatial mean to sampled target
-      # Offset = Sampled - SpatialMean, then New = Original + Offset
-      # This ensures catchment-average equals the sampled value
-      
-      offset <- sampled_value - spatial_mean
-      final_value <- original + offset
-      
-    } else {
-      stop("Unknown modification type: ", mod_type, ". Use 'relchg' or 'abschg'.")
-    }
-
-    # Apply physical bounds as safeguards
-    param_min <- par_bounds$min[mod_type_idx[1]]
-    param_max <- par_bounds$max[mod_type_idx[1]]
-
-    if (length(param_min) > 0 && length(param_max) > 0) {
-      # Clip to physical bounds
-      final_value_orig <- final_value
-      final_value <- max(param_min, min(param_max, final_value))
-
-      # Warn if clipping occurred
-      if (abs(final_value - final_value_orig) > 1e-10) {
-        warning(sprintf("Parameter %s: value %.3f clipped to physical bounds [%.3f, %.3f] -> %.3f",
-                        param_name, final_value_orig, param_min, param_max, final_value))
-      }
-    }
-
-    # Find parameter line and update (case-insensitive)
-    param_idx <- grep(paste0("^", param_name, "\\b"), lines, ignore.case = TRUE)
-
-    if (length(param_idx) > 0) {
-      value_idx <- param_idx[1] + 1
-      if (value_idx <= length(lines)) {
-        lines[value_idx] <- as.character(final_value)
-      }
-    }
-  }
-
-  writeLines(lines, par_file)
 }
 
 #' Read Parameter Values from Tabular File
@@ -915,32 +773,55 @@ modify_parameter_table_fast <- function(par_file, params, par_bounds, original_v
     }
   }
 
-  # Write back to file (only write operation per run!)
-  writeLines(first_line, par_file)
-  suppressWarnings({
-    write.table(
-      param_data,
-      file = par_file,
-      append = TRUE,
-      sep = "\t",
-      row.names = FALSE,
-      col.names = TRUE,
-      quote = FALSE,
-      na = ""
-    )
-  })
+  # Write back to file using write_cosero_parameters()
+  write_cosero_parameters(par_file, param_data,
+                          project_info = first_line,
+                          add_timestamp = FALSE,
+                          quiet = TRUE)
 }
 
 #' Modify COSERO Parameter File (Tabular Format)
 #'
+#' Modifies parameter values in a tabular COSERO parameter file. Applies spatial
+#' mean strategy for parameter modification: sampled values represent catchment-average
+#' targets, with modifications calculated relative to the spatial mean.
+#'
 #' @param par_file Path to parameter file
 #' @param params Named vector/list of sampled parameter values
-#' @param par_bounds Parameter bounds table with modification types
-#' @param original_values Original parameter values from file
+#' @param par_bounds Parameter bounds table with modification types (from
+#'   \code{\link{load_parameter_bounds}} or \code{\link{create_optimization_bounds}})
+#' @param original_values Original parameter values from file (from \code{\link{read_parameter_table}})
 #' @param zones Vector of zone IDs to modify (NULL = all zones)
 #' @param quiet Suppress messages
+#' @param add_timestamp Add modification timestamp to file header (default FALSE for loops)
+#'
+#' @return Invisible NULL (called for side effects - modifies file in place)
+#'
+#' @seealso
+#' \code{\link{read_parameter_table}} to read original values,
+#' \code{\link{write_cosero_parameters}} for lower-level file writing
+#'
 #' @export
-modify_parameter_table <- function(par_file, params, par_bounds, original_values, zones = NULL, quiet = FALSE) {
+#' @examples
+#' \dontrun{
+#' # Load parameter bounds
+#' par_bounds <- load_parameter_bounds(parameters = c("BETA", "M"))
+#'
+#' # Read original values
+#' original_values <- read_parameter_table("para.txt", c("BETA", "M"), zone_id = "all")
+#'
+#' # Define new parameter values
+#' new_params <- list(BETA = 5.0, M = 250)
+#'
+#' # Modify all zones
+#' modify_parameter_table("para.txt", new_params, par_bounds, original_values)
+#'
+#' # Modify only specific zones with timestamp
+#' modify_parameter_table("para.txt", new_params, par_bounds, original_values,
+#'                        zones = c(1, 2, 3), add_timestamp = TRUE)
+#' }
+modify_parameter_table <- function(par_file, params, par_bounds, original_values,
+                                   zones = NULL, quiet = FALSE, add_timestamp = FALSE) {
   # Read first line (project info)
   first_line <- readLines(par_file, n = 1)
 
@@ -1043,24 +924,11 @@ modify_parameter_table <- function(par_file, params, par_bounds, original_values
     }
   }
 
-  # Write back to file
-  # Write first line
-  writeLines(first_line, par_file)
-
-  # Append parameter table with column names
-  # Suppress expected warning about appending column names
-  suppressWarnings({
-    write.table(
-      param_data,
-      file = par_file,
-      append = TRUE,
-      sep = "\t",
-      row.names = FALSE,
-      col.names = TRUE,
-      quote = FALSE,
-      na = ""
-    )
-  })
+  # Write back to file using write_cosero_parameters()
+  write_cosero_parameters(par_file, param_data,
+                          project_info = first_line,
+                          add_timestamp = add_timestamp,
+                          quiet = TRUE)
 }
 
 #' Run COSERO Ensemble in Parallel
@@ -1132,8 +1000,7 @@ run_cosero_ensemble_parallel <- function(project_path,
   # Export necessary objects and functions to cluster
   clusterExport(cl, c("project_path", "parameter_sets", "par_bounds", "base_settings",
                       "par_filename", "original_values", "temp_dir",
-                      "modify_parameter_file", "modify_parameter_table",
-                      "read_parameter_file", "read_parameter_table", "find_parameter_column"),
+                      "modify_parameter_table", "read_parameter_table", "find_parameter_column"),
                 envir = environment())
 
   # Get package path for workers to load from
@@ -1281,13 +1148,8 @@ run_cosero_ensemble_parallel <- function(project_path,
 
       tryCatch({
         # Modify parameters
-        tryCatch({
-          modify_parameter_table(thread_par_file, parameter_sets[i, ],
-                              par_bounds, original_values, quiet = TRUE)
-        }, error = function(e) {
-          modify_parameter_file(thread_par_file, parameter_sets[i, ],
-                               par_bounds, original_values)
-        })
+        modify_parameter_table(thread_par_file, parameter_sets[i, ],
+                               par_bounds, original_values, quiet = TRUE)
 
         # Run COSERO
         result <- run_cosero(
@@ -1504,6 +1366,12 @@ extract_ensemble_output <- function(ensemble_results,
 #'               Must be a column name in the statistics data frame
 #' @param warn_nan If TRUE, warns when metrics are NaN (no observed data for subbasin)
 #' @return Numeric vector of metric values for each ensemble run
+#'
+#' @seealso
+#' \code{\link{calculate_ensemble_metrics}} to calculate metrics from QSIM/QOBS (slower but more flexible),
+#' \code{\link{extract_run_metrics}} for single run results,
+#' \code{\link{calculate_run_metrics}} to calculate metrics for single runs
+#'
 #' @export
 #' @examples
 #' \dontrun{
@@ -1569,7 +1437,8 @@ extract_ensemble_metrics <- function(ensemble_results, subbasin_id = "001",
 #' defaults_settings$SPINUP (if available) or can be manually specified via the spinup parameter.
 #'
 #' For standard metrics (NSE, KGE, BIAS, RMSE) already calculated by COSERO, use
-#' extract_ensemble_metrics() instead - it's faster and guaranteed to match COSERO's evaluation.
+#' \code{\link{extract_ensemble_metrics}} instead - it's faster and guaranteed to match
+#' COSERO's evaluation.
 #'
 #' @param ensemble_results Results from run_cosero_ensemble() or run_cosero_ensemble_parallel()
 #' @param subbasin_id Subbasin ID to calculate metrics for (e.g., "001" or 1)
@@ -1577,6 +1446,12 @@ extract_ensemble_metrics <- function(ensemble_results, subbasin_id = "001",
 #' @param spinup Spin-up period in timesteps to exclude from metric calculation. If NULL (default),
 #'               automatically reads from defaults_settings$SPINUP. Set to 0 to use all timesteps.
 #' @return Numeric vector of metric values for each ensemble run
+#'
+#' @seealso
+#' \code{\link{extract_ensemble_metrics}} to extract pre-calculated metrics (faster),
+#' \code{\link{extract_run_metrics}} for single run results,
+#' \code{\link{calculate_run_metrics}} to calculate metrics for single runs
+#'
 #' @export
 #' @examples
 #' \dontrun{

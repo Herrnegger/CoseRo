@@ -13,7 +13,8 @@ run_cosero(
   quiet = FALSE,
   statevar_source = 1,
   tmmon_option = 1,
-  auto_answers = NULL
+  auto_answers = NULL,
+  create_backup = TRUE
 )
 }
 \arguments{
@@ -64,6 +65,9 @@ Use \code{\link{show_cosero_defaults}} to see all available parameters.}
 
 \item{auto_answers}{Custom automation answers for COSERO prompts (advanced users only).
 Overrides statevar_source and tmmon_option if provided.}
+
+\item{create_backup}{If TRUE (default), creates backup of defaults.txt in
+parameterfile_backup folder. Set to FALSE during optimization runs.}
 }
 \value{
 List containing:

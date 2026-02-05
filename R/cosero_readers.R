@@ -457,6 +457,79 @@ read_cosero_parameters <- function(param_file, skip_lines = 1, quiet = FALSE) {
   return(param_data)
 }
 
+#' Write COSERO Parameter File
+#'
+#' Writes a parameter data frame to a COSERO parameter file in tabular format.
+#' Automatically adds a timestamp to track when the file was last modified.
+#'
+#' @param par_file Path to the output parameter file
+#' @param param_data Data frame with parameter values (from read_cosero_parameters or modified)
+#' @param project_info Character string for the first line of the file. If NULL (default),
+#'   reads the existing first line from par_file (if it exists) or uses a generic header.
+#' @param add_timestamp Logical. If TRUE (default), appends a timestamp to the project_info.
+#' @param quiet Suppress messages
+#'
+#' @return Invisible NULL (called for side effects)
+#' @export
+#' @examples
+#' \dontrun{
+#' # Read, modify, and write
+#' params <- read_cosero_parameters("para.txt")
+#' params$BETA_ <- params$BETA_ * 1.1
+#' write_cosero_parameters("para_modified.txt", params)
+#'
+#' # Write with custom project info
+#' write_cosero_parameters("para.txt", params,
+#'                         project_info = "Wildalpen optimized")
+#'
+#' # Write without timestamp
+#' write_cosero_parameters("para.txt", params, add_timestamp = FALSE)
+#' }
+write_cosero_parameters <- function(par_file, param_data,
+                                    project_info = NULL,
+                                    add_timestamp = TRUE,
+                                    quiet = FALSE) {
+
+  # Get project_info from existing file if not provided
+  if (is.null(project_info)) {
+    if (file.exists(par_file)) {
+      project_info <- readLines(par_file, n = 1, warn = FALSE)
+      # Remove any existing timestamp pattern to avoid duplication
+      project_info <- sub("\\s*\\[Modified:.*\\]\\s*$", "", project_info)
+    } else {
+      project_info <- "COSERO Parameter File"
+    }
+  }
+
+  # Add timestamp if requested
+  if (add_timestamp) {
+    timestamp <- format(Sys.time(), "%Y-%m-%d %H:%M:%S")
+    project_info <- paste0(project_info, " [Modified: ", timestamp, "]")
+  }
+
+  # Write first line (project info)
+  writeLines(project_info, par_file)
+
+  # Append parameter table with headers
+  suppressWarnings({
+    write.table(
+      param_data,
+      file = par_file,
+      append = TRUE,
+      sep = "\t",
+      row.names = FALSE,
+      col.names = TRUE,
+      quote = FALSE
+    )
+  })
+
+  if (!quiet) {
+    cat("Wrote", nrow(param_data), "zones to:", par_file, "\n")
+  }
+
+  invisible(NULL)
+}
+
 parse_parameter_data <- function(data_lines, col_names) {
   n_rows <- length(data_lines)
   n_cols <- length(col_names)

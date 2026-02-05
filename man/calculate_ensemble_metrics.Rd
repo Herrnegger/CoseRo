@@ -31,7 +31,8 @@ defaults_settings$SPINUP (if available) or can be manually specified via the spi
 }
 \details{
 For standard metrics (NSE, KGE, BIAS, RMSE) already calculated by COSERO, use
-extract_ensemble_metrics() instead - it's faster and guaranteed to match COSERO's evaluation.
+\code{\link{extract_ensemble_metrics}} instead - it's faster and guaranteed to match
+COSERO's evaluation.
 }
 \examples{
 \dontrun{
@@ -46,4 +47,9 @@ pbias <- calculate_ensemble_metrics(results, subbasin_id = "001",
 nse_no_spinup <- calculate_ensemble_metrics(results, subbasin_id = "001",
                                             metric = "NSE", spinup = 0)
 }
+}
+\seealso{
+\code{\link{extract_ensemble_metrics}} to extract pre-calculated metrics (faster),
+\code{\link{extract_run_metrics}} for single run results,
+\code{\link{calculate_run_metrics}} to calculate metrics for single runs
 }

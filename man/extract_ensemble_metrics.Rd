@@ -43,3 +43,8 @@ sobol_indices <- calculate_sobol_indices(nse_values, sobol_samples)
 plot_sobol(sobol_indices)
 }
 }
+\seealso{
+\code{\link{calculate_ensemble_metrics}} to calculate metrics from QSIM/QOBS (slower but more flexible),
+\code{\link{extract_run_metrics}} for single run results,
+\code{\link{calculate_run_metrics}} to calculate metrics for single runs
+}

@@ -322,16 +322,19 @@ read_defaults <- function(defaults_file) {
 }
 
 # 3.2 Project Setup #####
-setup_project_directories <- function(project_path, defaults_settings = NULL, timestamp, quiet = FALSE) {
+setup_project_directories <- function(project_path, defaults_settings = NULL, timestamp,
+                                      quiet = FALSE, create_backup = TRUE) {
   input_dir <- file.path(project_path, "input")
   output_dir <- file.path(project_path, "output")
 
   if (!dir.exists(input_dir)) dir.create(input_dir, recursive = TRUE)
   if (!dir.exists(output_dir)) dir.create(output_dir, recursive = TRUE)
 
-  # Create backup folder for parameter files
-  backup_dir <- file.path(input_dir, "parameterfile_backup")
-  if (!dir.exists(backup_dir)) dir.create(backup_dir, recursive = TRUE)
+  backup_dir <- NULL
+  if (create_backup) {
+    backup_dir <- file.path(input_dir, "parameterfile_backup")
+    if (!dir.exists(backup_dir)) dir.create(backup_dir, recursive = TRUE)
+  }
 
   defaults_file <- file.path(input_dir, "defaults.txt")
   current_settings <- NULL
@@ -339,14 +342,17 @@ setup_project_directories <- function(project_path, defaults_settings = NULL, ti
   if (file.exists(defaults_file)) {
     current_settings <- read_defaults(defaults_file)
     if (!is.null(defaults_settings)) {
-      backup_file <- file.path(backup_dir, paste0("defaults_backup_", timestamp, ".txt"))
-      file.copy(defaults_file, backup_file)
-      if (!quiet) cat("Backed up defaults.txt to:", backup_file, "\n")
+      if (create_backup) {
+        backup_file <- file.path(backup_dir, paste0("defaults.txt.backup_", timestamp))
+        file.copy(defaults_file, backup_file)
+        if (!quiet) cat("Backed up defaults.txt to:", backup_file, "\n")
+      }
       modify_defaults(defaults_file, defaults_settings, quiet)
-      # Save the settings used for this run
-      used_file <- file.path(backup_dir, paste0("defaults_used_", timestamp, ".txt"))
-      file.copy(defaults_file, used_file)
-      if (!quiet) cat("Saved used settings to:", used_file, "\n")
+      if (create_backup) {
+        used_file <- file.path(backup_dir, paste0("defaults.txt.used_", timestamp))
+        file.copy(defaults_file, used_file)
+        if (!quiet) cat("Saved used settings to:", used_file, "\n")
+      }
     }
   } else {
     if (!is.null(defaults_settings)) {
@@ -488,6 +494,8 @@ execute_cosero <- function(project_path, exe_name, commands_file, capture_output
 #'        }
 #' @param auto_answers Custom automation answers for COSERO prompts (advanced users only).
 #'        Overrides statevar_source and tmmon_option if provided.
+#' @param create_backup If TRUE (default), creates backup of defaults.txt in
+#'        parameterfile_backup folder. Set to FALSE during optimization runs.
 #'
 #' @return List containing:
 #'   \item{exit_code}{Integer exit code (0 = success)}
@@ -563,7 +571,8 @@ run_cosero <- function(project_path,
                       quiet = FALSE,
                       statevar_source = 1,
                       tmmon_option = 1,
-                      auto_answers = NULL) {
+                      auto_answers = NULL,
+                      create_backup = TRUE) {
 
   # Validate inputs
   if (!dir.exists(project_path)) stop("Project path does not exist: ", project_path)
@@ -631,7 +640,7 @@ run_cosero <- function(project_path,
 
   # Setup project
   timestamp <- format(Sys.time(), "%Y%m%d_%H%M%S")
-  project_setup <- setup_project_directories(project_path, defaults_settings, timestamp, quiet)
+  project_setup <- setup_project_directories(project_path, defaults_settings, timestamp, quiet, create_backup)
 
   # Build auto_answers from parameters
   if (is.null(auto_answers)) {
@@ -745,24 +754,32 @@ run_cosero <- function(project_path,
 #' as it uses COSERO's pre-calculated values.
 #'
 #' @param run_result Result object from run_cosero()
-#' @param subbasin_id Subbasin ID to extract metrics for (e.g., "001" or 1).
-#'        Use "all" to extract metrics for all subbasins.
+#' @param subbasin_id Subbasin ID(s) to extract metrics for. Can be:
+#'   - Single ID: "001" or 1 (returns scalar)
+#'   - Multiple IDs: c("001", "002") (returns named vector)
+#'   - "all": Extract for all subbasins (returns named vector)
 #' @param metric Performance metric to extract ("NSE", "KGE", "BIAS", "RMSE", etc.)
 #'        Must be a column name in the statistics data frame
 #'
-#' @return If subbasin_id is specified: Single numeric value for that subbasin
-#'         If subbasin_id = "all": Named vector with metrics for all subbasins
+#' @return Single numeric value (if one subbasin) or named vector (if multiple/all)
+#'
+#' @seealso
+#' \code{\link{calculate_run_metrics}} to calculate metrics from QSIM/QOBS (slower but more flexible),
+#' \code{\link{extract_ensemble_metrics}} for ensemble results,
+#' \code{\link{calculate_ensemble_metrics}} to calculate metrics for ensembles
 #'
 #' @export
 #' @examples
 #' \dontrun{
-#' # Run COSERO
 #' result <- run_cosero("path/to/project")
 #'
-#' # Extract NSE for subbasin 001
+#' # Single subbasin (returns scalar)
 #' nse <- extract_run_metrics(result, subbasin_id = "001", metric = "NSE")
 #'
-#' # Extract KGE for all subbasins
+#' # Multiple subbasins (returns named vector)
+#' nse_multi <- extract_run_metrics(result, c("001", "002"), "NSE")
+#'
+#' # All subbasins (returns named vector)
 #' kge_all <- extract_run_metrics(result, subbasin_id = "all", metric = "KGE")
 #' }
 extract_run_metrics <- function(run_result, subbasin_id = "001", metric = "NSE") {
@@ -786,30 +803,33 @@ extract_run_metrics <- function(run_result, subbasin_id = "001", metric = "NSE")
   }
 
   # Handle "all" subbasins case
-  if (is.character(subbasin_id) && subbasin_id == "all") {
-    # Return all subbasins
+  if (length(subbasin_id) == 1 && is.character(subbasin_id) && tolower(subbasin_id) == "all") {
     result <- stats[[metric]]
     names(result) <- stats$sb
     return(result)
   }
 
-  # Format subbasin ID consistently (always ensure 4-digit format)
-  if (is.numeric(subbasin_id)) {
-    sb_id_num <- subbasin_id
-  } else {
-    sb_id_num <- as.numeric(subbasin_id)
-  }
-  sb_id_str <- sprintf("%04d", sb_id_num)
+  # Handle multiple subbasin IDs
+  sb_id_nums <- as.numeric(subbasin_id)
+  sb_id_strs <- sprintf("%04d", sb_id_nums)
 
-  # Filter for specific subbasin (handle both string and numeric ID formats)
-  sb_stats <- stats[stats$sb == sb_id_str | stats$sb == sb_id_num, ]
+  # Filter for specified subbasins
+  mask <- stats$sb %in% sb_id_strs | stats$sb %in% sb_id_nums
+  sb_stats <- stats[mask, ]
 
   if (nrow(sb_stats) == 0) {
-    stop("Subbasin '", subbasin_id, "' not found in statistics. Available: ",
-         paste(stats$sb, collapse = ", "))
+    stop("Subbasin(s) '", paste(subbasin_id, collapse = ", "),
+         "' not found in statistics. Available: ", paste(stats$sb, collapse = ", "))
   }
 
-  return(sb_stats[[metric]][1])
+  result <- sb_stats[[metric]]
+  names(result) <- sb_stats$sb
+
+  # Return scalar if single subbasin, named vector if multiple
+  if (length(result) == 1) {
+    return(as.numeric(result))
+  }
+  return(result)
 }
 
 #' Calculate Performance Metrics from Single COSERO Run
@@ -818,30 +838,39 @@ extract_run_metrics <- function(run_result, subbasin_id = "001", metric = "NSE")
 #' discharge from a single COSERO run. Automatically applies spin-up period from
 #' run settings.
 #'
-#' For standard metrics (NSE, KGE) already calculated by COSERO, use extract_run_metrics()
-#' instead - it's faster and guaranteed to match COSERO's evaluation.
+#' For standard metrics (NSE, KGE) already calculated by COSERO, use
+#' \code{\link{extract_run_metrics}} instead - it's faster and guaranteed to match
+#' COSERO's evaluation.
 #'
 #' @param run_result Result object from run_cosero()
-#' @param subbasin_id Subbasin ID to calculate metrics for (e.g., "001" or 1).
-#'        Use "all" to calculate metrics for all subbasins.
+#' @param subbasin_id Subbasin ID(s) to calculate metrics for. Can be:
+#'   - Single ID: "001" or 1 (returns scalar)
+#'   - Multiple IDs: c("001", "002") (returns named vector)
+#'   - "all": Calculate for all subbasins (returns named vector)
 #' @param metric Performance metric ("NSE", "KGE", "RMSE", "PBIAS")
 #' @param spinup Spin-up period in timesteps (optional). If NULL, reads from
 #'        run_result$defaults_settings$SPINUP
 #'
-#' @return If subbasin_id is specified: Single numeric value for that subbasin
-#'         If subbasin_id = "all": Named vector with metrics for all subbasins
+#' @return Single numeric value (if one subbasin) or named vector (if multiple/all)
+#'
+#' @seealso
+#' \code{\link{extract_run_metrics}} to extract pre-calculated metrics (faster),
+#' \code{\link{extract_ensemble_metrics}} for ensemble results,
+#' \code{\link{calculate_ensemble_metrics}} to calculate metrics for ensembles
 #'
 #' @export
 #' @examples
 #' \dontrun{
-#' # Run COSERO
 #' result <- run_cosero("path/to/project",
 #'                     defaults_settings = list(SPINUP = 365))
 #'
 #' # Calculate PBIAS for subbasin 001 (auto-detects spin-up)
 #' pbias <- calculate_run_metrics(result, subbasin_id = "001", metric = "PBIAS")
 #'
-#' # Calculate NSE for all subbasins
+#' # Multiple subbasins (returns named vector)
+#' nse_multi <- calculate_run_metrics(result, c("001", "002"), "NSE")
+#'
+#' # All subbasins (returns named vector)
 #' nse_all <- calculate_run_metrics(result, subbasin_id = "all", metric = "NSE")
 #'
 #' # Override spin-up period
@@ -929,19 +958,21 @@ calculate_run_metrics <- function(run_result, subbasin_id = "001",
   }
 
   # Handle "all" subbasins case
-  if (is.character(subbasin_id) && subbasin_id == "all") {
-    # Detect all available subbasins from column names
+  if (length(subbasin_id) == 1 && is.character(subbasin_id) && tolower(subbasin_id) == "all") {
     qsim_cols <- grep("^QSIM_", colnames(runoff), value = TRUE)
     if (length(qsim_cols) == 0) {
       stop("No QSIM columns found in runoff data")
     }
-
-    # Extract subbasin IDs from column names
     subbasin_ids <- gsub("^QSIM_", "", qsim_cols)
-
-    # Calculate for all subbasins
     results <- sapply(subbasin_ids, calc_single_subbasin)
     names(results) <- subbasin_ids
+    return(results)
+  }
+
+  # Handle multiple subbasins
+  if (length(subbasin_id) > 1) {
+    results <- sapply(subbasin_id, calc_single_subbasin)
+    names(results) <- sprintf("%04d", as.numeric(subbasin_id))
     return(results)
   }
 

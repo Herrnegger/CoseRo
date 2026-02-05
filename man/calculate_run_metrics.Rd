@@ -14,8 +14,12 @@ calculate_run_metrics(
 \arguments{
 \item{run_result}{Result object from run_cosero()}
 
-\item{subbasin_id}{Subbasin ID to calculate metrics for (e.g., "001" or 1).
-Use "all" to calculate metrics for all subbasins.}
+\item{subbasin_id}{Subbasin ID(s) to calculate metrics for. Can be:
+\itemize{
+\item Single ID: "001" or 1 (returns scalar)
+\item Multiple IDs: c("001", "002") (returns named vector)
+\item "all": Calculate for all subbasins (returns named vector)
+}}
 
 \item{metric}{Performance metric ("NSE", "KGE", "RMSE", "PBIAS")}
 
@@ -23,8 +27,7 @@ Use "all" to calculate metrics for all subbasins.}
 run_result$defaults_settings$SPINUP}
 }
 \value{
-If subbasin_id is specified: Single numeric value for that subbasin
-If subbasin_id = "all": Named vector with metrics for all subbasins
+Single numeric value (if one subbasin) or named vector (if multiple/all)
 }
 \description{
 Calculates performance metrics by comparing simulated (QSIM) against observed (QOBS)
@@ -32,23 +35,31 @@ discharge from a single COSERO run. Automatically applies spin-up period from
 run settings.
 }
 \details{
-For standard metrics (NSE, KGE) already calculated by COSERO, use extract_run_metrics()
-instead - it's faster and guaranteed to match COSERO's evaluation.
+For standard metrics (NSE, KGE) already calculated by COSERO, use
+\code{\link{extract_run_metrics}} instead - it's faster and guaranteed to match
+COSERO's evaluation.
 }
 \examples{
 \dontrun{
-# Run COSERO
 result <- run_cosero("path/to/project",
                     defaults_settings = list(SPINUP = 365))
 
 # Calculate PBIAS for subbasin 001 (auto-detects spin-up)
 pbias <- calculate_run_metrics(result, subbasin_id = "001", metric = "PBIAS")
 
-# Calculate NSE for all subbasins
+# Multiple subbasins (returns named vector)
+nse_multi <- calculate_run_metrics(result, c("001", "002"), "NSE")
+
+# All subbasins (returns named vector)
 nse_all <- calculate_run_metrics(result, subbasin_id = "all", metric = "NSE")
 
 # Override spin-up period
 kge <- calculate_run_metrics(result, subbasin_id = "001",
                              metric = "KGE", spinup = 100)
 }
+}
+\seealso{
+\code{\link{extract_run_metrics}} to extract pre-calculated metrics (faster),
+\code{\link{extract_ensemble_metrics}} for ensemble results,
+\code{\link{calculate_ensemble_metrics}} to calculate metrics for ensembles
 }
