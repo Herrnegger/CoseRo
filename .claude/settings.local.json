@@ -14,7 +14,9 @@
       "Bash(git mv:*)",
       "Bash(git rm:*)",
       "Bash(grep:*)",
-      "Bash(wc:*)"
+      "Bash(wc:*)",
+      "Bash(git branch:*)",
+      "Bash(git remote set-head:*)"
     ],
     "deny": [],
     "ask": []

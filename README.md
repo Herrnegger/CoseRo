@@ -433,20 +433,25 @@ devtools::check()
 If you use CoseRo in your research, please cite:
 
 ```
-[Add citation information here when published]
+Herrnegger, M., Fiaz, A., and the COSERO Development Team (2025).
+CoseRo: R Interface and Shiny Application for the COSERO Hydrological Model.
+R package version 0.1.0. https://github.com/Herrnegger/CoseRo
 ```
 
-## Troubleshooting
+Or in BibTeX format:
 
-**"COSERO executable not found"** — Ensure COSERO.exe is in your project directory and `project_path` is correct.
+```bibtex
+@Manual{cosero2025,
+  title  = {CoseRo: R Interface and Shiny Application for the COSERO Hydrological Model},
+  author = {Herrnegger, Mathew and Fiaz, Ahmed and {COSERO Development Team}},
+  year   = {2025},
+  note   = {R package version 0.1.0},
+  url    = {https://github.com/Herrnegger/CoseRo}
+}
+```
 
-**"Parameter file not found"** — Check that `para.txt` exists in `input/` and the PARAFILE setting in `defaults.txt`.
+You can also get the current citation by running `citation("CoseRo")` in R.
 
-**"Outputs not reading correctly"** — Verify `result$success == TRUE` and that OUTPUTTYPE matches your expected files.
-
-**Parallel ensemble fails** — Check disk space for temporary folders, reduce `n_cores`, or try sequential execution first.
-
-**Optimization creates many backup files** — This should not happen; optimization calls `run_cosero()` with `create_backup = FALSE` internally.
 
 ## Issues & Support
 
