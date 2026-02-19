@@ -41,6 +41,8 @@
 #'
 #' @name spartacus_preprocessing
 #' @keywords internal
+#' @importFrom stats setNames
+#' @importFrom utils flush.console setTxtProgressBar txtProgressBar
 NULL
 
 # ============================================================================
@@ -70,48 +72,6 @@ get_solar_parameters <- function(doy, lat) {
   list(day_length = day_length, sunrise = sunrise)
 }
 
-# ============================================================================
-# Helper: Parton & Logan (1981) Tmean calculation
-# ============================================================================
-#' @keywords internal
-calculate_tmean_parton_logan <- function(tmin, tmax, doy, lat,
-                                         a = 1.86, b = 2.20, c = -0.17) {
-  solar <- get_solar_parameters(doy, lat)
-  day_len <- solar$day_length
-  sunrise <- solar$sunrise
-  sunset <- 12 + (day_len / 2)
-
-  t_hourly <- numeric(24)
-  exp_b <- exp(-b)  # Boundary condition term
-  for (h in 0:23) {
-    i <- h + 1
-    if (h >= sunrise + c && h <= sunset) {
-      m <- h - (sunrise + c)
-      val <- pi * m / (day_len - c + a)
-      t_hourly[i] <- tmin + (tmax - tmin) * sin(val)
-    } else {
-      n <- if (h > sunset) h - sunset else (24 - sunset) + h
-      val_sunset <- pi * (sunset - (sunrise + c)) / (day_len - c + a)
-      t_sunset <- tmin + (tmax - tmin) * sin(val_sunset)
-      night_len <- 24 - day_len
-      # Correct formula: exp(-b) for boundary, exp(-b*n/night_len) for decay
-      t_hourly[i] <- (tmin - t_sunset * exp_b +
-        (t_sunset - tmin) * exp(-b * n / night_len)) / (1 - exp_b)
-    }
-  }
-  mean(t_hourly)
-}
-
-# ============================================================================
-# Helper: Dall'Amico & Hornsteiner (2006) Tmean calculation
-# ============================================================================
-#' @keywords internal
-calculate_tmean_dall_amico <- function(tmin, tmax, doy, lat) {
-  solar <- get_solar_parameters(doy, lat)
-  alpha <- 0.21 + 0.022 * (12 - solar$sunrise)
-  tmin + alpha * (tmax - tmin)
-}
-
 #' Extract SPARTACUS Precipitation for COSERO Input
 #'
 #' Processes yearly SPARTACUS precipitation NetCDF files and writes a single
@@ -137,13 +97,7 @@ calculate_tmean_dall_amico <- function(tmin, tmax, doy, lat) {
 #'   \item{txt}{Path to the text output file}
 #'   \item{bin}{Path to the binary file (or NULL if write_binary=FALSE)}
 #'
-#' @importFrom terra rast flip time ncol nrow
-#' @importFrom exactextractr exact_extract
-#' @importFrom Matrix sparseMatrix rowSums
 #' @importFrom data.table fwrite
-#' @importFrom sf st_crs st_transform
-#' @importFrom future plan multisession sequential future value
-#' @importFrom furrr future_map furrr_options
 #' @export
 #'
 #' @examples
@@ -165,26 +119,37 @@ write_spartacus_precip <- function(nc_dir, output_dir, model_zones,
                                    nz_col = "NZ", years = NULL,
                                    n_cores = 1, write_binary = FALSE) {
 
+  # Check for required suggested packages
+  required_pkgs <- c("terra", "sf", "exactextractr", "Matrix", "future", "furrr")
+  missing_pkgs <- required_pkgs[!sapply(required_pkgs, requireNamespace, quietly = TRUE)]
+  if (length(missing_pkgs) > 0) {
+    stop("The following packages are required for SPARTACUS preprocessing but are not installed: ",
+         paste(missing_pkgs, collapse = ", "),
+         "\nInstall them with: install.packages(c(",
+         paste0('"', missing_pkgs, '"', collapse = ", "), "))",
+         call. = FALSE)
+  }
+
   t_total_start <- Sys.time()
 
-  # ── Validation & File Discovery ──
-  if (!dir.exists(nc_dir)) stop("nc_dir does not exist: ", nc_dir)
-  if (!inherits(model_zones, "sf")) stop("model_zones must be an sf object")
-  if (!nz_col %in% names(model_zones)) stop("Column '", nz_col, "' not found")
+  # -- Validation & File Discovery --
+  if (!dir.exists(nc_dir)) stop("nc_dir does not exist: ", nc_dir, call. = FALSE)
+  if (!inherits(model_zones, "sf")) stop("model_zones must be an sf object", call. = FALSE)
+  if (!nz_col %in% names(model_zones)) stop("Column '", nz_col, "' not found", call. = FALSE)
 
   # Find SPARTACUS precipitation files (strict naming pattern)
   files <- sort(list.files(nc_dir, pattern = "SPARTACUS2-DAILY_RR_\\d{4}\\.nc$",
                            full.names = TRUE))
-  if (length(files) == 0) stop("No SPARTACUS precipitation files found")
+  if (length(files) == 0) stop("No SPARTACUS precipitation files found", call. = FALSE)
 
   # Filter by requested years if specified
   if (!is.null(years)) {
     file_years <- as.integer(gsub(".*_(\\d{4})\\.nc$", "\\1", basename(files)))
     files <- files[file_years %in% years]
-    if (length(files) == 0) stop("No files for specified years")
+    if (length(files) == 0) stop("No files for specified years", call. = FALSE)
   }
 
-  # ── Spatial Setup ──
+  # -- Spatial Setup --
   # Sort zones by ID for consistent output column order
   model_zones <- model_zones[order(model_zones[[nz_col]]), ]
   n_zones <- nrow(model_zones)
@@ -200,7 +165,7 @@ write_spartacus_precip <- function(nc_dir, output_dir, model_zones,
     model_zones <- sf::st_transform(model_zones, sf::st_crs(r_flipped))
   }
 
-  # ── Build Sparse Weight Matrix with Raw Cell Indices ──
+  # -- Build Sparse Weight Matrix with Raw Cell Indices --
   # This is the core optimization: we compute polygon-cell overlaps on the
 
   # flipped raster (correct geometry), then map indices back to raw storage.
@@ -245,7 +210,7 @@ write_spartacus_precip <- function(nc_dir, output_dir, model_zones,
   # Free memory
   rm(template, row_idx, col_idx, weights, r_raw, r_flipped); gc()
 
-  # ── Output File Setup ──
+  # -- Output File Setup --
   yrs <- gsub(".*_(\\d{4})\\.nc$", "\\1", basename(files))
   base_name <- sprintf("P_NZ_%s_%s", min(yrs), max(yrs))
   txt_file <- file.path(output_dir, paste0(base_name, ".txt"))
@@ -255,7 +220,7 @@ write_spartacus_precip <- function(nc_dir, output_dir, model_zones,
   if (file.exists(txt_file)) file.remove(txt_file)
   if (write_binary && file.exists(bin_file)) file.remove(bin_file)
 
-  # ── Process Files (Parallel or Sequential) ──
+  # -- Process Files (Parallel or Sequential) --
   message(sprintf("Processing %d files using %d core(s)...", length(files), n_cores))
 
   # Worker function: extract values and compute zonal means via matrix multiply
@@ -317,7 +282,7 @@ write_spartacus_precip <- function(nc_dir, output_dir, model_zones,
     close(pb)
   }
 
-  # ── Write Output Files ──
+  # -- Write Output Files --
   message("Writing output files...")
 
   if (write_binary) {
@@ -392,30 +357,21 @@ write_spartacus_precip <- function(nc_dir, output_dir, model_zones,
 #' **Why not use simple arithmetic mean?**
 #' The simple mean \code{(Tmin + Tmax) / 2} assumes symmetric diurnal temperature,
 #' but Tmin occurs briefly before sunrise while most of the day is closer to Tmin.
-#' This overestimates Tmean by 0.5-2°C, significantly affecting snow accumulation.
+#' This overestimates Tmean by 0.5-2 degrees C, significantly affecting snow accumulation.
 #'
 #' @references
-#' Dall'Amico, M. & Hornsteiner, M. (2006). A simple method for estimating daily
-#' and monthly mean temperatures from daily minima and maxima. Int. J. Climatol.
-#' 26(13):1929-1936. \doi{10.1002/joc.1363}
+#' Dall'Amico, M. and Hornsteiner, M. (2006). A simple method for estimating daily
+#' and monthly mean temperatures from daily minima and maxima. \emph{Int. J. Climatol.}
+#' \strong{26}(13):1929-1936. \doi{10.1002/joc.1363}
 #'
-#' Parton, W.J. & Logan, J.A. (1981). A model for diurnal variation in soil and
-#' air temperature. Agric. Meteorol. 23:205-216. \doi{10.1016/0002-1571(81)90105-9}
-#'
-#' The sparse weight matrix approach (see \code{\link{spartacus_preprocessing}})
-#' enables processing of 60+ years of daily data.
+#' Parton, W.J. and Logan, J.A. (1981). A model for diurnal variation in soil and
+#' air temperature. \emph{Agric. Meteorol.} \strong{23}:205-216. \doi{10.1016/0002-1571(81)90105-9}
 #'
 #' @return Invisibly returns a list with paths to the generated files:
 #'   \item{txt}{Path to the text output file}
 #'   \item{bin}{Path to the binary file (or NULL if write_binary=FALSE)}
 #'
-#' @importFrom terra rast flip time ncol nrow
-#' @importFrom exactextractr exact_extract
-#' @importFrom Matrix sparseMatrix rowSums
 #' @importFrom data.table fwrite
-#' @importFrom sf st_crs st_transform
-#' @importFrom future plan multisession sequential future value
-#' @importFrom furrr future_map furrr_options
 #' @export
 write_spartacus_temp <- function(tmin_dir, tmax_dir, output_dir, model_zones,
                                  nz_col = "NZ", years = NULL,
@@ -424,24 +380,35 @@ write_spartacus_temp <- function(tmin_dir, tmax_dir, output_dir, model_zones,
                                  lat = NULL,
                                  n_cores = 1, write_binary = FALSE) {
 
+  # Check for required suggested packages
+  required_pkgs <- c("terra", "sf", "exactextractr", "Matrix", "future", "furrr")
+  missing_pkgs <- required_pkgs[!sapply(required_pkgs, requireNamespace, quietly = TRUE)]
+  if (length(missing_pkgs) > 0) {
+    stop("The following packages are required for SPARTACUS preprocessing but are not installed: ",
+         paste(missing_pkgs, collapse = ", "),
+         "\nInstall them with: install.packages(c(",
+         paste0('"', missing_pkgs, '"', collapse = ", "), "))",
+         call. = FALSE)
+  }
+
   t_total_start <- Sys.time()
 
-  # ── Validation & File Discovery ──
+  # -- Validation & File Discovery --
   tmean_method <- match.arg(tmean_method)
-  if (!dir.exists(tmin_dir)) stop("tmin_dir does not exist")
-  if (!dir.exists(tmax_dir)) stop("tmax_dir does not exist")
-  if (!inherits(model_zones, "sf")) stop("model_zones must be an sf object")
-  if (!nz_col %in% names(model_zones)) stop("Column '", nz_col, "' not found")
+  if (!dir.exists(tmin_dir)) stop("tmin_dir does not exist", call. = FALSE)
+  if (!dir.exists(tmax_dir)) stop("tmax_dir does not exist", call. = FALSE)
+  if (!inherits(model_zones, "sf")) stop("model_zones must be an sf object", call. = FALSE)
+  if (!nz_col %in% names(model_zones)) stop("Column '", nz_col, "' not found", call. = FALSE)
   if (tmean_method == "simple" && (tmin_weight < 0 || tmin_weight > 1)) {
-    stop("tmin_weight must be between 0 and 1")
+    stop("tmin_weight must be between 0 and 1", call. = FALSE)
   }
 
   # Find SPARTACUS temperature files (strict naming patterns)
   tmin_files <- list.files(tmin_dir, pattern = "SPARTACUS2-DAILY_TN_\\d{4}\\.nc$", full.names = TRUE)
   tmax_files <- list.files(tmax_dir, pattern = "SPARTACUS2-DAILY_TX_\\d{4}\\.nc$", full.names = TRUE)
 
-  if (length(tmin_files) == 0) stop("No SPARTACUS Tmin files found in: ", tmin_dir)
-  if (length(tmax_files) == 0) stop("No SPARTACUS Tmax files found in: ", tmax_dir)
+  if (length(tmin_files) == 0) stop("No SPARTACUS Tmin files found in: ", tmin_dir, call. = FALSE)
+  if (length(tmax_files) == 0) stop("No SPARTACUS Tmax files found in: ", tmax_dir, call. = FALSE)
 
   # Find years present in both Tmin and Tmax directories
   tmin_yrs <- gsub(".*_(\\d{4})\\.nc$", "\\1", basename(tmin_files))
@@ -449,9 +416,9 @@ write_spartacus_temp <- function(tmin_dir, tmax_dir, output_dir, model_zones,
   common_years <- sort(intersect(tmin_yrs, tmax_yrs))
 
   if (!is.null(years)) common_years <- sort(intersect(common_years, as.character(years)))
-  if (length(common_years) == 0) stop("No matching years found between Tmin and Tmax")
+  if (length(common_years) == 0) stop("No matching years found between Tmin and Tmax", call. = FALSE)
 
-  # ── Spatial Setup with Raw Cell Index Mapping ──
+  # -- Spatial Setup with Raw Cell Index Mapping --
   # Sort zones by ID for consistent output column order
   model_zones <- model_zones[order(model_zones[[nz_col]]), ]
   n_zones <- nrow(model_zones)
@@ -471,10 +438,10 @@ write_spartacus_temp <- function(tmin_dir, tmax_dir, output_dir, model_zones,
     zones_wgs84 <- sf::st_transform(model_zones, 4326)
     bbox <- sf::st_bbox(zones_wgs84)
     lat <- (bbox["ymin"] + bbox["ymax"]) / 2
-    message(sprintf("Using center latitude: %.2f°N", lat))
+    message(sprintf("Using center latitude: %.2f\u00b0N", lat))
   }
 
-  # ── Build Sparse Weight Matrix ──
+  # -- Build Sparse Weight Matrix --
   # See spartacus_preprocessing documentation for detailed explanation
   message("Building sparse weight matrix for ", n_zones, " zones...")
   template <- exactextractr::exact_extract(r_flipped, model_zones, include_cell = TRUE, progress = FALSE)
@@ -506,7 +473,7 @@ write_spartacus_temp <- function(tmin_dir, tmax_dir, output_dir, model_zones,
   # Free memory
   rm(template, row_idx, col_idx, weights, r_raw, r_flipped); gc()
 
-  # ── Output File Setup ──
+  # -- Output File Setup --
   base_name <- sprintf("T_NZ_%s_%s", min(common_years), max(common_years))
   txt_file <- file.path(output_dir, paste0(base_name, ".txt"))
   bin_file <- file.path(output_dir, paste0(base_name, ".bin"))
@@ -514,7 +481,7 @@ write_spartacus_temp <- function(tmin_dir, tmax_dir, output_dir, model_zones,
   if (file.exists(txt_file)) file.remove(txt_file)
   if (write_binary && file.exists(bin_file)) file.remove(bin_file)
 
-  # ── Process Year Pairs (Parallel or Sequential) ──
+  # -- Process Year Pairs (Parallel or Sequential) --
   tmax_weight <- 1 - tmin_weight
   method_desc <- switch(tmean_method,
     "simple" = sprintf("simple (%.0f%% Tmin + %.0f%% Tmax)", tmin_weight * 100, tmax_weight * 100),
@@ -645,14 +612,19 @@ write_spartacus_temp <- function(tmin_dir, tmax_dir, output_dir, model_zones,
                                  method = tmean_method, w_min = tmin_weight, w_max = tmax_weight,
                                  latitude = lat,
                                  .options = furrr::furrr_options(packages = c("terra", "Matrix")))
-  } else {
+  } else if (requireNamespace("pbapply", quietly = TRUE)) {
     results <- pbapply::pblapply(common_years, process_file_pair, tmin_files = tmin_files,
                                  tmax_files = tmax_files, cells = all_raw_cells, weight_matrix = W,
                                  method = tmean_method, w_min = tmin_weight, w_max = tmax_weight,
                                  latitude = lat)
+  } else {
+    results <- lapply(common_years, process_file_pair, tmin_files = tmin_files,
+                      tmax_files = tmax_files, cells = all_raw_cells, weight_matrix = W,
+                      method = tmean_method, w_min = tmin_weight, w_max = tmax_weight,
+                      latitude = lat)
   }
 
-  # ── Write Output Files ──
+  # -- Write Output Files --
   message("Writing output files...")
   if (write_binary) {
     bin_con <- file(bin_file, "wb")

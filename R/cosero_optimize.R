@@ -3,6 +3,12 @@
 # DDS and SCE-UA optimization with multi-objective support
 # =============================================================================
 
+#' @importFrom stats rnorm runif setNames
+#' @importFrom utils head read.table write.csv
+NULL
+
+utils::globalVariables(c("iteration", "metric"))
+
 # 0 Helper: Zone-Subbasin Mapping #####
 
 #' Get Zones for Subbasins
@@ -117,16 +123,16 @@ create_optimization_bounds <- function(parameters,
 
   n_params <- length(parameters)
 
-  if (length(lower) != n_params) stop("'lower' must match 'parameters' length")
-  if (length(upper) != n_params) stop("'upper' must match 'parameters' length")
-  if (any(lower >= upper)) stop("All lower < upper required")
+  if (length(lower) != n_params) stop("'lower' must match 'parameters' length", call. = FALSE)
+  if (length(upper) != n_params) stop("'upper' must match 'parameters' length", call. = FALSE)
+  if (any(lower >= upper)) stop("All lower < upper required", call. = FALSE)
 
   # Default values: use midpoint if not specified
   if (is.null(default)) {
     default <- (lower + upper) / 2
   }
   if (length(default) != n_params) {
-    stop("'default' must match 'parameters' length")
+    stop("'default' must match 'parameters' length", call. = FALSE)
   }
 
   # Modification type: default to relchg
@@ -134,10 +140,10 @@ create_optimization_bounds <- function(parameters,
     modification_type <- rep("relchg", n_params)
   }
   if (length(modification_type) != n_params) {
-    stop("'modification_type' must match 'parameters' length")
+    stop("'modification_type' must match 'parameters' length", call. = FALSE)
   }
   if (!all(modification_type %in% c("relchg", "abschg"))) {
-    stop("modification_type must be 'relchg' or 'abschg'")
+    stop("modification_type must be 'relchg' or 'abschg'", call. = FALSE)
   }
 
   # Description: use parameter name if not specified
@@ -145,7 +151,7 @@ create_optimization_bounds <- function(parameters,
     description <- paste("Optimization parameter:", parameters)
   }
   if (length(description) != n_params) {
-    stop("'description' must match 'parameters' length")
+    stop("'description' must match 'parameters' length", call. = FALSE)
   }
 
   # Category: use "optimization" if not specified
@@ -153,7 +159,7 @@ create_optimization_bounds <- function(parameters,
     category <- rep("optimization", n_params)
   }
   if (length(category) != n_params) {
-    stop("'category' must match 'parameters' length")
+    stop("'category' must match 'parameters' length", call. = FALSE)
   }
 
   tibble::tibble(
@@ -254,7 +260,7 @@ calculate_single_metric <- function(result, subbasin, metric, spinup_value = 0) 
       "RMSE" = -hydroGOF::rmse(sim, obs),
       "PBIAS" = 1 - abs(hydroGOF::pbias(sim, obs)) / 100,
       "VE" = 1 - abs(sum(sim) - sum(obs)) / sum(obs),
-      stop("Unknown metric: ", metric)
+      stop("Unknown metric: ", metric, call. = FALSE)
     )
   }, error = function(e) NA)
   
@@ -319,27 +325,27 @@ create_objective_function <- function(cosero_path,
       metric_weights <- rep(1/n_metrics, n_metrics)
     }
     if (length(metric_weights) != n_metrics) {
-      stop("metric_weights must match metric length")
+      stop("metric_weights must match metric length", call. = FALSE)
     }
     if (abs(sum(metric_weights) - 1) > 1e-6) {
-      stop("metric_weights must sum to 1")
+      stop("metric_weights must sum to 1", call. = FALSE)
     }
   }
   
   if (aggregation == "weighted") {
     if (is.null(subbasin_weights)) {
-      stop("subbasin_weights required for aggregation='weighted'")
+      stop("subbasin_weights required for aggregation='weighted'", call. = FALSE)
     }
     if (length(subbasin_weights) != n_subbasins) {
-      stop("subbasin_weights must match target_subbasins length")
+      stop("subbasin_weights must match target_subbasins length", call. = FALSE)
     }
     if (abs(sum(subbasin_weights) - 1) > 1e-6) {
-      stop("subbasin_weights must sum to 1")
+      stop("subbasin_weights must sum to 1", call. = FALSE)
     }
   }
   
   if (!aggregation %in% c("mean", "weighted", "min", "product")) {
-    stop("aggregation must be: mean, weighted, min, or product")
+    stop("aggregation must be: mean, weighted, min, or product", call. = FALSE)
   }
   
   # Get parameter filename
@@ -356,7 +362,7 @@ create_objective_function <- function(cosero_path,
   }
   
   par_file <- file.path(cosero_path, "input", par_filename)
-  if (!file.exists(par_file)) stop("Parameter file not found: ", par_file)
+  if (!file.exists(par_file)) stop("Parameter file not found: ", par_file, call. = FALSE)
 
   # Create backup of original parameter file in parameterfile_backup folder
   backup_dir <- file.path(cosero_path, "input", "parameterfile_backup")
@@ -1115,7 +1121,7 @@ optimize_cosero_sce <- function(cosero_path,
                                 use_minimal_reading = TRUE) {
   
   if (!requireNamespace("rtop", quietly = TRUE)) {
-    stop("Package 'rtop' required for SCE-UA")
+    stop("Package 'rtop' required for SCE-UA", call. = FALSE)
   }
 
   n_params <- nrow(par_bounds)
@@ -1297,7 +1303,7 @@ optimize_cosero_sce <- function(cosero_path,
 #' }
 plot_cosero_optimization <- function(opt_result) {
   if (!requireNamespace("ggplot2", quietly = TRUE)) {
-    stop("Package 'ggplot2' required")
+    stop("Package 'ggplot2' required", call. = FALSE)
   }
   
   if (!is.null(opt_result$history)) {

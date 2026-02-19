@@ -3,14 +3,13 @@
 # Author: COSERO R Interface
 # Date: 2025-09-25
 
-# 1 Load Libraries #####
-library(readr)
-library(dplyr)
-library(tibble)
-library(stringr)
-library(lubridate)
+#' @importFrom dplyr filter mutate select arrange group_by summarise bind_rows
+#' @importFrom lubridate ymd_hm year month day hour minute
+#' @importFrom tibble tibble as_tibble
+#' @importFrom data.table fread
+NULL
 
-# 2 Configuration Management #####
+# Configuration Management #####
 
 # 2.1 COSERO Default Parameters #####
 cosero_defaults <- data.frame(
@@ -67,7 +66,9 @@ show_cosero_defaults <- function(parameter_name = NULL) {
   invisible(cosero_defaults)
 }
 
-# 2.3 Configuration Validation #####
+# Configuration Validation #####
+
+#' @keywords internal
 validate_cosero_defaults <- function(settings) {
   validation_results <- list(valid = TRUE, messages = character(0), settings = settings)
 
@@ -166,6 +167,7 @@ get_default_cosero_values <- function() {
   )
 }
 
+#' @keywords internal
 modify_defaults <- function(defaults_file, settings, quiet = FALSE) {
   if (!file.exists(defaults_file)) {
     create_default_defaults(defaults_file, quiet)
@@ -209,6 +211,7 @@ modify_defaults <- function(defaults_file, settings, quiet = FALSE) {
   if (!quiet) cat("Updated defaults.txt with", length(settings), "parameters\n")
 }
 
+#' @keywords internal
 create_default_defaults <- function(defaults_file, quiet = FALSE) {
   default_values <- get_default_cosero_values()
   content <- character(0)
@@ -252,7 +255,7 @@ create_default_defaults <- function(defaults_file, quiet = FALSE) {
 #' }
 read_defaults <- function(defaults_file) {
   if (!file.exists(defaults_file)) {
-    stop("defaults.txt file not found: ", defaults_file)
+    stop("defaults.txt file not found: ", defaults_file, call. = FALSE)
   }
 
   lines <- readLines(defaults_file)
@@ -321,7 +324,9 @@ read_defaults <- function(defaults_file) {
   return(settings)
 }
 
-# 3.2 Project Setup #####
+# Project Setup #####
+
+#' @keywords internal
 setup_project_directories <- function(project_path, defaults_settings = NULL, timestamp,
                                       quiet = FALSE, create_backup = TRUE) {
   input_dir <- file.path(project_path, "input")
@@ -575,17 +580,17 @@ run_cosero <- function(project_path,
                       create_backup = TRUE) {
 
   # Validate inputs
-  if (!dir.exists(project_path)) stop("Project path does not exist: ", project_path)
-  if (!file.exists(file.path(project_path, exe_name))) stop("COSERO executable not found: ", exe_name)
+  if (!dir.exists(project_path)) stop("Project path does not exist: ", project_path, call. = FALSE)
+  if (!file.exists(file.path(project_path, exe_name))) stop("COSERO executable not found: ", exe_name, call. = FALSE)
 
   # Validate statevar_source parameter
   if (!statevar_source %in% c(1, 2)) {
-    stop("statevar_source must be 1 (parameter file) or 2 (statevar.dmp file)")
+    stop("statevar_source must be 1 (parameter file) or 2 (statevar.dmp file)", call. = FALSE)
   }
 
   # Validate tmmon_option parameter
   if (!tmmon_option %in% c(1, 2)) {
-    stop("tmmon_option must be 1 (from parameter file) or 2 (calculate from data)")
+    stop("tmmon_option must be 1 (from parameter file) or 2 (calculate from data)", call. = FALSE)
   }
 
   # Check if statevar.dmp exists when needed and copy from output to input if necessary
@@ -632,7 +637,7 @@ run_cosero <- function(project_path,
     validation <- validate_cosero_defaults(defaults_settings)
     if (length(validation$messages) > 0) sapply(validation$messages, cat, "\n")
     if (!validation$valid) {
-      stop("Invalid configuration settings provided")
+      stop("Invalid configuration settings provided", call. = FALSE)
     }
     # Use the processed settings (with converted dates)
     defaults_settings <- validation$settings
@@ -741,7 +746,7 @@ run_cosero <- function(project_path,
     ))
 
   }, error = function(e) {
-    stop("Error running COSERO: ", e$message)
+    stop("Error running COSERO: ", e$message, call. = FALSE)
   })
 }
 
@@ -786,12 +791,12 @@ extract_run_metrics <- function(run_result, subbasin_id = "001", metric = "NSE")
 
   # Check if run was successful
   if (!run_result$success) {
-    stop("Run failed - cannot extract metrics")
+    stop("Run failed - cannot extract metrics", call. = FALSE)
   }
 
   # Check if statistics data exists
   if (is.null(run_result$output_data) || is.null(run_result$output_data$statistics)) {
-    stop("No statistics data found in run result")
+    stop("No statistics data found in run result", call. = FALSE)
   }
 
   stats <- run_result$output_data$statistics
@@ -799,7 +804,7 @@ extract_run_metrics <- function(run_result, subbasin_id = "001", metric = "NSE")
   # Check if metric exists
   if (!metric %in% colnames(stats)) {
     stop("Metric '", metric, "' not found. Available metrics: ",
-         paste(setdiff(colnames(stats), "sb"), collapse = ", "))
+         paste(setdiff(colnames(stats), "sb"), collapse = ", "), call. = FALSE)
   }
 
   # Handle "all" subbasins case
@@ -819,7 +824,8 @@ extract_run_metrics <- function(run_result, subbasin_id = "001", metric = "NSE")
 
   if (nrow(sb_stats) == 0) {
     stop("Subbasin(s) '", paste(subbasin_id, collapse = ", "),
-         "' not found in statistics. Available: ", paste(stats$sb, collapse = ", "))
+         "' not found in statistics. Available: ", paste(stats$sb, collapse = ", "),
+         call. = FALSE)
   }
 
   result <- sb_stats[[metric]]
@@ -882,12 +888,12 @@ calculate_run_metrics <- function(run_result, subbasin_id = "001",
 
   # Check if run was successful
   if (!run_result$success) {
-    stop("Run failed - cannot calculate metrics")
+    stop("Run failed - cannot calculate metrics", call. = FALSE)
   }
 
   # Check if runoff data exists
   if (is.null(run_result$output_data) || is.null(run_result$output_data$runoff)) {
-    stop("No runoff data found in run result")
+    stop("No runoff data found in run result", call. = FALSE)
   }
 
   runoff <- run_result$output_data$runoff
@@ -919,10 +925,10 @@ calculate_run_metrics <- function(run_result, subbasin_id = "001",
 
     # Check if columns exist
     if (!qsim_col %in% colnames(runoff)) {
-      stop("Column '", qsim_col, "' not found in runoff data")
+      stop("Column '", qsim_col, "' not found in runoff data", call. = FALSE)
     }
     if (!qobs_col %in% colnames(runoff)) {
-      stop("Column '", qobs_col, "' not found in runoff data")
+      stop("Column '", qobs_col, "' not found in runoff data", call. = FALSE)
     }
 
     # Extract data
@@ -947,7 +953,7 @@ calculate_run_metrics <- function(run_result, subbasin_id = "001",
         hydroGOF::pbias(simulated, observed)
       } else {
         stop("Unknown metric: ", metric,
-             ". Supported: KGE, NSE, RMSE, PBIAS")
+             ". Supported: KGE, NSE, RMSE, PBIAS", call. = FALSE)
       }
     }, error = function(e) {
       warning("Error calculating ", metric, " for subbasin ", sb_id, ": ", e$message)
@@ -961,7 +967,7 @@ calculate_run_metrics <- function(run_result, subbasin_id = "001",
   if (length(subbasin_id) == 1 && is.character(subbasin_id) && tolower(subbasin_id) == "all") {
     qsim_cols <- grep("^QSIM_", colnames(runoff), value = TRUE)
     if (length(qsim_cols) == 0) {
-      stop("No QSIM columns found in runoff data")
+      stop("No QSIM columns found in runoff data", call. = FALSE)
     }
     subbasin_ids <- gsub("^QSIM_", "", qsim_cols)
     results <- sapply(subbasin_ids, calc_single_subbasin)

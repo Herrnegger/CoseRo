@@ -6,7 +6,7 @@
 # Load required libraries
 library(dplyr)
 library(ggplot2)
-library(COSERO)  # Load COSERO package functions
+library(CoseRo)  # Load COSERO package functions
 
 # ==============================================================================
 # EXAMPLE 1: Snow and Runoff Parameters

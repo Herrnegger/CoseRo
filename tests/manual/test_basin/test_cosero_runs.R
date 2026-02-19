@@ -1,9 +1,9 @@
 # COSERO Run Function Test Script
 # Test different run configurations on D:\temp\COSERO_test
 # Based on examples from 01_cosero_core_run_README.md and 03_cosero_execution_examples_README.md
-devtools::load_all("D:/OneDrive - Universität für Bodenkultur Wien/github/COSERO-R")
+devtools::load_all()
 #devtools::document()
-library(COSERO)  # Assuming the package is loaded
+library(CoseRo)  # Assuming the package is loaded
 
 # Project path
 project_path <- "D:/temp/COSERO_test"

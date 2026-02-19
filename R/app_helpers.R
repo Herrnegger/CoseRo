@@ -3,14 +3,15 @@
 # Author: COSERO R Interface
 # Date: 2025-10-28
 
-#' @importFrom dplyr filter mutate select arrange group_by summarise
+#' @importFrom dplyr filter mutate select arrange group_by summarise %>% across all_of
 #' @importFrom lubridate ymd_hm year month day hour minute
 #' @importFrom plotly plot_ly add_trace layout
+#' @importFrom htmlwidgets saveWidget
+#' @importFrom stats ave median
+#' @importFrom utils modifyList
 NULL
 
-library(dplyr)
-library(lubridate)
-library(plotly)
+utils::globalVariables(c("Date", "month", "year", "year_month", "sb"))
 
 # Color Configuration ####
 # Centralized color definitions for all plots
@@ -356,7 +357,7 @@ plot_discharge <- function(data) {
       line = list(color = COLORS_DISCHARGE$Q_obs, width = 1.5),
       hovertemplate = paste0(
         "<b>Date:</b> %{x|%Y-%m-%d}<br>",
-        "<b>Q Obs:</b> %{y:.2f} m³/s<br>",
+        "<b>Q Obs:</b> %{y:.2f} m\u00b3/s<br>",
         "<extra></extra>"
       )
     ) %>%
@@ -368,14 +369,14 @@ plot_discharge <- function(data) {
       line = list(color = COLORS_DISCHARGE$Q_sim, width = 1.5),
       hovertemplate = paste0(
         "<b>Date:</b> %{x|%Y-%m-%d}<br>",
-        "<b>Q Sim:</b> %{y:.2f} m³/s<br>",
+        "<b>Q Sim:</b> %{y:.2f} m\u00b3/s<br>",
         "<extra></extra>"
       )
     ) %>%
     layout(
       title = list(text = "Discharge", font = list(size = 14)),
       xaxis = list(title = list(text = "", font = list(size = 12)), tickfont = list(size = 11)),
-      yaxis = list(title = list(text = "Discharge (m³/s)", font = list(size = 12)), tickfont = list(size = 11)),
+      yaxis = list(title = list(text = "Discharge (m\u00b3/s)", font = list(size = 12)), tickfont = list(size = 11)),
       hovermode = "x unified",
       font = list(size = 11),
       legend = list(orientation = "h", x = 0.5, xanchor = "center", y = -0.2, font = list(size = 10))
@@ -788,7 +789,7 @@ prepare_seasonality_data <- function(subbasin_data, spinup_timesteps = 0) {
     return(as.data.frame(monthly))
   }
 
-  # Panel 1: Discharge - use mean (already in m³/s)
+  # Panel 1: Discharge - use mean (already in m\u00b3/s)
   if (!is.null(subbasin_data$discharge)) {
     result$discharge <- calc_monthly_aggregation(
       subbasin_data$discharge,
@@ -906,7 +907,7 @@ plot_seasonality_discharge <- function(monthly_data) {
                      "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"),
         tickfont = list(size = 11)
       ),
-      yaxis = list(title = list(text = "Discharge (m³/s)", font = list(size = 12)), tickfont = list(size = 11)),
+      yaxis = list(title = list(text = "Discharge (m\u00b3/s)", font = list(size = 12)), tickfont = list(size = 11)),
       hovermode = "x unified",
       font = list(size = 11),
       legend = list(orientation = "h", x = 0.5, xanchor = "center", y = -0.2, font = list(size = 10))
@@ -1124,7 +1125,7 @@ export_plot_png <- function(plot, filename, width = 1200, height = 400) {
 
     # If none of the above work, throw an informative error
     stop("PNG export requires: kaleido package (recommended) or webshot + phantomjs.\n",
-         "Install with: install.packages('kaleido')")
+         "Install with: install.packages('kaleido')", call. = FALSE)
 
   }, error = function(e) {
     warning("Could not export PNG: ", e$message,
@@ -1139,10 +1140,10 @@ export_plot_png <- function(plot, filename, width = 1200, height = 400) {
 #' Handles both forward and backslashes, removes quotes
 #'
 #' This function is designed to handle common copy-paste scenarios from Windows Explorer:
-#' - Paths with forward slashes: "D:/Projects/COSERO"
-#' - Paths with backslashes: "D:\Projects\COSERO"
-#' - Paths with quotes: '"D:\Projects\COSERO"' (from Shift+Right-click -> Copy as path)
-#' - Mixed slashes: "D:/Projects\COSERO"
+#' - Paths with forward slashes: `"D:/Projects/COSERO"`
+#' - Paths with backslashes: `"D:\\Projects\\COSERO"`
+#' - Paths with quotes: `'"D:\\Projects\\COSERO"'` (from Shift+Right-click -> Copy as path)
+#' - Mixed slashes: `"D:/Projects\\COSERO"`
 #' - Leading/trailing whitespace
 #'
 #' @param path Raw path string from user input

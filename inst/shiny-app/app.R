@@ -25,8 +25,8 @@ library(shinyjs)
 
 # Load COSERO package functions
 # Try to load installed package first, otherwise source from R/ directory
-if (requireNamespace("COSERO", quietly = TRUE)) {
-  library(COSERO)
+if (requireNamespace("CoseRo", quietly = TRUE)) {
+  library(CoseRo)
 } else {
   # Fallback: source from package directory
   # Get the app directory and navigate to package R/ folder
@@ -149,7 +149,7 @@ ui <- fluidPage(
       style = "margin-right: 20px;",
       onerror = "this.style.display='none'; console.error('Logo not found: logo.svg');"
     ),
-    tags$h2("COSERO Workbench", style = "margin: 0; font-weight: 600;")
+    tags$h2("Workbench", style = "margin: 0; font-weight: 600;")
   ),
 
   # Full width tabset panel without sidebar

@@ -1,3 +1,6 @@
+#' @importFrom bslib bs_theme
+NULL
+
 #' Launch COSERO Workbench Shiny Application
 #'
 #' @description
@@ -29,11 +32,11 @@
 #' }
 launch_cosero_app <- function(project_dir = NULL, launch.browser = TRUE, port = NULL, ...) {
   # Get the app directory from the installed package
-  app_dir <- system.file("shiny-app", package = "COSERO")
+  app_dir <- system.file("shiny-app", package = "CoseRo")
 
   # Check if app directory exists
   if (app_dir == "") {
-    stop("Could not find Shiny app. Try re-installing the COSERO package.",
+    stop("Could not find Shiny app. Try re-installing the CoseRo package.",
          call. = FALSE)
   }
 
@@ -47,7 +50,7 @@ launch_cosero_app <- function(project_dir = NULL, launch.browser = TRUE, port = 
   # Validate and normalize project directory if provided
   if (!is.null(project_dir)) {
     if (!dir.exists(project_dir)) {
-      stop("Project directory does not exist: ", project_dir)
+      stop("Project directory does not exist: ", project_dir, call. = FALSE)
     }
     project_dir <- normalizePath(project_dir, winslash = "/")
     message("Pre-loading project: ", project_dir)

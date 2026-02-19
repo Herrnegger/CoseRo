@@ -1,12 +1,12 @@
 bibentry(
   bibtype  = "Manual",
-  title    = "COSERO: R Interface for the COSERO Hydrological Model",
+  title    = "CoseRo: Hydrological Modelling Library",
   author   = c(
     person("Mathew", "Herrnegger"),
     person("Ahmed", "Fiaz"),
     person("COSERO Development Team")
   ),
   year     = "2025",
-  url      = "https://github.com/Herrnegger/COSERO-R",
+  url      = "https://github.com/Herrnegger/CoseRo",
   note     = "R package"
 )

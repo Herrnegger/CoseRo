@@ -39,3 +39,8 @@ samples <- generate_sobol_samples(sobol_bounds, n = 100)
 nrow(samples$parameter_sets)  # 500 = 100 * (3 + 2)
 }
 }
+\seealso{
+\code{\link{load_parameter_bounds}} to load parameter bounds from CSV,
+\code{\link{create_sobol_bounds}} to create bounds matrix for Sobol sampling,
+\code{\link{calculate_sobol_indices}} to compute sensitivity indices from results
+}

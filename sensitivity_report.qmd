@@ -428,7 +428,7 @@ The package requires the following R packages:
 remotes::install_github("username/COSERO-R")
 
 # Load package
-library(COSERO)
+library(CoseRo)
 
 # Launch interactive app
 launch_cosero_app()
@@ -449,7 +449,7 @@ Begin by loading the required R package and setting up the working environment:
 #| eval: false
 
 # Load the COSERO-R package
-library(COSERO)
+library(CoseRo)
 
 # Set project path (adjust to your directory)
 project_path <- "C:/COSERO_Project"
@@ -642,7 +642,7 @@ Define the parameter space by specifying minimum and maximum values for each par
 ```{r}
 #| eval: false
 
-library(COSERO)
+library(CoseRo)
 library(sensitivity)  # For Sobol analysis
 library(randtoolbox)  # For Sobol sampling
 

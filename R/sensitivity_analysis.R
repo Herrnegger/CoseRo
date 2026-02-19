@@ -2,19 +2,29 @@
 # Sobol-based global sensitivity analysis for COSERO parameters
 # Date: 2025-11-04
 
-# 1 Load Libraries #####
-library(dplyr)
-library(tidyr)
-library(purrr)
-library(ggplot2)
-library(sensobol)
-library(hydroGOF)
-library(parallel)
-#library(doSNOW)    # For progress updates in parallel
-library(foreach)
+#' @importFrom dplyr filter mutate select arrange group_by summarise bind_rows %>% desc
+#' @importFrom tidyr pivot_longer pivot_wider
+#' @importFrom purrr map map_dbl map_dfr map2_df
+#' @importFrom tibble as_tibble
+#' @importFrom ggplot2 ggplot aes geom_bar geom_point geom_line geom_ribbon geom_hline
+#' @importFrom ggplot2 coord_flip coord_cartesian facet_wrap
+#' @importFrom ggplot2 theme_minimal theme_bw theme element_text element_rect
+#' @importFrom ggplot2 labs ggtitle
+#' @importFrom sensobol sobol_matrices sobol_indices
+#' @importFrom hydroGOF NSE KGE
+#' @importFrom parallel makeCluster stopCluster clusterExport clusterEvalQ detectCores
+#' @importFrom foreach foreach %dopar%
+#' @importFrom doSNOW registerDoSNOW
+#' @importFrom grDevices dev.cur dev.off
+#' @importFrom stats median quantile
+#' @importFrom utils flush.console read.csv read.table write.csv
+NULL
 
-# Note: COSERO functions loaded from package
-# (run_cosero, read_cosero_output, read_defaults, etc.)
+utils::globalVariables(c(
+  "year_month", "year", "output", "parameter", "value", "date",
+  "sensitivity", "original", "parameters", "std.error", "low.ci", "high.ci",
+  "q05", "q25", "q75", "q95", ".", "batch_position"
+))
 
 # Helper Functions #####
 
@@ -25,6 +35,7 @@ library(foreach)
 #' @param start_time Start time of ensemble
 #' @param run_type Type of run ("Simulation" or other label)
 #' @param quiet Suppress output
+#' @keywords internal
 display_progress <- function(current, total, start_time, run_type = "Simulation", quiet = FALSE) {
   if (quiet) return(invisible(NULL))
 
@@ -70,6 +81,7 @@ display_progress <- function(current, total, start_time, run_type = "Simulation"
 #'
 #' @param seconds Time in seconds
 #' @return Formatted string
+#' @keywords internal
 format_time_duration <- function(seconds) {
   if (seconds < 60) {
     return(sprintf("%.1fs", seconds))
@@ -195,13 +207,13 @@ create_custom_bounds <- function(parameters,
   n_params <- length(parameters)
 
   if (length(min) != n_params) {
-    stop("Length of 'min' must match length of 'parameters'")
+    stop("Length of 'min' must match length of 'parameters'", call. = FALSE)
   }
   if (length(max) != n_params) {
-    stop("Length of 'max' must match length of 'parameters'")
+    stop("Length of 'max' must match length of 'parameters'", call. = FALSE)
   }
   if (length(modification_type) != n_params) {
-    stop("Length of 'modification_type' must match length of 'parameters'")
+    stop("Length of 'modification_type' must match length of 'parameters'", call. = FALSE)
   }
 
   # Validate modification types
@@ -209,14 +221,15 @@ create_custom_bounds <- function(parameters,
   invalid_types <- modification_type[!modification_type %in% valid_types]
   if (length(invalid_types) > 0) {
     stop("Invalid modification_type: ", paste(invalid_types, collapse = ", "),
-         "\nValid types are: ", paste(valid_types, collapse = ", "))
+         "\nValid types are: ", paste(valid_types, collapse = ", "),
+         call. = FALSE)
   }
 
   # Validate min < max
   if (any(min >= max)) {
     invalid_idx <- which(min >= max)
     stop("min must be less than max for parameters: ",
-         paste(parameters[invalid_idx], collapse = ", "))
+         paste(parameters[invalid_idx], collapse = ", "), call. = FALSE)
   }
 
   # Set sampling ranges (for Sobol) - Defaults to physical bounds (Target Value strategy)
@@ -231,19 +244,19 @@ create_custom_bounds <- function(parameters,
   if (is.null(default)) {
     default <- ifelse(modification_type == "relchg", 1.0, (min + max) / 2)
   } else if (length(default) != n_params) {
-    stop("Length of 'default' must match length of 'parameters'")
+    stop("Length of 'default' must match length of 'parameters'", call. = FALSE)
   }
 
   if (is.null(description)) {
     description <- paste("Parameter:", parameters)
   } else if (length(description) != n_params) {
-    stop("Length of 'description' must match length of 'parameters'")
+    stop("Length of 'description' must match length of 'parameters'", call. = FALSE)
   }
 
   if (is.null(category)) {
     category <- rep("custom", n_params)
   } else if (length(category) != n_params) {
-    stop("Length of 'category' must match length of 'parameters'")
+    stop("Length of 'category' must match length of 'parameters'", call. = FALSE)
   }
 
   # Create tibble in same format as CSV
@@ -323,7 +336,8 @@ load_parameter_bounds <- function(bounds_file = NULL,
   # Option 2: Build custom bounds from individual parameters
   if (!is.null(custom_min) && !is.null(custom_max) && !is.null(custom_modification_type)) {
     if (is.null(parameters)) {
-      stop("'parameters' must be specified when using custom_min, custom_max, and custom_modification_type")
+      stop("'parameters' must be specified when using custom_min, custom_max, and custom_modification_type",
+           call. = FALSE)
     }
 
     custom_bounds <- create_custom_bounds(
@@ -340,7 +354,7 @@ load_parameter_bounds <- function(bounds_file = NULL,
   # Option 3: Load from CSV file
   # Use default parameter bounds file from package if not specified
   if (is.null(bounds_file)) {
-    bounds_file <- system.file("extdata", "parameter_bounds.csv", package = "COSERO")
+    bounds_file <- system.file("extdata", "parameter_bounds.csv", package = "CoseRo")
     if (bounds_file == "") {
       stop("Could not find parameter_bounds.csv in package installation.\n",
            "Either install the package data or provide a custom bounds_file path.",
@@ -348,7 +362,8 @@ load_parameter_bounds <- function(bounds_file = NULL,
     }
   } else if (!file.exists(bounds_file)) {
     stop("Parameter bounds file not found: ", bounds_file,
-         "\nEither provide a valid CSV file path or use custom bounds parameters")
+         "\nEither provide a valid CSV file path or use custom bounds parameters",
+         call. = FALSE)
   }
 
   bounds <- read.csv(bounds_file, stringsAsFactors = FALSE)
@@ -403,6 +418,11 @@ create_sobol_bounds <- function(par_bounds) {
 #'   \item{parameter_sets}{Scaled parameter sets (tibble with n*(k+2) rows)}
 #'   \item{n}{Base sample size}
 #'   \item{par_names}{Parameter names}
+#'
+#' @seealso
+#' \code{\link{load_parameter_bounds}} to load parameter bounds from CSV,
+#' \code{\link{create_sobol_bounds}} to create bounds matrix for Sobol sampling,
+#' \code{\link{calculate_sobol_indices}} to compute sensitivity indices from results
 #'
 #' @export
 #' @examples
@@ -460,6 +480,11 @@ generate_sobol_samples <- function(par_bounds, n = 50, order = "first") {
 #'   \item{parameter_sets}{Original parameter sets used}
 #'   \item{runtime_minutes}{Total runtime in minutes}
 #'
+#' @seealso
+#' \code{\link{run_cosero_ensemble_parallel}} for parallel execution,
+#' \code{\link{extract_ensemble_metrics}} to extract pre-calculated metrics from results,
+#' \code{\link{calculate_ensemble_metrics}} to calculate metrics from QSIM/QOBS
+#'
 #' @export
 #' @examples
 #' \dontrun{
@@ -502,7 +527,7 @@ run_cosero_ensemble <- function(project_path,
   }
 
   if (!file.exists(par_file)) {
-    stop("Parameter file not found: ", par_file)
+    stop("Parameter file not found: ", par_file, call. = FALSE)
   }
 
   if (!quiet) cat("Using parameter file:", par_file, "\n")
@@ -612,7 +637,7 @@ run_cosero_ensemble <- function(project_path,
 
   runtime <- difftime(Sys.time(), start_time, units = "mins")
   if (!quiet) {
-    cat(sprintf("\n✓ Ensemble completed in %s\n", format_time_duration(as.numeric(runtime) * 60)))
+    cat(sprintf("\nDone: Ensemble completed in %s\n", format_time_duration(as.numeric(runtime) * 60)))
     cat(sprintf("  Average per run: %s\n", format_time_duration(runtime * 60 / n_runs)))
   }
 
@@ -628,6 +653,7 @@ run_cosero_ensemble <- function(project_path,
 #' @param par_file Path to parameter file (tabular format with zones)
 #' @param param_names Vector of parameter names to read
 #' @param zone_id Zone ID to extract parameters from (default: first zone). Use "all" to read all zones.
+#' @param quiet Suppress messages
 #' @return If zone_id is specified: Named list of parameter values.
 #'         If zone_id = "all": Data frame with columns NZ_ (zone ID) and one column per parameter
 #' @export
@@ -662,7 +688,7 @@ read_parameter_table <- function(par_file, param_names, zone_id = NULL, quiet = 
   zone_data <- param_data[param_data$NZ_ == zone_id, ]
 
   if (nrow(zone_data) == 0) {
-    stop("Zone ", zone_id, " not found in parameter file")
+    stop("Zone ", zone_id, " not found in parameter file", call. = FALSE)
   }
 
   values <- list()
@@ -690,6 +716,9 @@ read_parameter_table <- function(par_file, param_names, zone_id = NULL, quiet = 
 #' @param param_structure Pre-loaded parameter file structure (from ensemble function)
 #' @param zones Vector of zone IDs to modify (NULL = all zones)
 #' @param quiet Suppress messages
+#'
+#' @seealso \code{\link{modify_parameter_table}} for the standard version
+#' @keywords internal
 modify_parameter_table_fast <- function(par_file, params, par_bounds, original_values,
                                         param_structure, zones = NULL, quiet = FALSE) {
   # Reset working copy from original (fast - no file I/O!)
@@ -757,7 +786,8 @@ modify_parameter_table_fast <- function(par_file, params, par_bounds, original_v
         param_data[zone_mask, param_col] <- param_data[zone_mask, param_col] + offset
         
       } else {
-        stop("Unknown modification type: ", mod_type, ". Use 'relchg' or 'abschg'.")
+        stop("Unknown modification type: ", mod_type, ". Use 'relchg' or 'abschg'.",
+             call. = FALSE)
       }
 
       # Apply physical bounds
@@ -898,7 +928,8 @@ modify_parameter_table <- function(par_file, params, par_bounds, original_values
         param_data[zone_mask, param_col] <- param_data[zone_mask, param_col] + offset
         
       } else {
-        stop("Unknown modification type: ", mod_type, ". Use 'relchg' or 'abschg'.")
+        stop("Unknown modification type: ", mod_type, ". Use 'relchg' or 'abschg'.",
+             call. = FALSE)
       }
 
       # Apply physical bounds as safeguards
@@ -942,6 +973,12 @@ modify_parameter_table <- function(par_file, params, par_bounds, original_values
 #' @param quiet Suppress output
 #' @param statevar_source State variable source: 1 = read from parameter file (default), 2 = read from statevar.dmp file (warm start)
 #' @return List with results and parameters
+#'
+#' @seealso
+#' \code{\link{run_cosero_ensemble}} for sequential execution,
+#' \code{\link{extract_ensemble_metrics}} to extract pre-calculated metrics from results,
+#' \code{\link{calculate_ensemble_metrics}} to calculate metrics from QSIM/QOBS
+#'
 #' @export
 run_cosero_ensemble_parallel <- function(project_path,
                                          parameter_sets,
@@ -976,15 +1013,11 @@ run_cosero_ensemble_parallel <- function(project_path,
 
   par_file <- file.path(project_path, "input", par_filename)
   if (!file.exists(par_file)) {
-    stop("Parameter file not found: ", par_file)
+    stop("Parameter file not found: ", par_file, call. = FALSE)
   }
 
   # Read original parameter values (detect format) - always quiet
-  original_values <- tryCatch({
-    read_parameter_table(par_file, names(parameter_sets), zone_id = NULL, quiet = TRUE)
-  }, error = function(e) {
-    read_parameter_file(par_file, names(parameter_sets))
-  })
+  original_values <- read_parameter_table(par_file, names(parameter_sets), zone_id = NULL, quiet = TRUE)
 
   # Split runs into chunks for parallel processing
   run_indices <- 1:n_runs
@@ -1009,25 +1042,17 @@ run_cosero_ensemble_parallel <- function(project_path,
   # Export package path to cluster
   clusterExport(cl, c("pkg_source_path"), envir = environment())
 
-  # Load required libraries and package on each worker
+  # Load CoseRo package on each worker (brings all Imports along)
   clusterEvalQ(cl, {
-    library(dplyr)
-    library(readr)
-    library(tibble)
-    library(stringr)
-    library(lubridate)
-    library(data.table)
-
-    # Try to load COSERO package (works for installed package)
-    if (requireNamespace("COSERO", quietly = TRUE)) {
-      library(COSERO)
+    if (requireNamespace("CoseRo", quietly = TRUE)) {
+      library(CoseRo)
     } else {
       # If not installed, try devtools::load_all() for development
       if (requireNamespace("devtools", quietly = TRUE)) {
-        # Use the exported pkg_source_path from parent environment
         devtools::load_all(pkg_source_path, quiet = TRUE)
       } else {
-        stop("COSERO package not installed and devtools not available")
+        stop("CoseRo package not installed and devtools not available",
+             call. = FALSE)
       }
     }
   })
@@ -1099,7 +1124,8 @@ run_cosero_ensemble_parallel <- function(project_path,
 
       # robocopy codes: 0-7=success, 8+=error
       if (exit_code >= 8) {
-        stop(sprintf("robocopy failed (exit code %d) copying to: %s", exit_code, wdir))
+        stop(sprintf("robocopy failed (exit code %d) copying to: %s", exit_code, wdir),
+             call. = FALSE)
       }
     } else {
       # Unix: prefer rsync if available, fallback to cp
@@ -1285,7 +1311,7 @@ run_cosero_ensemble_parallel <- function(project_path,
 
   runtime <- difftime(Sys.time(), start_time, units = "mins")
   if (!quiet) {
-    cat(sprintf("\n✓ Ensemble completed in %s\n", format_time_duration(as.numeric(runtime) * 60)))
+    cat(sprintf("\nDone: Ensemble completed in %s\n", format_time_duration(as.numeric(runtime) * 60)))
     cat(sprintf("  Average per run: %s\n", format_time_duration(runtime * 60 / n_runs)))
 
     # Calculate efficiency
@@ -1298,7 +1324,7 @@ run_cosero_ensemble_parallel <- function(project_path,
                 efficiency, actual_speedup, n_cores))
   }
 
-  if (!quiet) cat("✓ Memory cleanup complete\n\n")
+  if (!quiet) cat("Done: Memory cleanup complete\n\n")
 
   return(list(
     results = results,
@@ -1334,7 +1360,7 @@ extract_ensemble_output <- function(ensemble_results,
       } else if (variable == "et") {
         data <- result$output_data$evapotranspiration
       } else {
-        stop("Unknown variable: ", variable)
+        stop("Unknown variable: ", variable, call. = FALSE)
       }
 
       # Aggregate
@@ -1529,7 +1555,7 @@ calculate_ensemble_metrics <- function(ensemble_results,
           } else if (metric == "PBIAS") {
             hydroGOF::pbias(simulated, observed)
           } else {
-            stop("Unknown metric: ", metric)
+            stop("Unknown metric: ", metric, call. = FALSE)
           }
         }, error = function(e) {
           NA
@@ -1761,11 +1787,12 @@ plot_ensemble_uncertainty <- function(ensemble_output, observed = NULL,
   # Check if we got any valid data
   n_valid <- sum(sapply(timeseries_list, function(x) !all(is.na(x))))
   if (n_valid == 0) {
-    stop("No valid timeseries data found in ensemble output. Check subbasin_id and variable.")
+    stop("No valid timeseries data found in ensemble output. Check subbasin_id and variable.",
+         call. = FALSE)
   }
 
   if (is.null(dates)) {
-    stop("Could not extract dates from ensemble output")
+    stop("Could not extract dates from ensemble output", call. = FALSE)
   }
 
   # Convert list to matrix

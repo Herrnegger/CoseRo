@@ -4,7 +4,7 @@
 # Date: 2025-09-26
 
 # Load the COSERO package
-library(COSERO)
+library(CoseRo)
 
 # ==============================================================================
 # COSERO PARAMETER DOCUMENTATION

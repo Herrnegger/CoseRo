@@ -16,10 +16,10 @@ Normalized path string with consistent separators
 \description{
 This function is designed to handle common copy-paste scenarios from Windows Explorer:
 \itemize{
-\item Paths with forward slashes: "D:/Projects/COSERO"
-\item Paths with backslashes: "D:\Projects\COSERO"
-\item Paths with quotes: '"D:\Projects\COSERO"' (from Shift+Right-click -> Copy as path)
-\item Mixed slashes: "D:/Projects\COSERO"
+\item Paths with forward slashes: \code{"D:/Projects/COSERO"}
+\item Paths with backslashes: \code{"D:\\\\Projects\\\\COSERO"}
+\item Paths with quotes: \code{'"D:\\\\Projects\\\\COSERO"'} (from Shift+Right-click -> Copy as path)
+\item Mixed slashes: \code{"D:/Projects\\\\COSERO"}
 \item Leading/trailing whitespace
 }
 }

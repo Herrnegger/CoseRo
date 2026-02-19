@@ -15,3 +15,4 @@ Formatted string
 \description{
 Format Time Duration
 }
+\keyword{internal}

@@ -57,3 +57,8 @@ results <- run_cosero_ensemble(
 nse <- extract_ensemble_metrics(results, subbasin_id = "0001", metric = "NSE")
 }
 }
+\seealso{
+\code{\link{run_cosero_ensemble_parallel}} for parallel execution,
+\code{\link{extract_ensemble_metrics}} to extract pre-calculated metrics from results,
+\code{\link{calculate_ensemble_metrics}} to calculate metrics from QSIM/QOBS
+}

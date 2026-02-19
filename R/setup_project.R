@@ -35,16 +35,17 @@
 setup_cosero_project_example <- function(project_path, overwrite = FALSE) {
 
   if (is.null(project_path) || nchar(project_path) == 0) {
-    stop("project_path must be specified")
+    stop("project_path must be specified", call. = FALSE)
   }
 
   # Find the example zip
-  zip_path <- system.file("extdata", "COSERO_Wildalpen.zip", package = "COSERO")
+  zip_path <- system.file("extdata", "COSERO_Wildalpen.zip", package = "CoseRo")
 
   if (!file.exists(zip_path)) {
     stop(
       "Example project zip not found at: ", zip_path, "\n",
-      "The package installation may be incomplete."
+      "The package installation may be incomplete.",
+      call. = FALSE
     )
   }
 
@@ -155,11 +156,11 @@ setup_cosero_project <- function(project_path,
 
   # Validate inputs
   if (is.null(project_path) || nchar(project_path) == 0) {
-    stop("project_path must be specified")
+    stop("project_path must be specified", call. = FALSE)
   }
 
   if (!template %in% c("minimal", "example")) {
-    stop("template must be 'minimal' or 'example'")
+    stop("template must be 'minimal' or 'example'", call. = FALSE)
   }
 
   # Create main project directory
@@ -195,7 +196,8 @@ setup_cosero_project <- function(project_path,
   # Verify COSERO.exe exists
   exe_path <- file.path(project_path, "COSERO.exe")
   if (!file.exists(exe_path)) {
-    stop("COSERO.exe not found after binary installation. Check cosero_bin_source.")
+    stop("COSERO.exe not found after binary installation. Check cosero_bin_source.",
+         call. = FALSE)
   }
 
   # Create defaults.txt if requested
@@ -216,7 +218,7 @@ setup_cosero_project <- function(project_path,
           sapply(validation$messages, message)
         }
         if (!validation$valid) {
-          stop("Invalid defaults_settings provided")
+          stop("Invalid defaults_settings provided", call. = FALSE)
         }
         # Create with custom settings
         create_default_defaults(defaults_file, quiet = TRUE)
@@ -279,13 +281,14 @@ copy_cosero_binaries <- function(source, destination, overwrite = FALSE, quiet =
 
   if (source == "package") {
     # Extract from package zip
-    zip_path <- system.file("extdata", "cosero_binaries.zip", package = "COSERO")
+    zip_path <- system.file("extdata", "cosero_binaries.zip", package = "CoseRo")
 
     if (!file.exists(zip_path)) {
       stop(
         "Package binary zip not found at: ", zip_path, "\n",
         "Please ensure inst/extdata/cosero_binaries.zip exists in the package,\n",
-        "or specify cosero_bin_source as a path to COSERO binaries."
+        "or specify cosero_bin_source as a path to COSERO binaries.",
+        call. = FALSE
       )
     }
 
@@ -298,7 +301,7 @@ copy_cosero_binaries <- function(source, destination, overwrite = FALSE, quiet =
     root_files <- zip_contents$Name[!grepl("/", zip_contents$Name)]
 
     if (length(root_files) == 0) {
-      stop("No files found in cosero_binaries.zip")
+      stop("No files found in cosero_binaries.zip", call. = FALSE)
     }
 
     # Extract to destination
@@ -315,7 +318,7 @@ copy_cosero_binaries <- function(source, destination, overwrite = FALSE, quiet =
     root_files <- zip_contents$Name[!grepl("/", zip_contents$Name)]
 
     if (length(root_files) == 0) {
-      stop("No root-level files found in zip:", source)
+      stop("No root-level files found in zip:", source, call. = FALSE)
     }
 
     utils::unzip(source, files = root_files, exdir = destination, overwrite = overwrite)
@@ -331,7 +334,7 @@ copy_cosero_binaries <- function(source, destination, overwrite = FALSE, quiet =
     bin_files <- list.files(source, pattern = "\\.(exe|dll)$", ignore.case = TRUE, full.names = FALSE)
 
     if (length(bin_files) == 0) {
-      stop("No .exe or .dll files found in:", source)
+      stop("No .exe or .dll files found in:", source, call. = FALSE)
     }
 
     # Copy each file
@@ -354,7 +357,8 @@ copy_cosero_binaries <- function(source, destination, overwrite = FALSE, quiet =
       "Must be:\n",
       "  - 'package' (to use bundled binaries)\n",
       "  - Path to folder containing COSERO.exe and DLLs\n",
-      "  - Path to zip file with binaries"
+      "  - Path to zip file with binaries",
+      call. = FALSE
     )
   }
 
@@ -373,7 +377,7 @@ copy_cosero_binaries <- function(source, destination, overwrite = FALSE, quiet =
 #' @keywords internal
 copy_template_files <- function(input_dir, overwrite = FALSE, quiet = FALSE) {
   # Check for template files in package
-  template_path <- system.file("extdata", "template_input", package = "COSERO")
+  template_path <- system.file("extdata", "template_input", package = "CoseRo")
 
   if (!dir.exists(template_path)) {
     if (!quiet) {
@@ -440,7 +444,7 @@ show_required_files <- function(show_details = TRUE) {
     Description = c(
       "Model configuration settings",
       "Meteorological input file definitions",
-      "Model parameters (169 columns × NZ+2 rows)",
+      "Model parameters (169 columns x NZ+2 rows)",
       "Precipitation time series",
       "Temperature time series",
       "Observed discharge data",
@@ -468,7 +472,7 @@ show_required_files <- function(show_details = TRUE) {
   cat("REQUIRED FILES:\n")
   req_files <- files_df[files_df$Category == "REQUIRED", ]
   for (i in 1:nrow(req_files)) {
-    cat(sprintf("  [✓] %-22s - %s\n", req_files$Filename[i], req_files$Description[i]))
+    cat(sprintf("  [x] %-22s - %s\n", req_files$Filename[i], req_files$Description[i]))
     if (show_details) {
       cat(sprintf("      %s\n", req_files$Details[i]))
     }
@@ -504,7 +508,7 @@ show_required_files <- function(show_details = TRUE) {
 #' list_package_binaries()
 #' }
 list_package_binaries <- function() {
-  zip_path <- system.file("extdata", "cosero_binaries.zip", package = "COSERO")
+  zip_path <- system.file("extdata", "cosero_binaries.zip", package = "CoseRo")
 
   if (!file.exists(zip_path)) {
     message("Package binary zip not found at: ", zip_path)

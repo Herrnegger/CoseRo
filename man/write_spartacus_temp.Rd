@@ -77,53 +77,13 @@ then aggregated to zones.
 \strong{Why not use simple arithmetic mean?}
 The simple mean \code{(Tmin + Tmax) / 2} assumes symmetric diurnal temperature,
 but Tmin occurs briefly before sunrise while most of the day is closer to Tmin.
-This overestimates Tmean by 0.5-2°C, significantly affecting snow accumulation.
-}
-\examples{
-\dontrun{
-library(sf)
-zones <- st_read("path/to/your/zones.shp")
-
-# Method 1: Simple weighted mean (default)
-write_spartacus_temp(
-  tmin_dir = "path/to/tmin",
-  tmax_dir = "path/to/tmax",
-  output_dir = "output/data",
-  model_zones = zones,
-  tmean_method = "simple",
-  tmin_weight = 0.6,  # 60\% Tmin, 40\% Tmax
-  n_cores = 4
-)
-
-# Method 2: Dall'Amico - day-length adjusted (recommended for Alps)
-write_spartacus_temp(
-  tmin_dir = "path/to/tmin",
-  tmax_dir = "path/to/tmax",
-  output_dir = "output/data",
-  model_zones = zones,
-  tmean_method = "dall_amico",
-  n_cores = 4
-)
-
-# Method 3: Parton-Logan - full diurnal simulation (most accurate, slower)
-write_spartacus_temp(
-  tmin_dir = "path/to/tmin",
-  tmax_dir = "path/to/tmax",
-  output_dir = "output/data",
-  model_zones = zones,
-  tmean_method = "parton_logan",
-  n_cores = 4
-)
-}
+This overestimates Tmean by 0.5-2 degrees C, significantly affecting snow accumulation.
 }
 \references{
-Dall'Amico, M. & Hornsteiner, M. (2006). A simple method for estimating daily
-and monthly mean temperatures from daily minima and maxima. Int. J. Climatol.
-26(13):1929-1936. \doi{10.1002/joc.1363}
+Dall'Amico, M. and Hornsteiner, M. (2006). A simple method for estimating daily
+and monthly mean temperatures from daily minima and maxima. \emph{Int. J. Climatol.}
+\strong{26}(13):1929-1936. \doi{10.1002/joc.1363}
 
-Parton, W.J. & Logan, J.A. (1981). A model for diurnal variation in soil and
-air temperature. Agric. Meteorol. 23:205-216. \doi{10.1016/0002-1571(81)90105-9}
-
-The sparse weight matrix approach (see \code{\link{spartacus_preprocessing}})
-enables processing of 60+ years of daily data.
+Parton, W.J. and Logan, J.A. (1981). A model for diurnal variation in soil and
+air temperature. \emph{Agric. Meteorol.} \strong{23}:205-216. \doi{10.1016/0002-1571(81)90105-9}
 }

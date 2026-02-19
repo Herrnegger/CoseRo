@@ -1,4 +1,4 @@
-# COSERO <img src="man/figures/logo.svg" align="right" height="139" alt="COSERO logo" />
+# CoseRo <img src="man/figures/logo.svg" align="right" height="139" alt="CoseRo logo" />
 
 **R Interface and Shiny App for COSERO Hydrological Model**
 
@@ -8,26 +8,19 @@
 
 <!-- badges: end -->
 
+> **⚠️ Work in Progress** — This package is under active development. Features are functional, but not fully tested. Use with caution and validate results for your specific setup.
+
 ## Overview
 
-**COSERO** provides a complete R interface for the COSERO hydrological model, including:
+**CoseRo** provides a complete R interface for the COSERO hydrological model, including:
 
 -   ✅ **Automated Model Execution**: Run COSERO simulations programmatically from R scripts
 -   ✅ **Fast Output Reading**: Efficiently read and parse 13+ different COSERO output file formats
 -   ✅ **Interactive Visualization**: Modern Shiny web application with 5 analysis tabs
+-   ✅ **Parameter Optimization**: DDS and SCE-UA algorithms for automated parameter calibration
 -   ✅ **Sensitivity Analysis**: Sobol-based global sensitivity analysis framework with parallel computing
 -   ✅ **Input Data Preprocessing**: Convert SPARTACUS gridded climate data to COSERO input format
 -   ✅ **Flexible Usage**: Use as scripting library OR interactive GUI
-
-## Important Notice
-
-**⚠️ SENSITIVITY ANALYSIS FUNCTIONALITY**
-
-The sensitivity analysis features (Sobol-based global sensitivity analysis) are currently under development and have not been fully tested. While the core implementation is functional, further validation is necessary.
-
-**Status:** - Parameter bounds and Sobol sampling: Implemented - Ensemble execution (sequential (working) and parallel (to be tested): Implemented - Parameter modification for tabular and simple formats: Implemented - Sensitivity indices calculation and visualization: Implemented - Comprehensive testing: open
-
-If you plan to use the sensitivity analysis functionality, please conduct thorough testing with your specific COSERO setup and validate results carefully.
 
 ## Installation
 
@@ -42,35 +35,23 @@ install.packages("devtools")
 # Load all functions from your package for development
 devtools::load_all()
 
-# Now you can use all COSERO functions without installing
+# Now you can use all CoseRo functions without installing
 launch_cosero_app()
 ```
 
-This loads your package directly from the source code without installing it, making development faster.
-
 ### Option 2: Install as Regular Package
 
-For regular use, install the package locally:
-
 ``` r
-# Install from source directory
 devtools::install()
-
-# Now you can use library
-library(COSERO)
+library(CoseRo)
 launch_cosero_app()
 ```
 
 ### Option 3: Install from GitHub
 
-Once published, install directly from GitHub:
-
 ``` r
-# Install remotes if you don't have it
 install.packages("remotes")
-
-# Install COSERO package
-remotes::install_github("Herrnegger/COSERO-R")
+remotes::install_github("Herrnegger/CoseRo")
 ```
 
 ### System Requirements
@@ -87,18 +68,14 @@ remotes::install_github("Herrnegger/COSERO-R")
 
 ## Quick Start
 
-### Get Started with an example project (Wildalpen)
-
 ``` r
-library(COSERO)
+library(CoseRo)
 
-# 1. Create a working example project (includes data, binaries, outputs)
+# 1. Create a working example project (Wildalpen catchment, includes data and binaries)
 setup_cosero_project_example("D:/COSERO_example")
 
 # 2. Launch app with auto-loaded data
 launch_cosero_app("D:/COSERO_example")
-
-# Done! Explore the example in the interactive app.
 ```
 
 ## Usage
@@ -106,7 +83,7 @@ launch_cosero_app("D:/COSERO_example")
 ### 1. Interactive Shiny App (Recommended for Beginners)
 
 ``` r
-library(COSERO)
+library(CoseRo)
 
 # Launch with a specific project (auto-loads data)
 launch_cosero_app("path/to/project")
@@ -117,273 +94,220 @@ launch_cosero_app()
 
 The Shiny app provides five interactive analysis tabs:
 
-**1. COSERO Run Tab** - Browse and select COSERO project directory - Configure simulation settings (dates, spin-up, output type) - Choose state variable source (cold start vs warm start from statevar.dmp) - Select monthly temperature option (from file or calculated) - Execute model runs with one click - View execution log and runtime statistics
+**1. COSERO Run Tab** — Browse project directory, configure simulation settings, choose warm/cold start, execute runs, view log.
 
-**2. Time Series Tab** - Interactive plotly graphs for discharge (Q_obs vs Q_sim) - Precipitation components (rain vs snow) - Runoff components (surface, subsurface, baseflow, glacier melt) - Water balance variables (soil moisture, groundwater, snow water equivalent) - Zoom, pan, and hover for detailed values - Date range filtering
+**2. Time Series Tab** — Interactive plotly graphs for discharge, precipitation, runoff components, water balance. Zoom, pan, hover for detail.
 
-**3. Seasonality Tab** - Monthly aggregated analysis - Compare observed vs simulated patterns - Precipitation and evapotranspiration monthly totals - Visualize seasonal water balance - Identify model performance by season
+**3. Seasonality Tab** — Monthly aggregated analysis, observed vs simulated patterns, seasonal water balance.
 
-**4. Statistics Tab** - Comprehensive performance metrics table - NSE (Nash-Sutcliffe Efficiency) - KGE (Kling-Gupta Efficiency) - BIAS (Bias percentage) - RMSE (Root Mean Square Error) - Correlation coefficient and other metrics - Per-subbasin statistics
+**4. Statistics Tab** — NSE, KGE, BIAS, RMSE, correlation — per-subbasin performance metrics table.
 
-**5. Export Tab** - Download interactive plots as PNG - Export time series data as CSV - Export statistics tables - Batch export functionality
+**5. Export Tab** — Download plots as PNG, time series as CSV, statistics tables.
 
 ### 2. Scripting with R Functions
 
 #### Run COSERO Model
 
 ``` r
-library(COSERO)
+library(CoseRo)
 
-# Basic run with defaults (reads existing defaults.txt)
-result <- run_cosero(
-  project_path = "path/to/cosero/project"
-)
-
-# Run with custom settings
 result <- run_cosero(
   project_path = "path/to/project",
   defaults_settings = list(
     STARTDATE = "2015 1 1 0 0",
-    ENDDATE = "2015 12 31 23 59",
-    SPINUP = 365,
+    ENDDATE   = "2015 12 31 23 59",
+    SPINUP    = 365,
     OUTPUTTYPE = 3  # 1=basic, 2=+glacier/met, 3=+monitor/longterm
   ),
-  statevar_source = 1,  # 1 = cold start (from para.txt), 2 = warm start (from statevar.dmp)
-  tmmon_option = 1,     # 1 = use TMMon from para.txt, 2 = calculate from input data
-  read_outputs = TRUE,  # Automatically read all outputs after successful run
-  quiet = FALSE         # Show progress messages
+  statevar_source = 1,  # 1 = cold start, 2 = warm start (statevar.dmp)
+  read_outputs    = TRUE
 )
 
-# Check results
-print(result$success)          # TRUE if simulation succeeded
-print(result$runtime_seconds)  # Execution time
-print(result$exit_code)        # 0 = success
-
-# Access output data directly
-discharge <- result$output_data$runoff
+print(result$success)
+discharge  <- result$output_data$runoff
 statistics <- result$output_data$statistics
 
-# Warm start example (use state from previous run)
-# COSERO.exe saves statevar.dmp automatically, enabling warm start
+# Warm start example
 result2 <- run_cosero(
-  project_path = "path/to/project",
-  defaults_settings = list(
-    STARTDATE = "2016 1 1 0 0",
-    ENDDATE = "2016 12 31 23 59"
-  ),
-  statevar_source = 2  # Use saved state from previous simulation
+  project_path    = "path/to/project",
+  defaults_settings = list(STARTDATE = "2016 1 1 0 0", ENDDATE = "2016 12 31 23 59"),
+  statevar_source = 2  # Use saved state from previous run
 )
 ```
 
 #### Read COSERO Outputs
 
-The package can read 13+ different COSERO output file formats automatically based on OUTPUTTYPE:
-
 ``` r
 # Read all available output files (auto-detects OUTPUTTYPE)
 output <- read_cosero_output(
-  output_dir = "path/to/project/output",
+  output_dir    = "path/to/project/output",
   defaults_file = "path/to/project/input/defaults.txt"
 )
 
-# Access different data types
-discharge <- output$runoff              # COSERO.runoff (QOBS, QSIM, Qloc)
-precipitation <- output$precipitation   # COSERO.prec (PRAIN, PSNOW by subbasin)
-runoff_components <- output$runoff_components  # COSERO.plus (QAB123, QAB23, QAB3, glacmelt)
-water_balance <- output$water_balance   # COSERO.plus1 (BW0, BW3, SWW, cumulative P/ET/Q)
-statistics <- output$statistics         # statistics.txt (NSE, KGE, BIAS, RMSE, etc.)
-topology <- output$topology             # topology.txt (subbasin structure)
+discharge        <- output$runoff              # COSERO.runoff
+precipitation    <- output$precipitation       # COSERO.prec
+runoff_comps     <- output$runoff_components   # COSERO.plus
+water_balance    <- output$water_balance       # COSERO.plus1
+statistics       <- output$statistics          # statistics.txt
+topology         <- output$topology            # topology.txt
+# OUTPUTTYPE 2+
+glacier          <- output$glacier             # var_glac.txt
+meteorology      <- output$meteorology         # var_MET.txt
+# OUTPUTTYPE 3
+monitor          <- output$monitor             # monitor.txt
+longterm_annual  <- output$longterm_annual     # long-term_annual_means.txt
 
-# OUTPUTTYPE 2 files (if available)
-glacier <- output$glacier               # var_glac.txt
-meteorology <- output$meteorology       # var_MET.txt
+# Extract metrics from a single run
+metrics <- extract_run_metrics(result, subbasin_id = "001", metric = "NSE")
+metrics <- calculate_run_metrics(result, subbasin_id = "001", metric = "KGE")
 
-# OUTPUTTYPE 3 files (if available)
-monitor <- output$monitor               # monitor.txt (catchment-wide variables)
-monitor_sb <- output$monitor_subbasins  # monitor_sb*.txt (per-subbasin detailed outputs)
-rundepth <- output$rundepth             # rundepth.txt (runoff depth)
-longterm_annual <- output$longterm_annual     # long-term_annual_means.txt
-longterm_seasonal <- output$longterm_seasonal # long-term_seasonal_means.txt
-
-# Access metadata
-output$metadata$outputtype              # Detected OUTPUTTYPE (1, 2, or 3)
-output$metadata$subbasins               # List of available subbasins
-
-# Get specific subbasin data
+# Subbasin helpers
 subbasin_data <- get_subbasin_data(output$runoff, subbasin_id = "0001")
-# Returns data frame with DateTime, Date, Q_obs, Q_sim columns
-
-# List all available subbasins
 list_subbasins(output$runoff)
-
-# Get parameters for specific subbasin (if parameter file was read)
-if (!is.null(output$parameters)) {
-  sb_params <- get_subbasin_parameters(output$parameters, subbasin_id = 1)
-}
 ```
+
+#### Parameter Optimization
+
+``` r
+library(CoseRo)
+
+# Define parameter bounds
+par_bounds <- create_optimization_bounds(
+  parameters        = c("BETA", "CTMAX", "M", "TAB1"),
+  lower             = c(1, 2, 20, 1),
+  upper             = c(6, 8, 600, 50),
+  modification_type = rep("relchg", 4)
+)
+# Or load from bundled CSV (30 pre-defined parameters)
+par_bounds <- load_parameter_bounds(parameters = c("BETA", "CTMAX", "M", "TAB1"))
+
+# DDS optimization (fast, recommended for 3-10 parameters)
+result_dds <- optimize_cosero_dds(
+  cosero_path       = "D:/COSERO_project",
+  par_bounds        = par_bounds,
+  target_subbasins  = "001",          # Only zones in this subbasin are modified
+  metric            = "NSE",
+  defaults_settings = list(SPINUP = 365, OUTPUTTYPE = 1),
+  max_iter          = 2000
+)
+# Optimized file auto-saved: input/para_optimized_NB1_NSE_<timestamp>.txt
+
+# SCE-UA optimization (more robust, slower)
+result_sce <- optimize_cosero_sce(
+  cosero_path      = "D:/COSERO_project",
+  par_bounds       = par_bounds,
+  target_subbasins = "001",
+  metric           = "KGE",
+  maxn             = 5000,
+  ngs              = 3
+)
+
+# Multi-objective (60% NSE + 40% KGE)
+result_multi <- optimize_cosero_dds(
+  cosero_path      = "D:/COSERO_project",
+  par_bounds       = par_bounds,
+  target_subbasins = "001",
+  metric           = c("NSE", "KGE"),
+  metric_weights   = c(0.6, 0.4),
+  max_iter         = 2000
+)
+
+# Visualize and export
+plot_cosero_optimization(result_dds)
+export_cosero_optimization(result_dds, "D:/optimization_results")
+```
+
+**DDS vs SCE-UA:** DDS is fast and efficient for most calibrations (3-10 parameters). SCE-UA is more robust for complex problems but requires more evaluations. The original parameter file is never modified — it is backed up and restored automatically.
 
 #### Sensitivity Analysis
 
-This functionality is still under testing. See Important Notice above.
-
-The package provides a framework for Sobol-based global sensitivity analysis:
-
 ``` r
-# 1. Define parameter bounds
-# Option A: Load from package CSV (30 pre-defined parameters)
-bounds <- load_parameter_bounds()
-
-# Option B: Load specific parameters only
-bounds <- load_parameter_bounds(
-  parameters = c("BETA", "CTMAX", "FK", "M")
-)
-
-# Option C: Create custom bounds manually
-# Note: All parameter modifications preserve spatial patterns
-# - relchg: multiply original values (preserves relative differences)
-# - abschg: add to original values (preserves absolute differences)
-custom_bounds <- create_custom_bounds(
-  parameter = c("BETA", "FK", "TCOR"),
-  min = c(0.1, 0.5, -2),        # Physical bounds
-  max = c(10, 2.0, 2),          # Physical bounds
-  default = c(1.0, 1.0, 0),     # Default values
-  modification_type = c("relchg", "relchg", "abschg"),  # How to modify
-  sample_min = c(0.5, 0.8, -1), # Sampling range for Sobol (optional)
-  sample_max = c(2.0, 1.5, 1)   # Sampling range for Sobol (optional)
-)
+# 1. Load parameter bounds
+bounds <- load_parameter_bounds(parameters = c("BETA", "CTMAX", "FK", "M"))
 
 # 2. Generate Sobol samples
-# Creates N * (2 + n_params) parameter sets
 sobol_bounds <- create_sobol_bounds(bounds)
-samples <- generate_sobol_samples(sobol_bounds, n = 100)  # 100 * (2 + n_params) runs
+samples      <- generate_sobol_samples(sobol_bounds, n = 100)
 
-# 3. Run ensemble simulations
-# Option A: Parallel execution (recommended, much faster)
+# 3. Run ensemble (parallel recommended)
 ensemble_result <- run_cosero_ensemble_parallel(
-  project_path = "path/to/project",
-  parameter_sets = samples$parameter_sets,
-  par_bounds = bounds,
-  base_settings = list(STARTDATE = "2015 1 1 0 0",
-                       ENDDATE = "2015 12 31 23 59"),
-  n_cores = 4  # Use NULL to auto-detect
+  project_path    = "path/to/project",
+  parameter_sets  = samples$parameter_sets,
+  par_bounds      = bounds,
+  base_settings   = list(STARTDATE = "2015 1 1 0 0", ENDDATE = "2015 12 31 23 59"),
+  n_cores         = 4
 )
 
-# Option B: Sequential execution (for debugging)
-ensemble_result <- run_cosero_ensemble(
-  project_path = "path/to/project",
-  parameter_sets = samples$parameter_sets,
-  par_bounds = bounds
-)
-
-# 4. Extract performance metrics
-# Method 1: Use COSERO's pre-calculated metrics (RECOMMENDED)
-# This is faster and uses spin-up correctly
-Y <- extract_ensemble_metrics(
-  ensemble_result,
-  subbasin_id = "001",
-  metric = "KGE"  # NSE, KGE, BIAS, RMSE, etc.
-)
-
-# Method 2: Calculate custom metrics (for metrics not in COSERO output)
-# Y_custom <- calculate_ensemble_metrics(
-#   ensemble_result,
-#   subbasin_id = "001",
-#   metric = "PBIAS",
-#   spinup = NULL  # Auto-read from defaults_settings
-# )
-
-# 5. Calculate Sobol sensitivity indices
+# 4. Extract metrics and calculate indices
+Y             <- extract_ensemble_metrics(ensemble_result, subbasin_id = "001", metric = "KGE")
 sobol_indices <- calculate_sobol_indices(Y, samples, boot = TRUE, R = 100)
 
-# 6. Visualize results
-# Main sensitivity plot
+# 5. Visualize and export
 plot_sobol(sobol_indices)
-
-# Parameter scatter plots (dotty plots)
 plot_dotty(samples$parameter_sets, Y, y_label = "KGE")
-
-# 7. Export results
-export_sensitivity_results(
-  output_dir = "sensitivity_results",
-  sobol_indices = sobol_indices,
-  parameter_sets = samples$parameter_sets,
-  metrics = Y,
-  prefix = "cosero_sa"
-)
+export_sensitivity_results("sensitivity_results", sobol_indices, samples$parameter_sets, Y)
 ```
-
-**Key Features:** - Supports both simple and tabular parameter file formats - Handles monthly parameters (e.g., TCor1-TCor12) automatically - Preserves spatial patterns in distributed parameters - Parallel execution with progress tracking - Works with all COSERO performance metrics (NSE, KGE, BIAS, RMSE, etc.)
 
 #### SPARTACUS Data Preprocessing
 
-The package includes functions to preprocess SPARTACUS v2.1 gridded climate data (GeoSphere Austria, DOI: <https://doi.org/10.60669/m6w8-s545>) into COSERO meteorological input format:
-
 ``` r
-library(COSERO)
+library(CoseRo)
 library(sf)
 
-# Load your modeling zones (must have a zone ID column)
 zones <- st_read("path/to/model_zones.shp")
 
-# Process precipitation data
-# Input: SPARTACUS2-DAILY_RR_YYYY.nc files
-# Output: P_NZ_[start_year]_[end_year].txt
+# Precipitation: SPARTACUS2-DAILY_RR_YYYY.nc → P_NZ_<years>.txt
 write_spartacus_precip(
-  nc_dir = "data/SPARTACUS_Daily/RR",
+  nc_dir     = "data/SPARTACUS_Daily/RR",
   output_dir = "output/cosero_input",
   model_zones = zones,
-  nz_col = "NZ",      # Column name with zone IDs
-  n_cores = 4         # Parallel processing (NULL = auto-detect)
+  nz_col     = "NZ",
+  n_cores    = 4
 )
 
-# Process temperature data (calculates Tmean from Tmin and Tmax)
-# Input: SPARTACUS2-DAILY_TN_YYYY.nc and SPARTACUS2-DAILY_TX_YYYY.nc files
-# Output: T_NZ_[start_year]_[end_year].txt
+# Temperature: TN + TX → Tmean → T_NZ_<years>.txt
 write_spartacus_temp(
-  tmin_dir = "data/SPARTACUS_Daily/TN",
-  tmax_dir = "data/SPARTACUS_Daily/TX",
-  output_dir = "output/cosero_input",
+  tmin_dir    = "data/SPARTACUS_Daily/TN",
+  tmax_dir    = "data/SPARTACUS_Daily/TX",
+  output_dir  = "output/cosero_input",
   model_zones = zones,
-  nz_col = "NZ",
-  n_cores = 4
+  nz_col      = "NZ",
+  tmean_method = "dall_amico",  # Recommended for Alpine catchments
+  n_cores     = 4
 )
 ```
 
-**Key Features:** - Uses a sparse weight matrix approach that maps modeling zones directly to raw NetCDF memory layout for extremely fast, RAM-efficient processing - Parallel processing with batched execution - Handles 10+ years of daily 1km data in minutes - Output format: YYYY MM DD HH mm NZ1 NZ2 ... NZn (COSERO meteorological input) - Pixel-level temperature calculation (Tmean = (Tmin + Tmax) / 2) before spatial aggregation - Automatic CRS reprojection if needed
+**Tmean methods:** `"simple"` (weighted average), `"dall_amico"` (day-length adjusted, recommended for Alps), `"parton_logan"` (full diurnal simulation). The simple arithmetic mean overestimates Tmean by 0.5–2°C.
 
-**SPARTACUS Dataset:** - Source: GeoSphere Austria (https://doi.org/10.60669/m6w8-s545) - Spatial Resolution: 1 km - Temporal Resolution: Daily (1961-present) - Temporal Extent: 1961 to present (updated daily) - Coverage: Austria - Projection: ETRS89 (EPSG:4258) - Parameters: Precipitation (RR), Min Temperature (TN), Max Temperature (TX)
+**SPARTACUS Dataset (GeoSphere Austria):** 1 km daily gridded data for Austria (1961–present), DOI: <https://doi.org/10.60669/m6w8-s545>.
 
 ### 3. Understanding COSERO Output Types
 
-COSERO generates different sets of output files based on the OUTPUTTYPE setting:
+**OUTPUTTYPE 1** — `COSERO.runoff`, `COSERO.prec`, `COSERO.plus`, `COSERO.plus1`, `statistics.txt`, `topology.txt`
 
-**OUTPUTTYPE 1 (Basic Output)** Essential files for model evaluation: - `COSERO.runoff` - Discharge time series (QOBS, QSIM, Qloc per subbasin) - `COSERO.prec` - Precipitation by subbasin (PRAIN, PSNOW) - `COSERO.plus` - Runoff components (QAB123, QAB23, QAB3, glacmelt) - `COSERO.plus1` - Water balance (BW0, BW3, SWW, cumulative P/ET/Q) - `statistics.txt` - Performance metrics (NSE, KGE, BIAS, RMSE, etc.) - `topology.txt` - Subbasin structure and connectivity
+**OUTPUTTYPE 2** — All OUTPUTTYPE 1 files + `var_glac.txt`, `var_MET.txt`
 
-**OUTPUTTYPE 2 (+ Glacier and Meteorology)** All OUTPUTTYPE 1 files plus: - `var_glac.txt` - Glacier variables (if glaciers present) - `var_MET.txt` - Meteorological variables by zone
-
-**OUTPUTTYPE 3 (+ Monitoring and Long-term Analysis)** All OUTPUTTYPE 2 files plus: - `monitor.txt` - Catchment-wide state variables - `monitor_sb*.txt` - Detailed per-subbasin state variables - `rundepth.txt` - Runoff depth time series - `long-term_annual_means.txt` - Annual averages - `long-term_seasonal_means.txt` - Seasonal averages
-
-**Recommendation:** Use OUTPUTTYPE 3 for comprehensive analysis, OUTPUTTYPE 1 for quick model evaluation.
+**OUTPUTTYPE 3** — All OUTPUTTYPE 2 files + `monitor.txt`, `monitor_sb*.txt`, `rundepth.txt`, `long-term_annual_means.txt`, `long-term_seasonal_means.txt`
 
 ## Package Structure
 
-```         
-COSERO-R/
+```
+CoseRo/
 ├── R/
-│   ├── setup_project.R        # Project setup (setup_cosero_project_example)
-│   ├── cosero_run.R           # Model execution (run_cosero)
-│   ├── cosero_readers.R       # Output readers (read_cosero_output)
-│   ├── sensitivity_analysis.R # Sobol sensitivity analysis
-│   ├── spartacus_preprocessing.R # SPARTACUS preprocessing
-│   ├── app_helpers.R          # Plotting & data processing
-│   └── launch_app.R           # App launcher (launch_cosero_app)
+│   ├── setup_project.R           # Project setup
+│   ├── cosero_run.R              # Model execution
+│   ├── cosero_readers.R          # Output file readers
+│   ├── cosero_optimize.R         # DDS and SCE-UA optimization
+│   ├── sensitivity_analysis.R    # Sobol sensitivity analysis
+│   ├── spartacus_preprocessing.R # SPARTACUS NetCDF → COSERO input
+│   ├── app_helpers.R             # Plotting & data processing
+│   └── launch_app.R              # App launcher
 ├── inst/
-│   ├── shiny-app/app.R        # Interactive Shiny application
+│   ├── shiny-app/app.R           # Interactive Shiny application
 │   └── extdata/
-│       ├── COSERO_Wildalpen.zip # Example project (38 MB)
-│       └── parameter_bounds.csv # Sensitivity analysis bounds
-├── tests/testthat/            # Test suite (33 tests)
-└── man/                       # Auto-generated documentation
+│       ├── COSERO_Wildalpen.zip  # Example project
+│       └── parameter_bounds.csv  # Default parameter bounds (30 parameters)
+└── man/                          # Auto-generated documentation
 ```
 
 ## Key Functions
@@ -391,262 +315,150 @@ COSERO-R/
 ### Project Setup
 
 | Function | Description |
-|--------------------------------|----------------------------------------|
-| `setup_cosero_project_example()` | Create ready-to-run example project (Distributed Model of the Salza River catchment) |
+|---|---|
+| `setup_cosero_project_example()` | Create ready-to-run example project (Wildalpen catchment) |
 | `setup_cosero_project()` | Create empty project structure with binaries |
+| `show_required_files()` | Display checklist of required COSERO input files |
 
 ### Model Execution
 
 | Function | Description |
-|--------------------------------|----------------------------------------|
-| `run_cosero()` | Execute COSERO model with custom settings, warm/cold start options |
-| `launch_cosero_app()` | Launch interactive Shiny app (optionally with auto-loaded project) |
+|---|---|
+| `run_cosero()` | Execute COSERO with custom settings and warm/cold start |
+| `launch_cosero_app()` | Launch interactive Shiny app |
+| `extract_run_metrics()` | Extract performance metrics from a single run result |
+| `calculate_run_metrics()` | Calculate metrics by comparing QSIM vs QOBS for a single run |
 
 ### Output Reading
 
 | Function | Description |
-|--------------------------------|----------------------------------------|
-| `read_cosero_output()` | Read and parse all COSERO output files (auto-detects OUTPUTTYPE 1-3) |
-| `get_subbasin_data()` | Extract discharge data for specific subbasin |
-| `list_subbasins()` | List all available subbasins in output |
-| `get_subbasin_parameters()` | Extract parameters for specific subbasin |
-| `read_cosero_parameters()` | Read parameter file (para.txt) with zone/subbasin structure |
+|---|---|
+| `read_cosero_output()` | Read all COSERO output files (auto-detects OUTPUTTYPE 1–3) |
+| `get_subbasin_data()` | Extract discharge data for a specific subbasin |
+| `list_subbasins()` | List available subbasins in output |
+| `read_cosero_parameters()` | Read parameter file (para.txt) |
+| `write_cosero_parameters()` | Write parameter data frame to file |
+| `detect_outputtype()` | Detect OUTPUTTYPE by checking which files exist |
 
 ### Configuration Management
 
-| Function                     | Description                                |
-|--------------------------------|----------------------------------------|
-| `read_defaults()`            | Read defaults.txt configuration file       |
-| `modify_defaults()`          | Modify defaults.txt with new settings      |
-| `validate_cosero_defaults()` | Validate configuration parameters          |
-| `show_cosero_defaults()`     | Display available configuration parameters |
+| Function | Description |
+|---|---|
+| `read_defaults()` | Read defaults.txt configuration file |
+| `show_cosero_defaults()` | Display available configuration parameters |
+| `validate_cosero_defaults()` | Validate configuration parameters |
+
+### Parameter Optimization
+
+| Function | Description |
+|---|---|
+| `optimize_cosero_dds()` | Optimize parameters with DDS (fast, greedy search) |
+| `optimize_cosero_sce()` | Optimize parameters with SCE-UA (robust, population-based) |
+| `create_optimization_bounds()` | Define parameter bounds for optimization |
+| `plot_cosero_optimization()` | Plot optimization convergence history |
+| `export_cosero_optimization()` | Export results to CSV (parameters, history, summary) |
+
+### Sensitivity Analysis
+
+| Function | Description |
+|---|---|
+| `load_parameter_bounds()` | Load parameter bounds from CSV or create custom bounds |
+| `create_custom_bounds()` | Create parameter bounds manually |
+| `generate_sobol_samples()` | Generate Sobol quasi-random parameter sets |
+| `run_cosero_ensemble()` | Run ensemble simulations (sequential) |
+| `run_cosero_ensemble_parallel()` | Run ensemble simulations (parallel) |
+| `extract_ensemble_metrics()` | Extract metrics from ensemble statistics output |
+| `calculate_ensemble_metrics()` | Calculate metrics from ensemble QSIM/QOBS |
+| `calculate_sobol_indices()` | Calculate Sobol sensitivity indices with bootstrap |
+| `plot_sobol()` | Visualize Sobol sensitivity indices |
+| `plot_dotty()` | Parameter scatter plots |
+| `export_sensitivity_results()` | Export sensitivity results to files |
 
 ### Input Data Preprocessing
 
 | Function | Description |
-|--------------------------------|----------------------------------------|
-| `write_spartacus_precip()` | Convert SPARTACUS precipitation NetCDF to COSERO input format |
-| `write_spartacus_temp()` | Convert SPARTACUS Tmin/Tmax NetCDF to COSERO Tmean input format |
-
-### Sensitivity Analysis (Under Testing)
-
-| Function | Description |
-|--------------------------------|----------------------------------------|
-| `load_parameter_bounds()` | Load parameter bounds from CSV or create custom bounds |
-| `create_custom_bounds()` | Create custom parameter bounds manually |
-| `generate_sobol_samples()` | Generate Sobol parameter sets for sensitivity analysis |
-| `run_cosero_ensemble()` | Run ensemble simulations (sequential execution) |
-| `run_cosero_ensemble_parallel()` | Run ensemble simulations (parallel execution with progress) |
-| `extract_ensemble_metrics()` | Extract pre-calculated metrics from COSERO statistics |
-| `calculate_ensemble_metrics()` | Calculate custom metrics from ensemble results |
-| `calculate_sobol_indices()` | Calculate Sobol sensitivity indices with bootstrap |
-| `plot_sobol()` | Visualize Sobol sensitivity indices |
-| `plot_dotty()` | Create parameter scatter plots (dotty plots) |
-| `export_sensitivity_results()` | Export sensitivity analysis results to files |
-
-## Documentation
-
-### Built-in Help
-
-Access detailed function documentation from R:
-
-``` r
-# Project setup
-?setup_cosero_project_example # Create example project
-?setup_cosero_project         # Create empty project
-
-# Main functions
-?run_cosero                   # Model execution
-?read_cosero_output          # Output reading
-?launch_cosero_app           # Shiny app
-
-# Configuration
-?read_defaults                # Read configuration
-?modify_defaults              # Modify configuration
-?validate_cosero_defaults     # Validate settings
-
-# Input data preprocessing
-?write_spartacus_precip       # SPARTACUS precipitation preprocessing
-?write_spartacus_temp         # SPARTACUS temperature preprocessing
-
-# Data extraction
-?get_subbasin_data           # Extract subbasin discharge
-?list_subbasins              # List available subbasins
-?read_cosero_parameters      # Read parameter file
-
-# Sensitivity analysis
-?load_parameter_bounds       # Load parameter bounds
-?generate_sobol_samples      # Generate Sobol samples
-?run_cosero_ensemble_parallel # Run parallel ensemble
-?extract_ensemble_metrics      # Extract metrics
-?calculate_sobol_indices     # Calculate indices
-```
-
-### Learning Path
-
-``` r
-# 1. Install and create example
-devtools::install()
-library(COSERO)
-setup_cosero_project_example("D:/COSERO_example")
-
-# 2. Explore in GUI
-launch_cosero_app("D:/COSERO_example")
-
-# 3. Read outputs programmatically
-output <- read_cosero_output("D:/COSERO_example/output")
-sb_data <- get_subbasin_data(output$runoff, "0001")
-
-# 4. Run new simulation
-result <- run_cosero("D:/COSERO_example",
-  defaults_settings = list(OUTPUTTYPE = 3))
-```
+|---|---|
+| `write_spartacus_precip()` | Convert SPARTACUS precipitation NetCDF to COSERO format |
+| `write_spartacus_temp()` | Convert SPARTACUS Tmin/Tmax NetCDF to COSERO Tmean format |
 
 ## Common Use Cases
 
-### Use Case 1: Model Run for defined period
+### Calibration Period Run
 
 ``` r
-# Set up calibration period
 result <- run_cosero(
-  project_path = "D:/COSERO/MyBasin",
-  defaults_settings = list(
-    STARTDATE = "2010 1 1 0 0",
-    ENDDATE = "2015 12 31 23 59",
-    SPINUP = 365,  # 1 year warm-up
-    OUTPUTTYPE = 3
-  ),
-  statevar_source = 1  # Cold start
+  project_path      = "D:/COSERO/MyBasin",
+  defaults_settings = list(STARTDATE = "2010 1 1 0 0", ENDDATE = "2015 12 31 23 59",
+                           SPINUP = 365, OUTPUTTYPE = 3),
+  statevar_source   = 1
 )
-
-# Check model metrics
-stats <- result$output_data$statistics
-print(stats[, c("sb", "NSE", "KGE")])
+print(result$output_data$statistics[, c("sb", "NSE", "KGE")])
 ```
 
-### Use Case 2: Warm Start
+### Warm Start Validation
 
 ``` r
-# Run calibration first to generate statevar.dmp
-cal_result <- run_cosero(
-  project_path = "D:/COSERO/MyBasin",
-  defaults_settings = list(
-    STARTDATE = "2010 1 1 0 0",
-    ENDDATE = "2015 12 31 23 59"
-  )
-)
-
-# Use warm start for validation
+# Run calibration to generate statevar.dmp, then:
 val_result <- run_cosero(
-  project_path = "D:/COSERO/MyBasin",
-  defaults_settings = list(
-    STARTDATE = "2016 1 1 0 0",
-    ENDDATE = "2020 12 31 23 59",
-    SPINUP = 1  # Minimum required (warm start minimizes spinup need)
-  ),
-  statevar_source = 2  # Use state from calibration
+  project_path      = "D:/COSERO/MyBasin",
+  defaults_settings = list(STARTDATE = "2016 1 1 0 0", ENDDATE = "2020 12 31 23 59",
+                           SPINUP = 1),
+  statevar_source   = 2
 )
 ```
 
-### Use Case 3: Batch Processing Multiple Scenarios
+### Parameter Calibration
 
 ``` r
-scenarios <- list(
-  baseline = list(STARTDATE = "2010 1 1 0 0", ENDDATE = "2020 12 31 23 59"),
-  period1  = list(STARTDATE = "2010 1 1 0 0", ENDDATE = "2015 12 31 23 59"),
-  period2  = list(STARTDATE = "2015 1 1 0 0", ENDDATE = "2020 12 31 23 59")
+par_bounds <- load_parameter_bounds(parameters = c("BETA", "CTMAX", "M"))
+result     <- optimize_cosero_dds(
+  cosero_path      = "D:/COSERO/MyBasin",
+  par_bounds       = par_bounds,
+  target_subbasins = "001",
+  metric           = "NSE",
+  max_iter         = 1000
 )
-
-results <- list()
-for (scenario_name in names(scenarios)) {
-  cat("Running scenario:", scenario_name, "\n")
-  results[[scenario_name]] <- run_cosero(
-    project_path = "D:/COSERO/MyBasin",
-    defaults_settings = scenarios[[scenario_name]],
-    quiet = TRUE
-  )
-}
-
-# Compare results
-sapply(results, function(r) r$output_data$statistics$NSE[1])
+print(result$par_bounds[, c("parameter", "default", "optimal_value")])
 ```
 
-## Development
-
-### Running Tests
+## Building Documentation
 
 ``` r
-# Install development dependencies
-devtools::install_dev_deps()
-
-# Run all tests
-devtools::test()
-
-# Run specific test file
-testthat::test_file("tests/testthat/test-cosero_run.R")
-
-# Check test coverage
-covr::package_coverage()
-```
-
-### Building Documentation
-
-``` r
-# Generate documentation from roxygen2 comments
 devtools::document()
-
-# Build and check package
 devtools::check()
 ```
 
 ## Citation
 
-If you use COSERO-R in your research, please cite:
+If you use CoseRo in your research, please cite:
 
-```         
+```
 [Add citation information here when published]
 ```
 
 ## Troubleshooting
 
-### Common Issues
+**"COSERO executable not found"** — Ensure COSERO.exe is in your project directory and `project_path` is correct.
 
-**Issue: "COSERO executable not found"** - Ensure COSERO.exe is in your project directory - Check that you're using the correct project_path - Verify the exe_name parameter if using a different filename
+**"Parameter file not found"** — Check that `para.txt` exists in `input/` and the PARAFILE setting in `defaults.txt`.
 
-**Issue: "Parameter file not found"** - Check that para.txt exists in the input/ folder - Verify the PARAFILE setting in defaults.txt - Ensure file permissions allow reading
+**"Outputs not reading correctly"** — Verify `result$success == TRUE` and that OUTPUTTYPE matches your expected files.
 
-**Issue: "Outputs not reading correctly"** - Verify simulation completed successfully (check result\$success) - Ensure OUTPUTTYPE matches your expectations (1, 2, or 3) - Check that output/ folder contains the expected files
+**Parallel ensemble fails** — Check disk space for temporary folders, reduce `n_cores`, or try sequential execution first.
 
-**Issue: Parallel ensemble fails** - Verify all workers can access the COSERO executable - Check available disk space for temporary folders - Reduce n_cores if memory is limited - Try sequential execution first for debugging
+**Optimization creates many backup files** — This should not happen; optimization calls `run_cosero()` with `create_backup = FALSE` internally.
 
 ## Issues & Support
 
-**Bug Reports & Feature Requests:** https://github.com/Herrnegger/COSERO-R/issues
-
-**Questions & Discussions:** Use GitHub Issues with the "question" label
-
-**Before Reporting:** 1. Check this README for common issues 2. Verify COSERO.exe works standalone 3. Try with a minimal example 4. Include R version and package version
-
-## Contributing
-
-Contributions are welcome! Areas where help is especially appreciated:
-
--   Testing sensitivity analysis functionality
--   Additional output file format readers
--   Performance optimization for ensemble runs
--   Documentation improvements
--   Example workflows and use cases
-
-**To Contribute:** 1. Fork the repository 2. Create a feature branch (`git checkout -b feature/amazing-feature`) 3. Make your changes with clear commit messages 4. Add tests if applicable 5. Update documentation 6. Push to the branch (`git push origin feature/amazing-feature`) 7. Open a Pull Request
+**Bug Reports & Feature Requests:** <https://github.com/Herrnegger/CoseRo/issues>
 
 ## Acknowledgments
 
 -   COSERO hydrological model developers
--   R community and package contributors
--   sensobol package authors for sensitivity analysis framework
+-   sensobol package authors for the sensitivity analysis framework
 -   hydroGOF package authors for performance metrics
 -   Shiny and plotly teams for visualization tools
 
 ------------------------------------------------------------------------
 
-**Package Maintainer**: COSERO Development Team **Repository**: https://github.com/Herrnegger/COSERO-R **License**: GPL-3 **Last Updated**: 2026-01-26
+**Package Maintainer**: Mathew Herrnegger | **Repository**: <https://github.com/Herrnegger/CoseRo> | **License**: GPL-3

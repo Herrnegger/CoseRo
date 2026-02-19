@@ -4,16 +4,12 @@
 # Date: 2025-09-25
 
 #' @importFrom data.table fread
-#' @importFrom dplyr filter mutate select arrange group_by summarise
+#' @importFrom dplyr filter mutate select arrange group_by summarise %>% any_of
 #' @importFrom lubridate ymd_hm year month day hour minute
+#' @importFrom utils write.table
 NULL
 
-# 1 Load Libraries #####
-library(data.table)
-library(dplyr)
-library(lubridate)
-
-# 2 Main Output Reader #####
+# Main Output Reader #####
 
 #' Read COSERO Model Output Files
 #'
@@ -112,6 +108,9 @@ read_cosero_output <- function(output_dir, defaults_file = NULL, quiet = FALSE) 
 }
 
 # 2.1 OUTPUTTYPE Detection #####
+#' Detect COSERO output type
+#' @param output_dir Path to COSERO output directory
+#' @return Integer: 1, 2, or 3 corresponding to OUTPUTTYPE
 #' @export
 detect_outputtype <- function(output_dir) {
   has_monitor <- file.exists(file.path(output_dir, "monitor.txt"))
@@ -122,6 +121,9 @@ detect_outputtype <- function(output_dir) {
   return(1)
 }
 
+#' Detect available subbasins from COSERO output
+#' @param output_dir Path to COSERO output directory
+#' @return Character vector of subbasin IDs found in output files
 #' @export
 detect_subbasins <- function(output_dir) {
   monitor_files <- list.files(output_dir, pattern = "^monitor_sb\\d+\\.txt$")
@@ -178,7 +180,7 @@ detect_subbasins <- function(output_dir) {
 #' }
 read_cosero_runoff <- function(runoff_file, missing_value = -999.00, quiet = FALSE) {
   if (!file.exists(runoff_file)) {
-    stop("Runoff file not found: ", runoff_file)
+    stop("Runoff file not found: ", runoff_file, call. = FALSE)
   }
 
   if (!quiet) cat("Reading COSERO runoff file:", runoff_file, "\n")
@@ -187,18 +189,18 @@ read_cosero_runoff <- function(runoff_file, missing_value = -999.00, quiet = FAL
   # Find data section
   runoff_start <- grep("#### Runoff ####", lines)
   if (length(runoff_start) == 0) {
-    stop("Could not find '#### Runoff ####' section in file")
+    stop("Could not find '#### Runoff ####' section in file", call. = FALSE)
   }
 
   # Find header line
   header_pattern <- grep("yyyy\\s+mm\\s+dd", lines)
   if (length(header_pattern) == 0) {
-    stop("Could not find header line with 'yyyy mm dd' pattern")
+    stop("Could not find header line with 'yyyy mm dd' pattern", call. = FALSE)
   }
 
   header_line_idx <- header_pattern[header_pattern > runoff_start[1]][1]
   if (is.na(header_line_idx)) {
-    stop("Could not find header line after runoff section")
+    stop("Could not find header line after runoff section", call. = FALSE)
   }
 
   # Parse header
@@ -229,7 +231,9 @@ read_cosero_runoff <- function(runoff_file, missing_value = -999.00, quiet = FAL
   return(runoff_data)
 }
 
-# 3.2 Data Processing Functions #####
+# Data Processing Functions #####
+
+#' @keywords internal
 parse_cosero_data_lines <- function(data_lines, col_names) {
   data_matrix <- matrix(nrow = length(data_lines), ncol = length(col_names))
 
@@ -247,6 +251,7 @@ parse_cosero_data_lines <- function(data_lines, col_names) {
   return(data_matrix)
 }
 
+#' @keywords internal
 create_cosero_dataframe <- function(data_matrix, col_names) {
   runoff_data <- as.data.frame(data_matrix, stringsAsFactors = FALSE)
   colnames(runoff_data) <- col_names
@@ -352,7 +357,7 @@ read_cosero_statistics <- function(stats_file, quiet = FALSE) {
   # Find data section
   header_line <- grep("sb\\s+NSE\\s+KGE", lines)
   if (length(header_line) == 0) {
-    stop("Could not find statistics header in file")
+    stop("Could not find statistics header in file", call. = FALSE)
   }
 
   # Get header and data
@@ -429,12 +434,12 @@ read_cosero_statistics <- function(stats_file, quiet = FALSE) {
 #' }
 read_cosero_parameters <- function(param_file, skip_lines = 1, quiet = FALSE) {
   if (!file.exists(param_file)) {
-    stop("Parameter file not found: ", param_file)
+    stop("Parameter file not found: ", param_file, call. = FALSE)
   }
 
   lines <- readLines(param_file, warn = FALSE)
   if (length(lines) < 3) {
-    stop("Parameter file appears to be too short or empty")
+    stop("Parameter file appears to be too short or empty", call. = FALSE)
   }
 
   # Get header
@@ -680,7 +685,8 @@ get_subbasin_data <- function(runoff_data, subbasin_id) {
   available_cols <- colnames(runoff_data)
   if (!qobs_col %in% available_cols || !qsim_col %in% available_cols) {
     available_sbs <- unique(gsub(".*_(\\d+)", "\\1", available_cols[grep("QOBS_", available_cols)]))
-    stop("Subbasin ", subbasin_id, " not found. Available: ", paste(available_sbs, collapse = ", "))
+    stop("Subbasin ", subbasin_id, " not found. Available: ", paste(available_sbs, collapse = ", "),
+         call. = FALSE)
   }
 
   result <- runoff_data %>%
@@ -748,7 +754,7 @@ list_subbasins <- function(runoff_data, quiet = FALSE) {
 #' }
 get_subbasin_parameters <- function(param_data, subbasin_id) {
   if (!"NB_" %in% colnames(param_data)) {
-    stop("No subbasin ID column (NB_) found in parameter data")
+    stop("No subbasin ID column (NB_) found in parameter data", call. = FALSE)
   }
 
   if (is.character(subbasin_id)) {
@@ -759,7 +765,8 @@ get_subbasin_parameters <- function(param_data, subbasin_id) {
 
   if (nrow(sb_params) == 0) {
     available_sbs <- unique(param_data$NB_)
-    stop("Subbasin ", subbasin_id, " not found. Available: ", paste(available_sbs, collapse = ", "))
+    stop("Subbasin ", subbasin_id, " not found. Available: ", paste(available_sbs, collapse = ", "),
+         call. = FALSE)
   }
 
   return(sb_params)
@@ -778,6 +785,10 @@ read_simple_timeseries <- function(file_path, skip = 1, quiet = FALSE) {
 }
 
 # 8.1 Wrappers for existing readers
+#' Read COSERO.runoff from output directory
+#' @param output_dir Path to COSERO output directory
+#' @param quiet Suppress messages
+#' @return Data frame or NULL if file not found
 #' @export
 read_runoff <- function(output_dir, quiet = FALSE) {
   file <- file.path(output_dir, "COSERO.runoff")
@@ -786,6 +797,10 @@ read_runoff <- function(output_dir, quiet = FALSE) {
   read_cosero_runoff(file, quiet = quiet)
 }
 
+#' Read COSERO.prec from output directory
+#' @param output_dir Path to COSERO output directory
+#' @param quiet Suppress messages
+#' @return Data frame or NULL if file not found
 #' @export
 read_precipitation <- function(output_dir, quiet = FALSE) {
   file <- file.path(output_dir, "COSERO.prec")
@@ -796,6 +811,10 @@ read_precipitation <- function(output_dir, quiet = FALSE) {
   read_cosero_precipitation(file, quiet = quiet)
 }
 
+#' Read COSERO.plus from output directory
+#' @param output_dir Path to COSERO output directory
+#' @param quiet Suppress messages
+#' @return Data frame or NULL if file not found
 #' @export
 read_plus <- function(output_dir, quiet = FALSE) {
   file <- file.path(output_dir, "COSERO.plus")
@@ -807,6 +826,10 @@ read_plus <- function(output_dir, quiet = FALSE) {
   return(df)
 }
 
+#' Read COSERO.plus1 from output directory (converts cumulative to timestep values)
+#' @param output_dir Path to COSERO output directory
+#' @param quiet Suppress messages
+#' @return Data frame or NULL if file not found
 #' @export
 read_plus1 <- function(output_dir, quiet = FALSE) {
   file <- file.path(output_dir, "COSERO.plus1")
@@ -852,6 +875,10 @@ read_plus1 <- function(output_dir, quiet = FALSE) {
   return(df)
 }
 
+#' Read statistics.txt from output directory
+#' @param output_dir Path to COSERO output directory
+#' @param quiet Suppress messages
+#' @return Data frame or NULL if file not found
 #' @export
 read_statistics <- function(output_dir, quiet = FALSE) {
   file <- file.path(output_dir, "statistics.txt")
@@ -860,6 +887,10 @@ read_statistics <- function(output_dir, quiet = FALSE) {
   read_cosero_statistics(file, quiet = quiet)
 }
 
+#' Read topology.txt from output directory
+#' @param output_dir Path to COSERO output directory
+#' @param quiet Suppress messages
+#' @return Data frame or NULL if file not found
 #' @export
 read_topology <- function(output_dir, quiet = FALSE) {
   file <- file.path(output_dir, "topology.txt")
@@ -878,6 +909,10 @@ read_topology <- function(output_dir, quiet = FALSE) {
 }
 
 # 8.2 OUTPUTTYPE 2 readers
+#' Read var_glac.txt from output directory (OUTPUTTYPE >= 2)
+#' @param output_dir Path to COSERO output directory
+#' @param quiet Suppress messages
+#' @return Data frame or NULL if file not found
 #' @export
 read_var_glac <- function(output_dir, quiet = FALSE) {
   file <- file.path(output_dir, "var_glac.txt")

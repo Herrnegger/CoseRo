@@ -1,12 +1,12 @@
 # Check if COSERO functions are properly exported
 # Run this after reloading the package
 
-cat("Checking COSERO package exports...\n\n")
+cat("Checking CoseRo package exports...\n\n")
 
 # Try to load the package
-if (requireNamespace("COSERO", quietly = TRUE)) {
-  library(COSERO)
-  cat("✓ COSERO package loaded\n\n")
+if (requireNamespace("CoseRo", quietly = TRUE)) {
+  library(CoseRo)
+  cat("✓ CoseRo package loaded\n\n")
 } else {
   cat("! Package not installed - using devtools::load_all()\n")
   devtools::load_all()

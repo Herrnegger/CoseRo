@@ -10,7 +10,11 @@
       "Bash(dir:*)",
       "Bash(R.exe:*)",
       "WebSearch",
-      "WebFetch(domain:rdrr.io)"
+      "WebFetch(domain:rdrr.io)",
+      "Bash(git mv:*)",
+      "Bash(git rm:*)",
+      "Bash(grep:*)",
+      "Bash(wc:*)"
     ],
     "deny": [],
     "ask": []

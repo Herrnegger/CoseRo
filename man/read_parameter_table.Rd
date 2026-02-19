@@ -12,6 +12,8 @@ read_parameter_table(par_file, param_names, zone_id = NULL, quiet = FALSE)
 \item{param_names}{Vector of parameter names to read}
 
 \item{zone_id}{Zone ID to extract parameters from (default: first zone). Use "all" to read all zones.}
+
+\item{quiet}{Suppress messages}
 }
 \value{
 If zone_id is specified: Named list of parameter values.

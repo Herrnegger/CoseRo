@@ -32,3 +32,7 @@ modify_parameter_table_fast(
 \description{
 Uses pre-loaded parameter data to avoid repeated file reads
 }
+\seealso{
+\code{\link{modify_parameter_table}} for the standard version
+}
+\keyword{internal}

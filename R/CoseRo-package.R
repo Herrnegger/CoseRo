@@ -1,10 +1,10 @@
 #' @keywords internal
 "_PACKAGE"
 
-#' COSERO: R Interface for COSERO Hydrological Model
+#' CoseRo: Hydrological Modelling Library
 #'
 #' @description
-#' The COSERO R package provides a R interface for the COSERO hydrological model, including:
+#' The CoseRo R package provides an R interface for the COSERO hydrological model, including:
 #' \itemize{
 #'   \item Automated model execution with run_cosero()
 #'   \item Output reading for 13+ file formats
@@ -52,17 +52,32 @@
 #'   \item \code{\link{plot_sobol}} - Visualize sensitivity indices
 #' }
 #'
+#' **Parameter Optimization:**
+#' \itemize{
+#'   \item \code{\link{optimize_cosero_dds}} - DDS algorithm for fast optimization
+#'   \item \code{\link{optimize_cosero_sce}} - SCE-UA algorithm for robust global optimization
+#'   \item \code{\link{create_optimization_bounds}} - Define parameter bounds for optimization
+#'   \item \code{\link{plot_cosero_optimization}} - Visualize optimization convergence
+#'   \item \code{\link{export_cosero_optimization}} - Export optimization results to CSV
+#' }
+#'
 #' **SPARTACUS Preprocessing:**
 #' \itemize{
 #'   \item \code{\link{write_spartacus_precip}} - Convert precipitation to COSERO format
 #'   \item \code{\link{write_spartacus_temp}} - Convert temperature to COSERO format
 #' }
 #'
+#' @seealso
+#' \itemize{
+#'   \item GitHub: \url{https://github.com/Herrnegger/CoseRo}
+#'   \item Issues: \url{https://github.com/Herrnegger/CoseRo/issues}
+#' }
+#'
 #' @section Getting Started:
 #'
 #' \preformatted{
 #' # 1. Create example project
-#' library(COSERO)
+#' library(CoseRo)
 #' setup_cosero_project_example("D:/COSERO_example")
 #'
 #' # 2. Launch interactive app
@@ -73,7 +88,6 @@
 #' nse <- extract_run_metrics(result, subbasin_id = "001", metric = "NSE")
 #' }
 #'
-#' @docType _PACKAGE
-#' @name COSERO-package
-#' @aliases COSERO
+#' @name CoseRo-package
+#' @aliases CoseRo
 NULL

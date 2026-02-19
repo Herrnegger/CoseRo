@@ -38,3 +38,8 @@ List with results and parameters
 \description{
 Run COSERO Ensemble in Parallel
 }
+\seealso{
+\code{\link{run_cosero_ensemble}} for sequential execution,
+\code{\link{extract_ensemble_metrics}} to extract pre-calculated metrics from results,
+\code{\link{calculate_ensemble_metrics}} to calculate metrics from QSIM/QOBS
+}

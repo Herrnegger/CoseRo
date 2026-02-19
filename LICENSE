@@ -1,11 +1,11 @@
-LICENSE: COSERO R Package
+LICENSE: CoseRo R Package
 ---
 
 Legal License Text
 
-COSERO: R Interface for the COSERO Hydrological Model
+CoseRo: An R Interface for the COSERO Hydrological Model
 
-Copyright (c) 2025-2026 Mathew Herrnegger, Ahmed Fiaz, and COSERO Development Team
+Copyright (c) 2025-2026 Mathew Herrnegger and COSERO Development Team
 
 This program is free software: you can redistribute it and/or modify it under the terms of the GNU General Public License as published by the Free Software Foundation, either version 3 of the License, or (at your option) any later version.
 
