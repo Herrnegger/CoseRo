@@ -11,7 +11,8 @@ write_spartacus_precip(
   nz_col = "NZ",
   years = NULL,
   n_cores = 1,
-  write_binary = FALSE
+  write_binary = FALSE,
+  time_shift = TRUE
 )
 }
 \arguments{
@@ -29,6 +30,10 @@ write_spartacus_precip(
 \item{n_cores}{Number of cores for parallel processing (default: 1)}
 
 \item{write_binary}{If TRUE, also writes a Fortran-compatible binary file}
+
+\item{time_shift}{If TRUE (default), applies a temporal correction to align
+SPARTACUS precipitation to the 00:00-00:00 day definition used by HZB/eHYD
+discharge data. See Details.}
 }
 \value{
 Invisibly returns a list with paths to the generated files:
@@ -45,6 +50,18 @@ Austria. The filename pattern \code{SPARTACUS2-DAILY_RR_YYYY.nc} is required.
 
 The sparse weight matrix approach (see \code{\link{spartacus_preprocessing}})
 enables processing of 60+ years of daily data.
+
+\strong{Temporal Alignment (\code{time_shift = TRUE})}
+
+SPARTACUS daily precipitation sums are defined over the interval 07:00-07:00
+CET (Hiebl & Frei, 2018), whereas discharge data from HZB/eHYD uses the
+standard calendar day 00:00-00:00 CET. To harmonise both datasets, the
+precipitation for each target day \eqn{t} is redistributed as:
+
+\deqn{RR_{00,t} = \frac{7}{24} \cdot RR_{t-1} + \frac{17}{24} \cdot RR_t}
+
+The first day of the series has no \eqn{t-1} available; it is kept as-is
+(i.e. the full value of day 1 is used without adjustment).
 }
 \examples{
 \dontrun{
@@ -61,4 +78,14 @@ write_spartacus_precip(
   write_binary = TRUE
 )
 }
+}
+\references{
+Hiebl, J. and Frei, C. (2018). Daily precipitation grids for Austria since 1961 —
+development and evaluation of a spatial dataset for hydroclimatic monitoring and
+modelling. \emph{Theor. Appl. Climatol.} \strong{132}(1):327-345.
+\href{https://doi.org/10.1007/s00704-017-2093-x}{doi:10.1007/s00704-017-2093-x}
+
+GeoSphere Austria (2023). SPARTACUS v2 — Spatial Reanalysis of Temperature and
+Precipitation for Austria.
+\href{https://doi.org/10.60669/m6w8-s545}{doi:10.60669/m6w8-s545}
 }

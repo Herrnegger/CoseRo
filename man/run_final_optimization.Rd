@@ -9,6 +9,7 @@ run_final_optimization(
   par_bounds,
   zones_to_modify,
   defaults_settings,
+  obj_fun,
   verbose = TRUE
 )
 }
@@ -21,6 +22,8 @@ run_final_optimization(
 
 \item{defaults_settings}{COSERO settings}
 
+\item{obj_fun}{Objective function (carries original_values and param_structure)}
+
 \item{verbose}{Print progress}
 }
 \value{
@@ -28,5 +31,7 @@ COSERO run result or NULL if failed
 }
 \description{
 Internal helper function to run COSERO with optimal parameters and full outputs.
+Uses original_values from the objective function closure to ensure correct
+baseline for relative change (relchg) modifications.
 }
 \keyword{internal}

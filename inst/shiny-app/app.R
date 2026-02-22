@@ -137,6 +137,54 @@ ui <- fluidPage(
         border-radius: 4px;
         margin: 10px 0;
       }
+      /* Compact controls for visualization tabs */
+      .compact-controls .well {
+        padding: 10px 15px;
+        margin-bottom: 5px;
+      }
+      .compact-controls .subsection-header {
+        font-size: 0.9em;
+        margin-top: 5px;
+        margin-bottom: 6px;
+      }
+      .compact-controls .form-group {
+        margin-bottom: 6px;
+      }
+      .compact-controls .form-control {
+        padding: 4px 8px;
+        font-size: 0.85em;
+        height: auto;
+      }
+      .compact-controls label {
+        font-size: 0.85em;
+        margin-bottom: 2px;
+      }
+      .compact-controls .btn-sm {
+        padding: 3px 10px;
+        font-size: 0.8em;
+      }
+      .compact-controls .btn-primary {
+        padding: 5px 12px;
+        font-size: 0.85em;
+      }
+      .compact-controls .shiny-text-output {
+        font-size: 0.8em;
+        padding: 4px 8px;
+        background-color: #f0f0f0;
+        border-radius: 4px;
+        max-height: 50px;
+        overflow-y: auto;
+      }
+      .compact-controls hr {
+        margin: 6px 0;
+      }
+      .compact-controls .checkbox {
+        margin-top: 2px;
+        margin-bottom: 2px;
+      }
+      .compact-controls .checkbox label {
+        font-size: 0.85em;
+      }
     "))
   ),
 
@@ -163,253 +211,204 @@ ui <- fluidPage(
 
           tags$div(class = "section-header", "Configure & Run COSERO Model"),
 
-          fluidRow(
-            # Single column layout
-            column(8,
-              card(
-                card_header("Project Setup"),
-                card_body(
-                # Drag-drop zone for project directory
-                tags$div(
-                  id = "project_drag_zone",
-                  class = "drag-drop-zone",
-                  tags$p(
-                    tags$strong("Click Here to Select Project Folder", style = "font-size: 1.1em;"),
-                    tags$br(),
-                    tags$span("Opens file browser to navigate to your COSERO project", style = "font-size: 0.9em; color: #6c757d;")
-                  )
-                ),
-
-                # Hidden shinyDirButton (triggered by clicking the zone)
-                shinyjs::hidden(
-                  shinyDirButton(
-                    "run_project_dir_btn",
-                    "Browse",
-                    "Select COSERO project directory",
-                    icon = icon("folder-open")
-                  )
-                ),
-
-                # Project path input
-                textInput(
-                  "run_project_path",
-                  "Project Directory:",
-                  value = normalizePath(getwd(), winslash = "/", mustWork = FALSE),
-                  placeholder = "Path to COSERO project folder"
-                ),
-                tags$p(
-                  class = "input-hint",
-                  "Tip: You can also copy-paste the path directly - quotes and slashes (/ or \\) are handled automatically"
-                ),
-                uiOutput("project_validation_ui"),
-                actionButton(
-                  "load_defaults_btn",
-                  "Load Defaults from Project",
-                  icon = icon("sync"),
-                  class = "btn-sm"
-                ),
-                tags$hr(),
-
-                tags$div(class = "subsection-header", "Custom Parameter File (Optional)"),
-                tags$p(
-                  class = "input-hint",
-                  "Leave empty to use default para.txt from project. Or specify a custom parameter file to temporarily use instead."
-                ),
-
-                # Drag-drop zone for parameter file
-                tags$div(
-                  id = "param_file_drag_zone",
-                  class = "drag-drop-zone",
-                  style = "padding: 15px;",
-                  tags$p(
-                    tags$strong("Click to Select Custom Parameter File", style = "font-size: 0.95em;"),
-                    tags$br(),
-                    tags$span("Optional: Select a .txt parameter file", style = "font-size: 0.85em; color: #6c757d;")
-                  )
-                ),
-
-                # Hidden shinyFilesButton
-                shinyjs::hidden(
-                  shinyFilesButton(
-                    "param_file_btn",
-                    "Browse",
-                    "Select parameter file",
-                    icon = icon("file"),
-                    multiple = FALSE
-                  )
-                ),
-
-                # Parameter file path input
-                textInput(
-                  "param_file_path",
-                  "Parameter File Path:",
-                  value = "",
-                  placeholder = "Optional: Path to custom parameter file (leave empty for default)"
-                ),
-                actionButton(
-                  "clear_param_file",
-                  "Clear Selection",
-                  icon = icon("times"),
-                  class = "btn-sm btn-warning",
-                  style = "margin-top: -10px; margin-bottom: 10px;"
-                ),
-                uiOutput("param_file_validation_ui"),
-                tags$hr(),
-
-                tags$div(class = "subsection-header", "Simulation Period"),
-                fluidRow(
-                  column(6,
-                    dateInput(
-                      "run_start_date",
-                      "Start Date:",
-                      value = "2010-01-01"
+          tags$div(
+            class = "compact-controls",
+            fluidRow(
+              # Left column: Project & Parameter File
+              column(6,
+                card(
+                  card_header("Project Setup"),
+                  card_body(
+                  # Drag-drop zone for project directory
+                  tags$div(
+                    id = "project_drag_zone",
+                    class = "drag-drop-zone",
+                    style = "padding: 12px;",
+                    tags$p(
+                      style = "margin: 0;",
+                      tags$strong("Click to Select Project Folder", style = "font-size: 0.95em;"),
+                      tags$br(),
+                      tags$span("Opens file browser", style = "font-size: 0.8em; color: #6c757d;")
                     )
                   ),
-                  column(3,
-                    selectInput(
-                      "run_start_hour",
-                      "Hour:",
-                      choices = 0:23,
-                      selected = 0
-                    )
-                  ),
-                  column(3,
-                    selectInput(
-                      "run_start_minute",
-                      "Min:",
-                      choices = c(0, 15, 30, 45),
-                      selected = 0
-                    )
-                  )
-                ),
-                fluidRow(
-                  column(6,
-                    dateInput(
-                      "run_end_date",
-                      "End Date:",
-                      value = "2015-12-31"
-                    )
-                  ),
-                  column(3,
-                    selectInput(
-                      "run_end_hour",
-                      "Hour:",
-                      choices = 0:23,
-                      selected = 23
-                    )
-                  ),
-                  column(3,
-                    selectInput(
-                      "run_end_minute",
-                      "Min:",
-                      choices = c(0, 15, 30, 45, 59),
-                      selected = 59
-                    )
-                  )
-                ),
-                numericInput(
-                  "run_spinup",
-                  "Spinup Period (days):",
-                  value = 365,
-                  min = 0,
-                  max = 10000
-                ),
-                tags$hr(),
 
-                tags$div(class = "subsection-header", "Run Configuration"),
-                radioButtons(
-                  "run_mode",
-                  "Run Mode:",
-                  choices = list(
-                    "Cold Start (from parameter file)" = 1,
-                    "Warm Start (from previous run)" = 2
+                  # Hidden shinyDirButton (triggered by clicking the zone)
+                  shinyjs::hidden(
+                    shinyDirButton(
+                      "run_project_dir_btn",
+                      "Browse",
+                      "Select COSERO project directory",
+                      icon = icon("folder-open")
+                    )
                   ),
-                  selected = 1
-                ),
-                uiOutput("warm_start_status_ui"),
-                selectInput(
-                  "run_output_type",
-                  "Output Level:",
-                  choices = list(
-                    "Basic (runoff + statistics)" = 1,
-                    "Standard (+ glacier/meteorology)" = 2,
-                    "Comprehensive (+ long-term means)" = 3
-                  ),
-                  selected = 3
-                ),
-                tags$hr(),
 
-                tags$div(class = "subsection-header", "Advanced Options"),
-                actionButton(
-                  "toggle_advanced_params",
-                  "Show Advanced Parameters",
-                  icon = icon("chevron-down"),
-                  class = "btn-default btn-sm",
-                  style = "margin-bottom: 10px;"
-                ),
-                conditionalPanel(
-                  condition = "input.toggle_advanced_params % 2 == 1",
-                  tags$br(),
-                  radioButtons(
-                    "run_sc_flag",
-                    "Flux Calculation Area:",
-                    choices = list(
-                      "Local area (EZFL_B)" = 0,
-                      "Upstream area (EZFL_T)" = 1
+                  textInput(
+                    "run_project_path",
+                    NULL,
+                    value = normalizePath(getwd(), winslash = "/", mustWork = FALSE),
+                    placeholder = "Path to COSERO project folder"
+                  ),
+                  uiOutput("project_validation_ui"),
+                  fluidRow(
+                    column(6,
+                      actionButton(
+                        "load_defaults_btn",
+                        "Load Defaults",
+                        icon = icon("sync"),
+                        class = "btn-sm",
+                        style = "width: 100%;"
+                      )
+                    )
+                  ),
+                  tags$hr(),
+
+                  tags$div(class = "subsection-header", "Custom Parameter File (Optional)"),
+
+                  # Drag-drop zone for parameter file
+                  tags$div(
+                    id = "param_file_drag_zone",
+                    class = "drag-drop-zone",
+                    style = "padding: 8px;",
+                    tags$p(
+                      style = "margin: 0;",
+                      tags$strong("Click to Select Parameter File", style = "font-size: 0.85em;"),
+                      tags$br(),
+                      tags$span("Optional .txt file", style = "font-size: 0.8em; color: #6c757d;")
+                    )
+                  ),
+
+                  # Hidden shinyFilesButton
+                  shinyjs::hidden(
+                    shinyFilesButton(
+                      "param_file_btn",
+                      "Browse",
+                      "Select parameter file",
+                      icon = icon("file"),
+                      multiple = FALSE
+                    )
+                  ),
+
+                  textInput(
+                    "param_file_path",
+                    NULL,
+                    value = "",
+                    placeholder = "Leave empty for parameter file in default.txt"
+                  ),
+                  actionButton(
+                    "clear_param_file",
+                    "Clear",
+                    icon = icon("times"),
+                    class = "btn-sm btn-warning",
+                    style = "margin-top: -5px; margin-bottom: 5px;"
+                  ),
+                  uiOutput("param_file_validation_ui")
+                  )
+                )
+              ),
+
+              # Right column: Simulation Period & Run Config
+              column(6,
+                card(
+                  card_header("Simulation Settings"),
+                  card_body(
+                  tags$div(class = "subsection-header", "Period"),
+                  fluidRow(
+                    column(5,
+                      dateInput("run_start_date", "Start:", value = "2010-01-01")
                     ),
-                    selected = 0,
-                    inline = TRUE
+                    column(3,
+                      selectInput("run_start_hour", "H:", choices = 0:23, selected = 0)
+                    ),
+                    column(4,
+                      numericInput("run_spinup", "Spinup (d):", value = 365, min = 0, max = 10000)
+                    )
                   ),
-                  checkboxInput(
-                    "run_outcontrol",
-                    "Enable Zonal Outputs (requires Comprehensive output level)",
-                    value = TRUE
+                  fluidRow(
+                    column(5,
+                      dateInput("run_end_date", "End:", value = "2015-12-31")
+                    ),
+                    column(3,
+                      selectInput("run_end_hour", "H:", choices = 0:23, selected = 23)
+                    ),
+                    column(4,
+                      selectInput(
+                        "run_output_type",
+                        "Output:",
+                        choices = list("Basic" = 1, "Standard" = 2, "Full" = 3),
+                        selected = 3
+                      )
+                    )
                   ),
+                  # Hidden minute selectors (server references these)
+                  shinyjs::hidden(
+                    selectInput("run_start_minute", NULL, choices = c(0, 15, 30, 45), selected = 0),
+                    selectInput("run_end_minute", NULL, choices = c(0, 15, 30, 45, 59), selected = 59)
+                  ),
+                  tags$hr(),
+
+                  tags$div(class = "subsection-header", "Run Mode"),
                   radioButtons(
-                    "run_tmmon_option",
-                    "Temperature Calculation:",
+                    "run_mode",
+                    NULL,
                     choices = list(
-                      "From monthly temperature file" = 1,
-                      "Calculate from input data" = 2
+                      "Cold Start (parameter file)" = 1,
+                      "Warm Start (previous run)" = 2
                     ),
                     selected = 1,
                     inline = TRUE
                   ),
-                  numericInput(
-                    "run_ikl",
-                    "Snow Classes (IKL):",
-                    value = 1,
-                    min = 1,
-                    max = 20
+                  uiOutput("warm_start_status_ui"),
+                  tags$hr(),
+
+                  tags$div(class = "subsection-header", "Advanced Options"),
+                  actionButton(
+                    "toggle_advanced_params",
+                    "Show Advanced",
+                    icon = icon("chevron-down"),
+                    class = "btn-default btn-sm",
+                    style = "margin-bottom: 5px;"
                   ),
-                  numericInput(
-                    "run_nclass",
-                    "Land Use Classes (NCLASS):",
-                    value = 1,
-                    min = 1,
-                    max = 20
+                  conditionalPanel(
+                    condition = "input.toggle_advanced_params % 2 == 1",
+                    fluidRow(
+                      column(6,
+                        radioButtons(
+                          "run_sc_flag",
+                          "Flux Area:",
+                          choices = list("Local (EZFL_B)" = 0, "Upstream (EZFL_T)" = 1),
+                          selected = 0,
+                          inline = TRUE
+                        ),
+                        radioButtons(
+                          "run_tmmon_option",
+                          "TMMon:",
+                          choices = list("From file" = 1, "Calculate" = 2),
+                          selected = 1,
+                          inline = TRUE
+                        )
+                      ),
+                      column(6,
+                        fluidRow(
+                          column(6, numericInput("run_ikl", "IKL:", value = 1, min = 1, max = 20)),
+                          column(6, numericInput("run_nclass", "NCLASS:", value = 1, min = 1, max = 20))
+                        ),
+                        checkboxInput("run_outcontrol", "Zonal Outputs", value = TRUE),
+                        textInput("run_project_info", "Project:", value = "COSERO_Project")
+                      )
+                    )
                   ),
-                  textInput(
-                    "run_project_info",
-                    "Project Name:",
-                    value = "COSERO_Project"
+                  tags$hr(),
+
+                  actionButton(
+                    "run_cosero_btn",
+                    "Run COSERO",
+                    icon = icon("play"),
+                    class = "btn-primary",
+                    style = "width: 100%; margin-bottom: 5px;"
+                  ),
+                  uiOutput("run_progress_ui"),
+                  verbatimTextOutput("run_results_summary")
                   )
-                ),
-                tags$hr(),
-
-                tags$div(class = "subsection-header", "Execution"),
-                actionButton(
-                  "run_cosero_btn",
-                  "Run COSERO Model",
-                  icon = icon("play"),
-                  class = "btn-primary btn-lg",
-                  style = "width: 100%; margin-bottom: 10px;"
-                ),
-                uiOutput("run_progress_ui"),
-                tags$hr(),
-
-                tags$div(class = "subsection-header", "Results Summary"),
-                verbatimTextOutput("run_results_summary")
                 )
               )
             )
@@ -425,11 +424,12 @@ ui <- fluidPage(
 
           # Collapsible Control Panel
           tags$div(
-            style = "margin: 15px 0;",
+            class = "compact-controls",
+            style = "margin: 10px 0;",
             tags$button(
               id = "toggle_ts_controls",
               class = "btn btn-default btn-sm",
-              style = "margin-bottom: 10px;",
+              style = "margin-bottom: 5px;",
               onclick = "$(this).find('i').toggleClass('fa-chevron-down fa-chevron-up'); $('#ts_controls_panel').slideToggle();",
               icon("chevron-up"),
               " Show/Hide Controls"
@@ -438,13 +438,13 @@ ui <- fluidPage(
               id = "ts_controls_panel",
               style = "display: block;",
               wellPanel(
-                style = "background-color: #f8f9fa; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1);",
+                style = "background-color: #f8f9fa; border-radius: 6px; box-shadow: 0 1px 3px rgba(0,0,0,0.1);",
                 fluidRow(
-                  column(6,
+                  column(4,
                     tags$div(class = "subsection-header", "Data Selection"),
                     textInput(
                       "output_dir",
-                      "Output Directory:",
+                      NULL,
                       value = default_output_dir
                     ),
                     fluidRow(
@@ -457,25 +457,26 @@ ui <- fluidPage(
                       )),
                       column(6, checkboxInput(
                         "use_cache",
-                        "Use cache (faster)",
+                        "Use cache",
                         value = TRUE
                       ))
-                    ),
-                    tags$hr(),
-                    verbatimTextOutput("status_text")
+                    )
                   ),
-                  column(6,
-                    tags$div(class = "subsection-header", "Display Options"),
+                  column(4,
+                    tags$div(class = "subsection-header", "Subbasin"),
                     uiOutput("subbasin_selector"),
                     fluidRow(
                       column(6, actionButton("prev_subbasin", "< Prev", class = "btn-sm", style = "width: 100%;")),
                       column(6, actionButton("next_subbasin", "Next >", class = "btn-sm", style = "width: 100%;"))
-                    ),
-                    tags$br(),
+                    )
+                  ),
+                  column(4,
+                    tags$div(class = "subsection-header", "Date Range"),
                     uiOutput("date_range_slider"),
-                    actionButton("reset_zoom", "Reset Zoom", icon = icon("refresh"), style = "width: 100%;")
+                    actionButton("reset_zoom", "Reset Zoom", icon = icon("refresh"), class = "btn-sm", style = "width: 100%;")
                   )
-                )
+                ),
+                verbatimTextOutput("status_text")
               )
             )
           ),
@@ -509,11 +510,12 @@ ui <- fluidPage(
 
           # Collapsible Control Panel
           tags$div(
-            style = "margin: 15px;",
+            class = "compact-controls",
+            style = "margin: 10px 15px;",
             tags$button(
               id = "toggle_seasonality_controls",
               class = "btn btn-default btn-sm",
-              style = "margin-bottom: 10px;",
+              style = "margin-bottom: 5px;",
               onclick = "$(this).find('i').toggleClass('fa-chevron-down fa-chevron-up'); $('#seasonality_controls_panel').slideToggle();",
               icon("chevron-up"),
               " Show/Hide Controls"
@@ -522,17 +524,25 @@ ui <- fluidPage(
               id = "seasonality_controls_panel",
               style = "display: block;",
               wellPanel(
-                style = "background-color: #f8f9fa; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1);",
+                style = "background-color: #f8f9fa; border-radius: 6px; box-shadow: 0 1px 3px rgba(0,0,0,0.1);",
                 fluidRow(
-                  column(6,
-                    tags$div(class = "subsection-header", "Display Options"),
+                  column(4,
+                    tags$div(class = "subsection-header", "Subbasin"),
                     uiOutput("subbasin_selector_seasonality"),
                     fluidRow(
                       column(6, actionButton("prev_subbasin_seasonality", "< Prev", class = "btn-sm", style = "width: 100%;")),
                       column(6, actionButton("next_subbasin_seasonality", "Next >", class = "btn-sm", style = "width: 100%;"))
                     )
                   ),
-                  column(6,
+                  column(4,
+                    tags$div(class = "subsection-header", "Options"),
+                    checkboxInput(
+                      "seasonality_cumsum",
+                      "Show cumulative sums (Jan to Dec)",
+                      value = FALSE
+                    )
+                  ),
+                  column(4,
                     tags$div(class = "subsection-header", "Status"),
                     verbatimTextOutput("status_text_seasonality")
                   )
@@ -570,11 +580,12 @@ ui <- fluidPage(
 
           # Collapsible Control Panel
           tags$div(
-            style = "margin: 15px;",
+            class = "compact-controls",
+            style = "margin: 10px 15px;",
             tags$button(
               id = "toggle_stats_controls",
               class = "btn btn-default btn-sm",
-              style = "margin-bottom: 10px;",
+              style = "margin-bottom: 5px;",
               onclick = "$(this).find('i').toggleClass('fa-chevron-down fa-chevron-up'); $('#stats_controls_panel').slideToggle();",
               icon("chevron-up"),
               " Show/Hide Controls"
@@ -583,20 +594,23 @@ ui <- fluidPage(
               id = "stats_controls_panel",
               style = "display: block;",
               wellPanel(
-                style = "background-color: #f8f9fa; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1);",
+                style = "background-color: #f8f9fa; border-radius: 6px; box-shadow: 0 1px 3px rgba(0,0,0,0.1);",
                 fluidRow(
-                  column(6,
-                    tags$div(class = "subsection-header", "Display Options & Selection"),
+                  column(4,
+                    tags$div(class = "subsection-header", "View Mode"),
                     radioButtons(
                       "stats_view_mode",
-                      "View Mode:",
+                      NULL,
                       choices = list(
-                        "All Subbasins (by Objective Function)" = "all",
+                        "All Subbasins (by OF)" = "all",
                         "Single Subbasin (all metrics)" = "single"
                       ),
                       selected = "all",
                       inline = FALSE
-                    ),
+                    )
+                  ),
+                  column(4,
+                    tags$div(class = "subsection-header", "Selection"),
                     # Shown when view_mode = "all"
                     conditionalPanel(
                       condition = "input.stats_view_mode == 'all'",
@@ -612,7 +626,7 @@ ui <- fluidPage(
                       )
                     )
                   ),
-                  column(6,
+                  column(4,
                     tags$div(class = "subsection-header", "Status"),
                     verbatimTextOutput("status_text_stats")
                   )
@@ -1754,17 +1768,62 @@ server <- function(input, output, session) {
   # Seasonality plots
   output$plot_seasonality_discharge <- renderPlotly({
     req(seasonality_data())
-    plot_seasonality_discharge(seasonality_data()$discharge)
+    sdata <- seasonality_data()$discharge
+    is_cum <- isTRUE(input$seasonality_cumsum)
+    if (!is.null(sdata) && is_cum) {
+      value_cols <- setdiff(colnames(sdata), "month")
+      for (col in value_cols) {
+        sdata[[col]] <- cumsum(replace(sdata[[col]], is.na(sdata[[col]]), 0))
+      }
+    }
+    p <- plot_seasonality_discharge(sdata)
+    if (is_cum) {
+      p <- p %>% layout(
+        title = list(text = "Cumulative Monthly Discharge", font = list(size = 14)),
+        yaxis = list(title = list(text = "Cumulative Discharge (m\u00b3/s)", font = list(size = 12)))
+      )
+    }
+    p
   })
 
   output$plot_seasonality_precipitation <- renderPlotly({
     req(seasonality_data())
-    plot_seasonality_precipitation(seasonality_data()$precipitation)
+    sdata <- seasonality_data()$precipitation
+    is_cum <- isTRUE(input$seasonality_cumsum)
+    if (!is.null(sdata) && is_cum) {
+      value_cols <- setdiff(colnames(sdata), "month")
+      for (col in value_cols) {
+        sdata[[col]] <- cumsum(replace(sdata[[col]], is.na(sdata[[col]]), 0))
+      }
+    }
+    p <- plot_seasonality_precipitation(sdata)
+    if (is_cum) {
+      p <- p %>% layout(
+        title = list(text = "Cumulative Monthly Precipitation + ET", font = list(size = 14)),
+        yaxis = list(title = list(text = "Cumulative Flux (mm)", font = list(size = 12)))
+      )
+    }
+    p
   })
 
   output$plot_seasonality_runoff <- renderPlotly({
     req(seasonality_data())
-    plot_seasonality_runoff(seasonality_data()$runoff_components)
+    sdata <- seasonality_data()$runoff_components
+    is_cum <- isTRUE(input$seasonality_cumsum)
+    if (!is.null(sdata) && is_cum) {
+      value_cols <- setdiff(colnames(sdata), "month")
+      for (col in value_cols) {
+        sdata[[col]] <- cumsum(replace(sdata[[col]], is.na(sdata[[col]]), 0))
+      }
+    }
+    p <- plot_seasonality_runoff(sdata)
+    if (is_cum) {
+      p <- p %>% layout(
+        title = list(text = "Cumulative Monthly Runoff Components", font = list(size = 14)),
+        yaxis = list(title = list(text = "Cumulative Runoff (mm)", font = list(size = 12)))
+      )
+    }
+    p
   })
 
   output$plot_seasonality_water_balance <- renderPlotly({

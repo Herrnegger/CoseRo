@@ -14,7 +14,7 @@ from GeoSphere Austria. They will NOT work with other gridded datasets due to
 the hardcoded filename patterns and the raw cell index mapping logic.}
 \subsection{The Sparse Weight Matrix Approach}{
 
-The key innovation is building a sparse weight matrix that maps directly to
+The innovation is building a sparse weight matrix that maps directly to
 the raw (unflipped) NetCDF storage layout. This avoids expensive raster
 transformations during processing:
 \enumerate{
@@ -42,5 +42,20 @@ The primary functions are:
 \item \code{\link{write_spartacus_temp}}: For mean temperature (from TN and TX).
 }
 }
+}
+\references{
+Hiebl, J. and Frei, C. (2016). Daily temperature grids for Austria since 1961 —
+concept, creation and applicability. \emph{Theor. Appl. Climatol.}
+\strong{124}(1):161-178.
+\href{https://doi.org/10.1007/s00704-015-1411-4}{doi:10.1007/s00704-015-1411-4}
+
+Hiebl, J. and Frei, C. (2018). Daily precipitation grids for Austria since 1961 —
+development and evaluation of a spatial dataset for hydroclimatic monitoring and
+modelling. \emph{Theor. Appl. Climatol.} \strong{132}(1):327-345.
+\href{https://doi.org/10.1007/s00704-017-2093-x}{doi:10.1007/s00704-017-2093-x}
+
+GeoSphere Austria (2023). SPARTACUS v2 — Spatial Reanalysis of Temperature and
+Precipitation for Austria.
+\href{https://doi.org/10.60669/m6w8-s545}{doi:10.60669/m6w8-s545}
 }
 \keyword{internal}

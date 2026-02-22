@@ -220,7 +220,7 @@ read_cosero_minimal <- function(output_dir, quiet = TRUE) {
 #' @keywords internal
 calculate_single_metric <- function(result, subbasin, metric, spinup_value = 0) {
   
-  # Try pre-calculated
+  # Try pre-calculated statistics first
   if (metric %in% c("NSE", "KGE", "BIAS", "RMSE")) {
     val <- tryCatch({
       extract_run_metrics(result, subbasin_id = subbasin, metric = metric)
@@ -232,14 +232,31 @@ calculate_single_metric <- function(result, subbasin, metric, spinup_value = 0) 
     }
   }
   
-  # Calculate from data
+  # Calculate from runoff data
   runoff <- result$output_data$runoff
-  sb_formatted <- sprintf("%04d", as.numeric(subbasin))
-  
-  qsim_col <- paste0("QSIM_", sb_formatted)
-  qobs_col <- paste0("QOBS_", sb_formatted)
-  
-  if (!qsim_col %in% colnames(runoff) || !qobs_col %in% colnames(runoff)) {
+  if (is.null(runoff)) return(NA)
+
+  # Auto-detect subbasin column format (COSERO may use 3 or 4 digits)
+  sb_num <- as.numeric(subbasin)
+  possible_formats <- c(
+    sprintf("%03d", sb_num),
+    sprintf("%04d", sb_num),
+    sprintf("%d", sb_num)
+  )
+
+  qsim_col <- NULL
+  qobs_col <- NULL
+  for (fmt in possible_formats) {
+    qsim_try <- paste0("QSIM_", fmt)
+    qobs_try <- paste0("QOBS_", fmt)
+    if (qsim_try %in% colnames(runoff) && qobs_try %in% colnames(runoff)) {
+      qsim_col <- qsim_try
+      qobs_col <- qobs_try
+      break
+    }
+  }
+
+  if (is.null(qsim_col) || is.null(qobs_col)) {
     return(NA)
   }
   
@@ -342,6 +359,10 @@ create_objective_function <- function(cosero_path,
     if (abs(sum(subbasin_weights) - 1) > 1e-6) {
       stop("subbasin_weights must sum to 1", call. = FALSE)
     }
+  } else if (!is.null(subbasin_weights)) {
+    warning("subbasin_weights provided but aggregation='", aggregation,
+            "' - weights will be ignored. Use aggregation='weighted' to apply them.",
+            call. = FALSE)
   }
   
   if (!aggregation %in% c("mean", "weighted", "min", "product")) {
@@ -507,9 +528,11 @@ create_objective_function <- function(cosero_path,
     return(obj_value)
   }
 
-  # Store backup path as attribute for restoration after optimization
+  # Store backup path and original values as attributes
   attr(obj_fun, "backup_file") <- backup_file
   attr(obj_fun, "par_file") <- par_file
+  attr(obj_fun, "original_values") <- original_values
+  attr(obj_fun, "param_structure") <- param_structure
 
   return(obj_fun)
 }
@@ -541,7 +564,12 @@ dds_optimize <- function(obj_fun, lower, upper, max_iter = 1000,
   x_best <- runif(n_params, lower, upper)
   f_best <- obj_fun(x_best)
 
-  history <- data.frame(iteration = 1, objective = f_best)
+  # Pre-allocate history to avoid O(n^2) rbind growth
+  history <- data.frame(
+    iteration = integer(max_iter),
+    objective = numeric(max_iter)
+  )
+  history[1, ] <- c(1, f_best)
 
   # Progress bar setup
   if (verbose && requireNamespace("pbapply", quietly = TRUE)) {
@@ -557,11 +585,14 @@ dds_optimize <- function(obj_fun, lower, upper, max_iter = 1000,
 
     x_new <- x_best
     selected <- runif(n_params) < prob_select
+    # DDS spec: at least one parameter must be perturbed
+    if (!any(selected)) selected[sample(n_params, 1)] <- TRUE
 
     for (j in which(selected)) {
       sigma <- r * (upper[j] - lower[j])
       x_new[j] <- x_best[j] + rnorm(1, 0, sigma)
 
+      # Reflect at bounds, then clamp
       if (x_new[j] < lower[j]) x_new[j] <- lower[j] + (lower[j] - x_new[j])
       if (x_new[j] > upper[j]) x_new[j] <- upper[j] - (x_new[j] - upper[j])
       x_new[j] <- max(lower[j], min(upper[j], x_new[j]))
@@ -574,7 +605,7 @@ dds_optimize <- function(obj_fun, lower, upper, max_iter = 1000,
       f_best <- f_new
     }
 
-    history <- rbind(history, data.frame(iteration = i, objective = f_best))
+    history[i, ] <- c(i, f_best)
 
     # Update progress
     if (show_pb) {
@@ -594,64 +625,31 @@ dds_optimize <- function(obj_fun, lower, upper, max_iter = 1000,
 #' Run Final COSERO with Optimal Parameters
 #'
 #' Internal helper function to run COSERO with optimal parameters and full outputs.
+#' Uses original_values from the objective function closure to ensure correct
+#' baseline for relative change (relchg) modifications.
 #'
 #' @param cosero_path COSERO project path
 #' @param par_bounds Parameter bounds with optimal_value column
 #' @param zones_to_modify Zone IDs to modify (NULL = all zones)
 #' @param defaults_settings COSERO settings
+#' @param obj_fun Objective function (carries original_values and param_structure)
 #' @param verbose Print progress
 #'
 #' @return COSERO run result or NULL if failed
 #' @keywords internal
 run_final_optimization <- function(cosero_path, par_bounds, zones_to_modify,
-                                   defaults_settings, verbose = TRUE) {
+                                   defaults_settings, obj_fun, verbose = TRUE) {
 
   if (verbose) cat("\nRunning final COSERO with optimal parameters...\n")
 
   params_optimal <- setNames(as.list(par_bounds$optimal_value), par_bounds$parameter)
 
-  # Get parameter filename
-  if (!is.null(defaults_settings) && !is.null(defaults_settings$PARAFILE)) {
-    par_filename <- defaults_settings$PARAFILE
-  } else {
-    defaults_file <- file.path(cosero_path, "input", "defaults.txt")
-    if (file.exists(defaults_file)) {
-      defaults <- read_defaults(defaults_file)
-      par_filename <- ifelse(!is.null(defaults$PARAFILE), defaults$PARAFILE, "para.txt")
-    } else {
-      par_filename <- "para.txt"
-    }
-  }
-  par_file <- file.path(cosero_path, "input", par_filename)
+  par_file <- attr(obj_fun, "par_file")
+  # Use the original values captured at closure creation (before any modifications)
+  original_values <- attr(obj_fun, "original_values")
+  param_structure <- attr(obj_fun, "param_structure")
 
-  # Load structure
-  first_line <- readLines(par_file, n = 1)
-  param_data_original <- read.table(
-    par_file, header = TRUE, sep = "\t", skip = 1,
-    stringsAsFactors = FALSE, check.names = FALSE, comment.char = ""
-  )
-
-  param_structure <- list(
-    is_tabular = TRUE,
-    first_line = first_line,
-    param_data_original = param_data_original,
-    param_data_working = param_data_original
-  )
-
-  original_values <- list()
-  for (param_name in par_bounds$parameter) {
-    param_cols <- find_parameter_column(param_name, colnames(param_data_original),
-                                        return_all = TRUE)
-    if (length(param_cols) > 0) {
-      all_values <- numeric()
-      for (col in param_cols) {
-        all_values <- c(all_values, param_data_original[[col]])
-      }
-      original_values[[param_name]] <- all_values
-    }
-  }
-
-  # Apply optimal parameters
+  # Apply optimal parameters using the correct original baseline
   modify_parameter_table_fast(
     par_file, params_optimal, par_bounds, original_values,
     param_structure, zones_to_modify, quiet = TRUE
@@ -679,7 +677,377 @@ run_final_optimization <- function(cosero_path, par_bounds, zones_to_modify,
   return(NULL)
 }
 
-# 6 Main Optimization Functions #####
+#' Save Optimized Parameter File
+#'
+#' Internal helper to save the optimized parameters to a timestamped file
+#' in the output directory. Used by both DDS and SCE-UA.
+#'
+#' @param cosero_path COSERO project path
+#' @param par_bounds Parameter bounds with optimal_value column
+#' @param target_subbasins Subbasins used for calibration
+#' @param zones_to_modify Zone IDs that were modified
+#' @param metric Metric(s) used
+#' @param obj_fun Objective function (carries original_values and par_file)
+#' @param verbose Print progress
+#'
+#' @return Path to the saved optimized parameter file
+#' @keywords internal
+save_optimized_params <- function(cosero_path, par_bounds, target_subbasins,
+                                  zones_to_modify, metric, obj_fun,
+                                  verbose = TRUE) {
+
+  par_file <- attr(obj_fun, "par_file")
+  original_values <- attr(obj_fun, "original_values")
+
+  subbasin_str <- paste(gsub("^0+", "", target_subbasins), collapse = "_")
+  metric_str <- paste(metric, collapse = "_")
+  timestamp <- format(Sys.time(), "%Y%m%d_%H%M%S")
+  opt_filename <- sprintf("para_optimized_NB%s_%s_%s.txt", subbasin_str, metric_str, timestamp)
+
+  opt_file <- file.path(cosero_path, "output", opt_filename)
+
+  # Copy the original parameter file and apply optimal parameters
+  file.copy(par_file, opt_file, overwrite = TRUE)
+  optimal_params <- setNames(as.list(par_bounds$optimal_value), par_bounds$parameter)
+
+  modify_parameter_table(opt_file, optimal_params, par_bounds, original_values,
+                         zones = zones_to_modify, quiet = TRUE, add_timestamp = TRUE)
+  if (verbose) cat("Saved optimized parameters to:", opt_filename, "\n")
+
+  return(opt_file)
+}
+
+# 6 Reporting Helpers #####
+
+#' Run Initial Baseline COSERO
+#'
+#' Runs COSERO with current (unmodified) parameters and extracts baseline metrics.
+#'
+#' @param cosero_path COSERO project path
+#' @param target_subbasins Subbasin IDs
+#' @param metric Metric(s) to extract
+#' @param defaults_settings COSERO settings
+#' @param verbose Print progress
+#'
+#' @return List with initial_run result and initial_metrics matrix
+#' @keywords internal
+run_initial_baseline <- function(cosero_path, target_subbasins, metric,
+                                 defaults_settings, verbose = TRUE) {
+
+  if (verbose) cat("Running initial baseline model...\n")
+
+  initial_run <- tryCatch({
+    run_cosero(
+      project_path = cosero_path,
+      defaults_settings = defaults_settings,
+      read_outputs = FALSE,
+      quiet = TRUE,
+      create_backup = FALSE
+    )
+  }, error = function(e) {
+    if (verbose) warning("Initial run failed: ", e$message)
+    return(list(success = FALSE))
+  })
+
+  if (!initial_run$success) {
+    if (verbose) cat("  Initial run failed - skipping baseline metrics\n")
+    return(list(initial_run = initial_run, initial_metrics = NULL))
+  }
+
+  # Read minimal output for metric extraction
+  output_dir <- file.path(cosero_path, "output")
+  initial_run$output_data <- read_cosero_minimal(output_dir, quiet = TRUE)
+
+  # Extract metrics for each subbasin and metric
+  n_subbasins <- length(target_subbasins)
+  n_metrics <- length(metric)
+
+  spinup_value <- 0
+  if (!is.null(defaults_settings) && !is.null(defaults_settings$SPINUP)) {
+    spinup_value <- as.numeric(defaults_settings$SPINUP)
+  }
+
+  initial_metrics <- matrix(NA, nrow = n_subbasins, ncol = n_metrics,
+                            dimnames = list(target_subbasins, metric))
+
+  for (i in seq_along(target_subbasins)) {
+    for (j in seq_along(metric)) {
+      initial_metrics[i, j] <- calculate_single_metric(
+        initial_run, target_subbasins[i], metric[j], spinup_value
+      )
+    }
+  }
+
+  if (verbose) {
+    cat("  Initial baseline metrics:\n")
+    for (j in seq_along(metric)) {
+      vals <- initial_metrics[, j]
+      valid <- vals[!is.na(vals)]
+      if (length(valid) > 0) {
+        cat(sprintf("    %s: %s (mean: %.4f)\n",
+                    metric[j],
+                    paste(sprintf("%.4f", vals), collapse = " / "),
+                    mean(valid)))
+      }
+    }
+    cat("\n")
+  }
+
+  list(initial_run = initial_run, initial_metrics = initial_metrics)
+}
+
+
+#' Get Parameter Value Summary Across Zones
+#'
+#' Computes mean, median, min, max of parameter values across all zones.
+#'
+#' @param original_values Named list of parameter values (from obj_fun attribute)
+#' @param par_bounds Parameter bounds data frame
+#'
+#' @return Data frame with parameter, mean, median, min, max columns
+#' @keywords internal
+get_param_summary <- function(original_values, par_bounds) {
+  summary_rows <- lapply(par_bounds$parameter, function(pname) {
+    vals <- original_values[[pname]]
+    if (is.null(vals) || length(vals) == 0) {
+      data.frame(parameter = pname, mean = NA, median = NA,
+                 min = NA, max = NA, stringsAsFactors = FALSE)
+    } else {
+      data.frame(parameter = pname,
+                 mean = mean(vals, na.rm = TRUE),
+                 median = stats::median(vals, na.rm = TRUE),
+                 min = min(vals, na.rm = TRUE),
+                 max = max(vals, na.rm = TRUE),
+                 stringsAsFactors = FALSE)
+    }
+  })
+  do.call(rbind, summary_rows)
+}
+
+
+#' Read Optimized Parameter Values from File
+#'
+#' Reads the optimized para file and extracts parameter values for summary.
+#'
+#' @param opt_file Path to optimized parameter file
+#' @param par_bounds Parameter bounds data frame
+#'
+#' @return Named list of parameter values (same structure as original_values)
+#' @keywords internal
+read_optimized_values <- function(opt_file, par_bounds) {
+  param_data <- read.table(
+    opt_file, header = TRUE, sep = "\t", skip = 1,
+    stringsAsFactors = FALSE, check.names = FALSE, comment.char = ""
+  )
+
+  opt_values <- list()
+  for (param_name in par_bounds$parameter) {
+    param_cols <- find_parameter_column(param_name, colnames(param_data),
+                                        return_all = TRUE)
+    if (length(param_cols) > 0) {
+      all_values <- numeric()
+      for (col in param_cols) {
+        all_values <- c(all_values, param_data[[col]])
+      }
+      opt_values[[param_name]] <- all_values
+    }
+  }
+  opt_values
+}
+
+
+#' Print Optimization Report
+#'
+#' Prints a formatted comparison of initial vs optimized performance and parameters.
+#'
+#' @param algorithm Algorithm name ("DDS" or "SCE-UA")
+#' @param par_filename Parameter file basename
+#' @param target_subbasins Subbasin IDs
+#' @param zones_to_modify Zone IDs modified
+#' @param metric Metric(s) used
+#' @param metric_weights Metric weights (if multi-objective)
+#' @param subbasin_weights Subbasin weights (if weighted aggregation)
+#' @param aggregation Aggregation method
+#' @param runtime Runtime in seconds
+#' @param n_iter Number of iterations/evaluations
+#' @param initial_metrics Matrix of initial metrics (subbasins x metrics)
+#' @param final_metrics Matrix of final metrics (subbasins x metrics)
+#' @param initial_param_summary Data frame from get_param_summary (initial)
+#' @param final_param_summary Data frame from get_param_summary (optimized)
+#' @param initial_stats Statistics data frame from initial run (optional)
+#' @param final_stats Statistics data frame from final run (optional)
+#' @param opt_filename Optimized parameter filename
+#'
+#' @keywords internal
+print_optimization_report <- function(algorithm, par_filename,
+                                      target_subbasins, zones_to_modify,
+                                      metric, metric_weights,
+                                      subbasin_weights, aggregation,
+                                      runtime, n_iter,
+                                      initial_metrics, final_metrics,
+                                      initial_param_summary, final_param_summary,
+                                      initial_stats = NULL, final_stats = NULL,
+                                      opt_filename,
+                                      par_bounds = NULL,
+                                      output_file = NULL,
+                                      print_to_console = TRUE) {
+
+  # Capture all output so we can both print and write to file
+  report_lines <- utils::capture.output({
+
+  line_w <- 65
+  cat("\n")
+  cat(strrep("\u2550", line_w), "\n")
+  cat("  COSERO Optimization Results (", algorithm, ")\n", sep = "")
+  cat(strrep("\u2550", line_w), "\n")
+
+  # Header
+  cat("  Original param file : ", par_filename, "\n", sep = "")
+  cat("  Optimized param file: ", opt_filename, "\n", sep = "")
+  cat("  Target subbasins: ", paste(target_subbasins, collapse = ", "), "\n", sep = "")
+  if (!is.null(subbasin_weights)) {
+    cat("  Subbasin weights: ", paste(round(subbasin_weights, 3), collapse = ", "), "\n", sep = "")
+  }
+  cat("  Zones modified  : ",
+      if (is.null(zones_to_modify)) "all" else length(zones_to_modify), "\n", sep = "")
+  cat("  Metric(s)       : ", paste(metric, collapse = ", "), "\n", sep = "")
+  if (length(metric) > 1 && !is.null(metric_weights)) {
+    cat("  Metric weights  : ", paste(round(metric_weights, 3), collapse = ", "), "\n", sep = "")
+  }
+  cat("  Aggregation     : ", aggregation, "\n", sep = "")
+  cat("  Runtime         : ", round(runtime, 1), " seconds (", n_iter, " ",
+      if (algorithm == "DDS") "iterations" else "evaluations", ")\n", sep = "")
+
+  # Performance section - use full statistics if available, else fall back to metric matrix
+  stats_cols <- c("NSE", "KGE", "BETA")
+
+  get_stats_row <- function(stats_df, subbasin) {
+    if (is.null(stats_df)) return(NULL)
+    sb_num <- as.numeric(subbasin)
+    mask <- stats_df$sb %in% c(sprintf("%03d", sb_num), sprintf("%04d", sb_num),
+                                sprintf("%d", sb_num))
+    if (!any(mask)) return(NULL)
+    stats_df[mask, , drop = FALSE][1, ]
+  }
+
+  fmt_stat <- function(v) {
+    if (is.null(v) || is.na(v)) return("    NA")
+    sprintf("%6.4f", v)
+  }
+
+  has_full_stats <- !is.null(initial_stats) || !is.null(final_stats)
+
+  cat("\n")
+  cat(strrep("\u2500", line_w), "\n")
+
+  if (has_full_stats) {
+    # Determine which columns to show (present in at least one stats df)
+    avail_cols <- stats_cols[stats_cols %in% c(colnames(initial_stats), colnames(final_stats))]
+    col_header <- paste(avail_cols, collapse = " / ")
+    cat("  Performance (", col_header, ")\n", sep = "")
+    cat(strrep("\u2500", line_w), "\n")
+
+    for (i in seq_along(target_subbasins)) {
+      sb <- target_subbasins[i]
+      init_row <- get_stats_row(initial_stats, sb)
+      final_row <- get_stats_row(final_stats, sb)
+
+      init_parts <- sapply(avail_cols, function(col) {
+        fmt_stat(if (!is.null(init_row)) init_row[[col]] else NA)
+      })
+      final_parts <- sapply(avail_cols, function(col) {
+        fmt_stat(if (!is.null(final_row)) final_row[[col]] else NA)
+      })
+
+      fmt_change <- function(col, init_r, final_r) {
+        iv <- if (!is.null(init_r) && col %in% colnames(init_r)) init_r[[col]] else NA
+        fv <- if (!is.null(final_r) && col %in% colnames(final_r)) final_r[[col]] else NA
+        if (is.na(iv) || is.na(fv)) return("    NA")
+        d <- fv - iv
+        if (d >= 0) sprintf("%+6.4f", d) else sprintf("%6.4f", d)
+      }
+
+      change_parts <- sapply(avail_cols, function(col) fmt_change(col, init_row, final_row))
+
+      init_str   <- paste(paste0(avail_cols, " = ", init_parts),   collapse = "  |  ")
+      final_str  <- paste(paste0(avail_cols, " = ", final_parts),  collapse = "  |  ")
+      change_str <- paste(paste0(avail_cols, " = ", change_parts), collapse = "  |  ")
+
+      cat("    Initial   Subbasin ", sb, ":  ", init_str,   "\n", sep = "")
+      cat("    Optimized Subbasin ", sb, ":  ", final_str,  "\n", sep = "")
+      cat("    Change    Subbasin ", sb, ":  ", change_str, "\n", sep = "")
+      if (i < length(target_subbasins)) cat("\n")
+    }
+  } else if (!is.null(initial_metrics) && !is.null(final_metrics)) {
+    # Fallback: metric matrix only
+    cat("  Performance Comparison\n")
+    cat(strrep("\u2500", line_w), "\n")
+    cat(sprintf("  %-10s  %10s  %10s  %10s\n", "Subbasin", "Initial", "Optimized", "Change"))
+
+    for (i in seq_along(target_subbasins)) {
+      for (j in seq_along(metric)) {
+        init_val  <- initial_metrics[i, j]
+        final_val <- final_metrics[i, j]
+        change    <- final_val - init_val
+        init_str  <- if (is.na(init_val))  sprintf("%10s", "NA") else sprintf("%10.4f", init_val)
+        final_str <- if (is.na(final_val)) sprintf("%10s", "NA") else sprintf("%10.4f", final_val)
+        change_str <- if (is.na(change)) "      NA" else if (change >= 0) sprintf("+%.4f", change) else sprintf("%.4f", change)
+        cat(sprintf("  %-10s  %10s  %10s  %10s\n",
+                    target_subbasins[i], init_str, final_str, change_str))
+      }
+    }
+
+    if (length(target_subbasins) > 1) {
+      for (j in seq_along(metric)) {
+        init_mean  <- mean(initial_metrics[, j], na.rm = TRUE)
+        final_mean <- mean(final_metrics[, j],   na.rm = TRUE)
+        change_mean <- final_mean - init_mean
+        change_str  <- if (is.na(change_mean)) "      NA" else if (change_mean >= 0) sprintf("+%.4f", change_mean) else sprintf("%.4f", change_mean)
+        init_str    <- if (is.na(init_mean))  sprintf("%10s", "NA") else sprintf("%10.4f", init_mean)
+        final_str   <- if (is.na(final_mean)) sprintf("%10s", "NA") else sprintf("%10.4f", final_mean)
+        cat(sprintf("  %-10s  %10s  %10s  %10s\n", "Mean", init_str, final_str, change_str))
+      }
+    }
+  }
+
+  # Parameter comparison - Initial → Optimized with smart rounding
+  if (!is.null(initial_param_summary) && !is.null(final_param_summary)) {
+    cat("\n")
+    cat(strrep("\u2500", line_w), "\n")
+    cat("  Parameter Changes (spatial mean across zones)\n")
+    cat(strrep("\u2500", line_w), "\n")
+
+    fmt_pval <- function(v) {
+      if (is.na(v)) return("NA")
+      if (abs(v) >= 1) sprintf("%.1f", v) else sprintf("%.3f", v)
+    }
+
+    for (k in seq_len(nrow(initial_param_summary))) {
+      pname     <- initial_param_summary$parameter[k]
+      init_mean <- initial_param_summary$mean[k]
+      final_mean <- final_param_summary$mean[k]
+      cat(sprintf("  %-10s  %8s  ->  %8s\n",
+                  pname, fmt_pval(init_mean), fmt_pval(final_mean)))
+    }
+  }
+
+  # Footer
+  cat("\n")
+  cat(strrep("\u2550", line_w), "\n\n")
+
+  }) # end capture.output
+
+  # Print to console if requested
+  if (print_to_console) cat(paste(report_lines, collapse = "\n"), "\n")
+
+  # Write to file if requested
+  if (!is.null(output_file)) writeLines(report_lines, output_file)
+
+  invisible(report_lines)
+}
+
+
+# 7 Main Optimization Functions #####
 
 #' Optimize COSERO Parameters with DDS Algorithm
 #'
@@ -897,10 +1265,26 @@ optimize_cosero_dds <- function(cosero_path,
     target_subbasins <- zone_mapping$subbasins
   }
 
+  # Determine parameter file name for display
+  par_filename <- "para.txt"
+  if (!is.null(defaults_settings) && !is.null(defaults_settings$PARAFILE)) {
+    par_filename <- defaults_settings$PARAFILE
+  } else {
+    defaults_file <- file.path(cosero_path, "input", "defaults.txt")
+    if (file.exists(defaults_file)) {
+      defaults <- read_defaults(defaults_file)
+      if (!is.null(defaults$PARAFILE)) par_filename <- defaults$PARAFILE
+    }
+  }
+
   if (verbose) {
     cat("DDS Optimization:\n")
-    cat("  Parameters:", n_params, "\n")
+    cat("  Original param file:", par_filename, "\n")
+    cat("  Parameters :", n_params, "->", paste(par_bounds$parameter, collapse = ", "), "\n")
     cat("  Target subbasins:", paste(target_subbasins, collapse = ", "), "\n")
+    if (!is.null(subbasin_weights)) {
+      cat("  Subbasin weights:", paste(round(subbasin_weights, 3), collapse = ", "), "\n")
+    }
     cat("  Zones to modify:", if (is.null(zones_to_modify)) "all" else length(zones_to_modify), "\n")
     cat("  Metrics:", paste(metric, collapse = ", "), "\n")
     if (length(metric) > 1) {
@@ -910,12 +1294,23 @@ optimize_cosero_dds <- function(cosero_path,
     cat("  Max iterations:", max_iter, "\n\n")
   }
 
+  # Initial baseline run
+  baseline <- run_initial_baseline(
+    cosero_path, target_subbasins, metric, defaults_settings, verbose
+  )
+  initial_metrics <- baseline$initial_metrics
+
   obj_fun <- create_objective_function(
     cosero_path, par_bounds, target_subbasins, zones_to_modify,
     metric, metric_weights, subbasin_weights, aggregation,
     defaults_settings, verbose, use_minimal_reading
   )
   
+  # Initial parameter summary
+  initial_param_summary <- get_param_summary(
+    attr(obj_fun, "original_values"), par_bounds
+  )
+
   lower <- par_bounds$min
   upper <- par_bounds$max
   
@@ -934,11 +1329,11 @@ optimize_cosero_dds <- function(cosero_path,
   # Add parameter info
   par_bounds$optimal_value <- result$par
 
-  # Final run with full outputs
+  # Final run with full outputs (uses obj_fun's original_values for correct baseline)
   final_run_data <- NULL
   if (read_final_outputs) {
     final_run_data <- run_final_optimization(
-      cosero_path, par_bounds, zones_to_modify, defaults_settings, verbose
+      cosero_path, par_bounds, zones_to_modify, defaults_settings, obj_fun, verbose
     )
   }
 
@@ -951,34 +1346,70 @@ optimize_cosero_dds <- function(cosero_path,
     if (verbose) cat("Restored original parameter file\n")
   }
 
-  # Save optimized parameter file
-  subbasin_str <- paste(gsub("^0+", "", target_subbasins), collapse = "_")
-  metric_str <- paste(metric, collapse = "_")
-  timestamp <- format(Sys.time(), "%Y%m%d_%H%M%S")
-  opt_filename <- sprintf("para_optimized_NB%s_%s_%s.txt", subbasin_str, metric_str, timestamp)
-  
-  # Saved to output folder
-  opt_file <- file.path(cosero_path, "output", opt_filename)
+  # Save optimized parameter file (uses obj_fun's original_values for correct baseline)
+  opt_file <- save_optimized_params(
+    cosero_path, par_bounds, target_subbasins,
+    zones_to_modify, metric, obj_fun, verbose
+  )
 
-  # Copy original and apply optimal parameters
-  file.copy(par_file, opt_file, overwrite = TRUE)
-  optimal_params <- setNames(as.list(par_bounds$optimal_value), par_bounds$parameter)
+  # Extract final metrics and parameter summary
+  final_metrics <- NULL
+  final_param_summary <- NULL
 
-  # Read original values and apply modifications
-  param_data_orig <- read.table(par_file, header = TRUE, sep = "\t", skip = 1,
-                                stringsAsFactors = FALSE, check.names = FALSE, comment.char = "")
-  original_values <- list()
-  for (param_name in par_bounds$parameter) {
-    param_cols <- find_parameter_column(param_name, colnames(param_data_orig), return_all = TRUE)
-    if (length(param_cols) > 0) {
-      all_values <- numeric()
-      for (col in param_cols) all_values <- c(all_values, param_data_orig[[col]])
-      original_values[[param_name]] <- all_values
+  if (!is.null(final_run_data) && final_run_data$success) {
+    spinup_value <- 0
+    if (!is.null(defaults_settings) && !is.null(defaults_settings$SPINUP)) {
+      spinup_value <- as.numeric(defaults_settings$SPINUP)
+    }
+    final_metrics <- matrix(NA, nrow = length(target_subbasins), ncol = length(metric),
+                            dimnames = list(target_subbasins, metric))
+    for (i in seq_along(target_subbasins)) {
+      for (j in seq_along(metric)) {
+        final_metrics[i, j] <- calculate_single_metric(
+          final_run_data, target_subbasins[i], metric[j], spinup_value
+        )
+      }
     }
   }
-  modify_parameter_table(opt_file, optimal_params, par_bounds, original_values,
-                         zones = zones_to_modify, quiet = TRUE, add_timestamp = TRUE)
-  if (verbose) cat("Saved optimized parameters to:", opt_filename, "\n")
+
+  if (file.exists(opt_file)) {
+    opt_values <- read_optimized_values(opt_file, par_bounds)
+    final_param_summary <- get_param_summary(opt_values, par_bounds)
+  }
+
+  # Extract full statistics for report
+  initial_stats <- baseline$initial_run$output_data$statistics
+  final_stats   <- if (!is.null(final_run_data) && final_run_data$success)
+    final_run_data$output_data$statistics else NULL
+
+  # Derive report filename from optimized parameter file (same timestamp stem)
+  report_filename <- sub("\\.txt$", "_report.txt", basename(opt_file))
+  report_file <- file.path(cosero_path, "output", report_filename)
+
+  # Print and save report (always saved to disk; printed only when verbose)
+  print_optimization_report(
+    algorithm = "DDS",
+    par_filename = par_filename,
+    target_subbasins = target_subbasins,
+    zones_to_modify = zones_to_modify,
+    metric = metric,
+    metric_weights = metric_weights,
+    subbasin_weights = subbasin_weights,
+    aggregation = aggregation,
+    runtime = runtime,
+    n_iter = max_iter,
+    initial_metrics = initial_metrics,
+    final_metrics = final_metrics,
+    initial_param_summary = initial_param_summary,
+    final_param_summary = final_param_summary,
+    initial_stats = initial_stats,
+    final_stats = final_stats,
+    opt_filename = basename(opt_file),
+    par_bounds = par_bounds,
+    output_file = report_file,
+    print_to_console = verbose
+  )
+  if (verbose) cat("Saved optimization report to:", report_filename, "\n")
 
   list(
     par = result$par,
@@ -988,6 +1419,7 @@ optimize_cosero_dds <- function(cosero_path,
     runtime_seconds = runtime,
     metric = metric,
     metric_weights = metric_weights,
+    subbasin_weights = subbasin_weights,
     aggregation = aggregation,
     algorithm = "DDS",
     final_run = final_run_data,
@@ -995,7 +1427,12 @@ optimize_cosero_dds <- function(cosero_path,
     zones_to_modify = zones_to_modify,
     cosero_path = cosero_path,
     defaults_settings = defaults_settings,
-    optimized_par_file = opt_file
+    optimized_par_file = opt_file,
+    report_file = report_file,
+    initial_metrics = initial_metrics,
+    final_metrics = final_metrics,
+    initial_param_summary = initial_param_summary,
+    final_param_summary = final_param_summary
   )
 }
 #' Optimize COSERO Parameters with SCE-UA Algorithm
@@ -1119,7 +1556,6 @@ optimize_cosero_sce <- function(cosero_path,
                                 verbose = TRUE,
                                 read_final_outputs = TRUE,
                                 use_minimal_reading = TRUE) {
-  
   if (!requireNamespace("rtop", quietly = TRUE)) {
     stop("Package 'rtop' required for SCE-UA", call. = FALSE)
   }
@@ -1133,20 +1569,47 @@ optimize_cosero_sce <- function(cosero_path,
     target_subbasins <- zone_mapping$subbasins
   }
 
+  # Determine parameter file name for display
+  par_filename <- "para.txt"
+  if (!is.null(defaults_settings) && !is.null(defaults_settings$PARAFILE)) {
+    par_filename <- defaults_settings$PARAFILE
+  } else {
+    defaults_file <- file.path(cosero_path, "input", "defaults.txt")
+    if (file.exists(defaults_file)) {
+      defaults <- read_defaults(defaults_file)
+      if (!is.null(defaults$PARAFILE)) par_filename <- defaults$PARAFILE
+    }
+  }
+
   if (verbose) {
     cat("SCE-UA Optimization:\n")
-    cat("  Parameters:", n_params, "\n")
+    cat("  Original param file:", par_filename, "\n")
+    cat("  Parameters :", n_params, "->", paste(par_bounds$parameter, collapse = ", "), "\n")
     cat("  Target subbasins:", paste(target_subbasins, collapse = ", "), "\n")
+    if (!is.null(subbasin_weights)) {
+      cat("  Subbasin weights:", paste(round(subbasin_weights, 3), collapse = ", "), "\n")
+    }
     cat("  Zones to modify:", if (is.null(zones_to_modify)) "all" else length(zones_to_modify), "\n")
     cat("  Max evaluations:", maxn, "\n\n")
   }
+
+  # Initial baseline run
+  baseline <- run_initial_baseline(
+    cosero_path, target_subbasins, metric, defaults_settings, verbose
+  )
+  initial_metrics <- baseline$initial_metrics
 
   obj_fun <- create_objective_function(
     cosero_path, par_bounds, target_subbasins, zones_to_modify,
     metric, metric_weights, subbasin_weights, aggregation,
     defaults_settings, verbose, use_minimal_reading
   )
-  
+
+  # Initial parameter summary
+  initial_param_summary <- get_param_summary(
+    attr(obj_fun, "original_values"), par_bounds
+  )
+
   lower <- par_bounds$min
   upper <- par_bounds$max
   
@@ -1190,11 +1653,11 @@ optimize_cosero_sce <- function(cosero_path,
   
   par_bounds$optimal_value <- result$par
 
-  # Final run with full outputs
+  # Final run with full outputs (uses obj_fun's original_values for correct baseline)
   final_run_data <- NULL
   if (read_final_outputs) {
     final_run_data <- run_final_optimization(
-      cosero_path, par_bounds, zones_to_modify, defaults_settings, verbose
+      cosero_path, par_bounds, zones_to_modify, defaults_settings, obj_fun, verbose
     )
   }
 
@@ -1207,34 +1670,70 @@ optimize_cosero_sce <- function(cosero_path,
     if (verbose) cat("Restored original parameter file\n")
   }
 
-  # Save optimized parameter file
-  subbasin_str <- paste(gsub("^0+", "", target_subbasins), collapse = "_")
-  metric_str <- paste(metric, collapse = "_")
-  timestamp <- format(Sys.time(), "%Y%m%d_%H%M%S")
-  opt_filename <- sprintf("para_optimized_NB%s_%s_%s.txt", subbasin_str, metric_str, timestamp)
-  
-  # Saved to output folder
-  opt_file <- file.path(cosero_path, "output", opt_filename)
+  # Save optimized parameter file (uses obj_fun's original_values for correct baseline)
+  opt_file <- save_optimized_params(
+    cosero_path, par_bounds, target_subbasins,
+    zones_to_modify, metric, obj_fun, verbose
+  )
 
-  # Copy original and apply optimal parameters
-  file.copy(par_file, opt_file, overwrite = TRUE)
-  optimal_params <- setNames(as.list(par_bounds$optimal_value), par_bounds$parameter)
+  # Extract final metrics and parameter summary
+  final_metrics <- NULL
+  final_param_summary <- NULL
 
-  # Read original values and apply modifications
-  param_data_orig <- read.table(par_file, header = TRUE, sep = "\t", skip = 1,
-                                stringsAsFactors = FALSE, check.names = FALSE, comment.char = "")
-  original_values <- list()
-  for (param_name in par_bounds$parameter) {
-    param_cols <- find_parameter_column(param_name, colnames(param_data_orig), return_all = TRUE)
-    if (length(param_cols) > 0) {
-      all_values <- numeric()
-      for (col in param_cols) all_values <- c(all_values, param_data_orig[[col]])
-      original_values[[param_name]] <- all_values
+  if (!is.null(final_run_data) && final_run_data$success) {
+    spinup_value <- 0
+    if (!is.null(defaults_settings) && !is.null(defaults_settings$SPINUP)) {
+      spinup_value <- as.numeric(defaults_settings$SPINUP)
+    }
+    final_metrics <- matrix(NA, nrow = length(target_subbasins), ncol = length(metric),
+                            dimnames = list(target_subbasins, metric))
+    for (i in seq_along(target_subbasins)) {
+      for (j in seq_along(metric)) {
+        final_metrics[i, j] <- calculate_single_metric(
+          final_run_data, target_subbasins[i], metric[j], spinup_value
+        )
+      }
     }
   }
-  modify_parameter_table(opt_file, optimal_params, par_bounds, original_values,
-                         zones = zones_to_modify, quiet = TRUE, add_timestamp = TRUE)
-  if (verbose) cat("Saved optimized parameters to:", opt_filename, "\n")
+
+  if (file.exists(opt_file)) {
+    opt_values <- read_optimized_values(opt_file, par_bounds)
+    final_param_summary <- get_param_summary(opt_values, par_bounds)
+  }
+
+  # Extract full statistics for report
+  initial_stats <- baseline$initial_run$output_data$statistics
+  final_stats   <- if (!is.null(final_run_data) && final_run_data$success)
+    final_run_data$output_data$statistics else NULL
+
+  # Derive report filename from optimized parameter file (same timestamp stem)
+  report_filename <- sub("\\.txt$", "_report.txt", basename(opt_file))
+  report_file <- file.path(cosero_path, "output", report_filename)
+
+  # Print and save report (always saved to disk; printed only when verbose)
+  print_optimization_report(
+    algorithm = "SCE-UA",
+    par_filename = par_filename,
+    target_subbasins = target_subbasins,
+    zones_to_modify = zones_to_modify,
+    metric = metric,
+    metric_weights = metric_weights,
+    subbasin_weights = subbasin_weights,
+    aggregation = aggregation,
+    runtime = runtime,
+    n_iter = eval_count,
+    initial_metrics = initial_metrics,
+    final_metrics = final_metrics,
+    initial_param_summary = initial_param_summary,
+    final_param_summary = final_param_summary,
+    initial_stats = initial_stats,
+    final_stats = final_stats,
+    opt_filename = basename(opt_file),
+    par_bounds = par_bounds,
+    output_file = report_file,
+    print_to_console = verbose
+  )
+  if (verbose) cat("Saved optimization report to:", report_filename, "\n")
 
   list(
     par = result$par,
@@ -1244,6 +1743,7 @@ optimize_cosero_sce <- function(cosero_path,
     runtime_seconds = runtime,
     metric = metric,
     metric_weights = metric_weights,
+    subbasin_weights = subbasin_weights,
     aggregation = aggregation,
     algorithm = "SCE-UA",
     final_run = final_run_data,
@@ -1251,7 +1751,12 @@ optimize_cosero_sce <- function(cosero_path,
     zones_to_modify = zones_to_modify,
     cosero_path = cosero_path,
     defaults_settings = defaults_settings,
-    optimized_par_file = opt_file
+    optimized_par_file = opt_file,
+    report_file = report_file,
+    initial_metrics = initial_metrics,
+    final_metrics = final_metrics,
+    initial_param_summary = initial_param_summary,
+    final_param_summary = final_param_summary
   )
 }
 
@@ -1408,7 +1913,20 @@ export_cosero_optimization <- function(opt_result, output_dir) {
             file.path(output_dir, "optimization_summary.csv"),
             row.names = FALSE)
 
+  # Report text file
+  report_copied <- FALSE
+  if (!is.null(opt_result$report_file) && file.exists(opt_result$report_file)) {
+    file.copy(opt_result$report_file,
+              file.path(output_dir, basename(opt_result$report_file)),
+              overwrite = TRUE)
+    report_copied <- TRUE
+  }
+
   cat("Results exported to:", output_dir, "\n")
+  cat("  - optimal_parameters.csv\n")
+  if (!is.null(opt_result$history)) cat("  - optimization_history.csv\n")
+  cat("  - optimization_summary.csv\n")
+  if (report_copied) cat("  -", basename(opt_result$report_file), "\n")
 
   invisible(NULL)
 }

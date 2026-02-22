@@ -16,7 +16,14 @@
       "Bash(grep:*)",
       "Bash(wc:*)",
       "Bash(git branch:*)",
-      "Bash(git remote set-head:*)"
+      "Bash(git remote set-head:*)",
+      "WebFetch(domain:doi.org)",
+      "WebFetch(domain:link.springer.com)",
+      "Bash(find:*)",
+      "Bash(printf:*)",
+      "Bash(./COSERO.exe:*)",
+      "Bash(cmd /c \"run_cosero_temp.bat > /dev/null 2>&1\")",
+      "Bash(echo:*)"
     ],
     "deny": [],
     "ask": []

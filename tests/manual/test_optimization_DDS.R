@@ -4,7 +4,7 @@
 # Tests DDS optimization with the Wildalpen example catchment
 # =============================================================================
 devtools::document()
-devtools::load_all("D:/OneDrive - Universität für Bodenkultur Wien/github/COSERO-R")
+devtools::load_all()
 
 library(ggplot2)
 
@@ -39,7 +39,7 @@ param_names <- c("BETA", "CTMAX","M", "TAB1")
 param_names <- c("M", "KBF", "TAB1", "H1", "TVS1", "TAB2", "H2", "TVS2", "TAB3")
 
 # Optimization settings
-max_iterations <- 100  # Increase to 500-2000 for production
+max_iterations <- 50  # Increase to 500-2000 for production
 target_subbasin <- c("001","002","003")
 
 # Simulation period
@@ -96,13 +96,14 @@ result_dds <- optimize_cosero_dds(
   target_subbasins = target_subbasin,
   metric = "NSE",
   subbasin_weights = c(0.2, 0.2, 0.6),
+  aggregation = "weighted",
   defaults_settings = list(
     STARTDATE = start_date,
     ENDDATE = end_date,
     SPINUP = spinup,
     OUTPUTTYPE = 1
   ),
-  max_iter = max_iterations,
+  max_iter = max_iterations*0.1,
   r = 0.2,
   verbose = TRUE,
   read_final_outputs = TRUE

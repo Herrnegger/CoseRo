@@ -1,515 +1,387 @@
-# COSERO Core Run Interface
-# Main COSERO execution and configuration management
-# Author: COSERO R Interface
-# Date: 2025-09-25
+# COSERO Model Execution
+# Main interface for running COSERO simulations
+#
+# Configuration management: see cosero_config.R
+# Metrics extraction: see cosero_metrics.R
 
-#' @importFrom dplyr filter mutate select arrange group_by summarise bind_rows
+#' @importFrom dplyr filter mutate select arrange group_by
+#'   summarise bind_rows
 #' @importFrom lubridate ymd_hm year month day hour minute
 #' @importFrom tibble tibble as_tibble
-#' @importFrom data.table fread
 NULL
 
-# Configuration Management #####
-
-# 2.1 COSERO Default Parameters #####
-cosero_defaults <- data.frame(
-  parameter = c(
-    "PROJECTINFO", "DATAFILE", "PARAFILE", "IKL", "NCLASS", "OUTPUTTYPE",
-    "STARTDATE", "ENDDATE", "SPINUP", "SC_FLAG", "RUNOFFFILE", "STATSFILE",
-    "OPTFILE", "WRITERASTERS", "OUTCONTROL", "ADDFLUXCONT", "ADDFLUXFILE"
-  ),
-  type = c(
-    "character", "character", "character", "integer", "integer", "integer",
-    "date", "date", "integer", "flag", "character", "character",
-    "character", "character", "integer", "flag", "character"
-  ),
-  required = rep(TRUE, 17),
-  stringsAsFactors = FALSE
-)
-
-# 2.2 Configuration Display #####
-
-#' Show COSERO Default Configuration Parameters
-#'
-#' Displays available COSERO configuration parameters and their types.
-#' Useful for understanding what settings can be passed to run_cosero().
-#'
-#' @param parameter_name Optional. If specified, shows details for a single parameter.
-#'   If NULL (default), shows all available parameters.
-#'
-#' @return Invisibly returns the cosero_defaults data frame
-#' @export
-#' @examples
-#' \dontrun{
-#' # Show all parameters
-#' show_cosero_defaults()
-#'
-#' # Show details for specific parameter
-#' show_cosero_defaults("STARTDATE")
-#' show_cosero_defaults("OUTPUTTYPE")
-#' }
-show_cosero_defaults <- function(parameter_name = NULL) {
-  if (!is.null(parameter_name)) {
-    param_info <- cosero_defaults[cosero_defaults$parameter == parameter_name, ]
-    if (nrow(param_info) == 0) {
-      cat("Parameter not found. Available:", paste(cosero_defaults$parameter, collapse = ", "), "\n")
-      return(invisible(NULL))
-    }
-    cat("Parameter:", param_info$parameter, "Type:", param_info$type, "\n")
-  } else {
-    cat("COSERO Configuration Parameters (", nrow(cosero_defaults), " total):\n")
-    for (i in 1:nrow(cosero_defaults)) {
-      param <- cosero_defaults[i, ]
-      cat(sprintf("%-15s [%s]\n", param$parameter, param$type))
-    }
-  }
-  invisible(cosero_defaults)
-}
-
-# Configuration Validation #####
+# ============================================================================
+# Commands File Creation
+# ============================================================================
 
 #' @keywords internal
-validate_cosero_defaults <- function(settings) {
-  validation_results <- list(valid = TRUE, messages = character(0), settings = settings)
-
-  for (param_name in names(settings)) {
-    param_value <- settings[[param_name]]
-
-    if (!param_name %in% cosero_defaults$parameter) {
-      validation_results$messages <- c(validation_results$messages, paste("Unknown parameter:", param_name))
-      next
-    }
-
-    param_info <- cosero_defaults[cosero_defaults$parameter == param_name, ]
-    param_type <- param_info$type
-
-    # Validate by type
-    if (param_type == "integer") {
-      if (!is.numeric(param_value) || param_value != as.integer(param_value)) {
-        validation_results$valid <- FALSE
-        validation_results$messages <- c(validation_results$messages, paste(param_name, "must be integer"))
-      }
-      if (param_name == "OUTPUTTYPE" && !param_value %in% 0:3) {
-        validation_results$valid <- FALSE
-        validation_results$messages <- c(validation_results$messages, "OUTPUTTYPE must be 0, 1, 2, or 3")
-      }
-      if (param_name == "SPINUP" && param_value < 1) {
-        validation_results$valid <- FALSE
-        validation_results$messages <- c(validation_results$messages, "SPINUP must be >= 1 (COSERO requires at least 1 timestep)")
-      }
-    } else if (param_type == "flag") {
-      if (!param_value %in% c(0, 1)) {
-        validation_results$valid <- FALSE
-        validation_results$messages <- c(validation_results$messages, paste(param_name, "must be 0 or 1"))
-      }
-    } else if (param_type == "date") {
-      # Handle both string format "2015 1 1 0 0" and vector format c(2015, 1, 1, 0, 0)
-      if (is.character(param_value) && length(param_value) == 1) {
-        # Convert string to vector
-        date_parts <- as.numeric(strsplit(param_value, "\\s+")[[1]])
-        if (length(date_parts) != 5) {
-          validation_results$valid <- FALSE
-          validation_results$messages <- c(validation_results$messages, paste(param_name, "must have 5 elements: year month day hour minute"))
-        } else {
-          # Update the settings with the converted vector for later processing
-          validation_results$settings[[param_name]] <- date_parts
-        }
-      } else if (length(param_value) != 5) {
-        validation_results$valid <- FALSE
-        validation_results$messages <- c(validation_results$messages, paste(param_name, "must have 5 elements: year month day hour minute"))
-      }
-    } else if (param_type == "character") {
-      if (!is.character(param_value) || nchar(param_value) == 0) {
-        validation_results$valid <- FALSE
-        validation_results$messages <- c(validation_results$messages, paste(param_name, "must be non-empty character"))
-      }
-    }
-  }
-
-  # Cross-parameter validation
-  if ("STARTDATE" %in% names(validation_results$settings) && "ENDDATE" %in% names(validation_results$settings)) {
-    start_date <- validation_results$settings$STARTDATE
-    end_date <- validation_results$settings$ENDDATE
-    if (length(start_date) == 5 && length(end_date) == 5) {
-      start_num <- start_date[1] * 10000 + start_date[2] * 100 + start_date[3]
-      end_num <- end_date[1] * 10000 + end_date[2] * 100 + end_date[3]
-      if (start_num >= end_num) {
-        validation_results$valid <- FALSE
-        validation_results$messages <- c(validation_results$messages, "ENDDATE must be after STARTDATE")
-      }
-    }
-  }
-
-  return(validation_results)
-}
-
-# 3 File Management #####
-
-# 3.1 Defaults File Operations #####
-get_default_cosero_values <- function() {
-  list(
-    PROJECTINFO = "COSERO_Project",
-    DATAFILE = "data.txt",
-    PARAFILE = "para.txt",
-    IKL = 1,
-    NCLASS = 1,
-    OUTPUTTYPE = 1,
-    STARTDATE = "2010 1 1 0 0",
-    ENDDATE = "2015 12 31 23 59",
-    SPINUP = 365,
-    SC_FLAG = 0,
-    RUNOFFFILE = "runoff.txt",
-    STATSFILE = "statistics.txt",
-    OPTFILE = "opt.txt",
-    OUTCONTROL = 1,
-    ADDFLUXCONT = 0,
-    ADDFLUXFILE = "addflux.txt"
-  )
-}
-
-#' @keywords internal
-modify_defaults <- function(defaults_file, settings, quiet = FALSE) {
-  if (!file.exists(defaults_file)) {
-    create_default_defaults(defaults_file, quiet)
-  }
-
-  lines <- readLines(defaults_file)
-
-  # Filter out NULL values (user wants to keep existing defaults)
-  settings <- settings[!sapply(settings, is.null)]
-
-  for (param_name in names(settings)) {
-    param_value <- settings[[param_name]]
-
-    # Find lines that start with the parameter name (may have description after)
-    param_line <- grep(paste0("^", param_name, "\\b"), lines)
-
-    if (length(param_line) > 0) {
-      # Parameter exists - update the value on the next line
-      value_line <- param_line[1] + 1
-      if (value_line <= length(lines)) {
-        if (length(param_value) == 1) {
-          lines[value_line] <- as.character(param_value)
-        } else {
-          lines[value_line] <- paste(param_value, collapse = " ")
-        }
-      } else {
-        # Parameter name is last line - append value
-        lines <- c(lines, as.character(param_value))
-      }
-    } else {
-      # Parameter doesn't exist - add it
-      if (length(param_value) == 1) {
-        lines <- c(lines, param_name, as.character(param_value))
-      } else {
-        lines <- c(lines, param_name, paste(param_value, collapse = " "))
-      }
-    }
-  }
-
-  writeLines(lines, defaults_file)
-  if (!quiet) cat("Updated defaults.txt with", length(settings), "parameters\n")
-}
-
-#' @keywords internal
-create_default_defaults <- function(defaults_file, quiet = FALSE) {
-  default_values <- get_default_cosero_values()
-  content <- character(0)
-  for (param_name in names(default_values)) {
-    content <- c(content, param_name, as.character(default_values[[param_name]]))
-  }
-  writeLines(content, defaults_file)
-  if (!quiet) cat("Created default defaults.txt at:", defaults_file, "\n")
-}
-
-#' Read COSERO Defaults File
-#'
-#' Reads configuration settings from a COSERO defaults.txt file.
-#' Parses the file format and returns settings as a named list.
-#'
-#' @param defaults_file Path to defaults.txt file
-#'
-#' @return Named list with configuration settings. Common items include:
-#'   \item{PROJECTINFO}{Project name/description}
-#'   \item{DATAFILE}{Input data filename}
-#'   \item{PARAFILE}{Parameter filename}
-#'   \item{STARTDATE}{Start date as character vector c(YYYY, MM, DD, HH, MM)}
-#'   \item{ENDDATE}{End date as character vector c(YYYY, MM, DD, HH, MM)}
-#'   \item{SPINUP}{Spin-up period in timesteps}
-#'   \item{OUTPUTTYPE}{Output detail level (0-3)}
-#'   \item{...}{Other COSERO settings}
-#'
-#' @export
-#' @examples
-#' \dontrun{
-#' # Read defaults file
-#' settings <- read_defaults("path/to/input/defaults.txt")
-#'
-#' # Access specific settings
-#' start_date <- settings$STARTDATE
-#' spinup <- settings$SPINUP
-#'
-#' # Use in run_cosero
-#' result <- run_cosero("path/to/project",
-#'                      defaults_settings = settings)
-#' }
-read_defaults <- function(defaults_file) {
-  if (!file.exists(defaults_file)) {
-    stop("defaults.txt file not found: ", defaults_file, call. = FALSE)
-  }
-
-  lines <- readLines(defaults_file)
-  settings <- list()
-
-  # Get valid parameter names from cosero_defaults
-  valid_params <- cosero_defaults$parameter
-
-  i <- 1
-  while (i <= length(lines)) {
-    line <- trimws(lines[i])
-
-    # Skip empty lines
-    if (nchar(line) == 0) {
-      i <- i + 1
-      next
-    }
-
-    # Extract potential parameter name (first word, before any spaces or parentheses)
-    potential_param <- regmatches(line, regexpr("^[A-Z_]+", line))
-
-    # Check if this line contains a valid parameter keyword
-    if (length(potential_param) > 0 && potential_param[1] %in% valid_params) {
-      param_name <- potential_param[1]
-
-      # Look for the value in the next non-empty line
-      j <- i + 1
-      while (j <= length(lines)) {
-        next_line <- trimws(lines[j])
-
-        # Skip empty lines
-        if (nchar(next_line) == 0) {
-          j <- j + 1
-          next
-        }
-
-        # Check if we've hit another valid parameter keyword
-        next_potential_param <- regmatches(next_line, regexpr("^[A-Z_]+", next_line))
-        if (length(next_potential_param) > 0 && next_potential_param[1] %in% valid_params) {
-          break
-        }
-
-        # This should be our value line
-        if (grepl("\\s", next_line)) {
-          # Multiple space-separated values
-          param_value <- strsplit(next_line, "\\s+")[[1]]
-        } else {
-          # Single value
-          param_value <- next_line
-        }
-
-        settings[[param_name]] <- param_value
-        i <- j  # Continue from this line
-        break
-      }
-
-      if (j > length(lines)) {
-        # No value found, continue to next line
-        i <- i + 1
-      }
-    } else {
-      i <- i + 1
-    }
-  }
-
-  return(settings)
-}
-
-# Project Setup #####
-
-#' @keywords internal
-setup_project_directories <- function(project_path, defaults_settings = NULL, timestamp,
-                                      quiet = FALSE, create_backup = TRUE) {
-  input_dir <- file.path(project_path, "input")
-  output_dir <- file.path(project_path, "output")
-
-  if (!dir.exists(input_dir)) dir.create(input_dir, recursive = TRUE)
-  if (!dir.exists(output_dir)) dir.create(output_dir, recursive = TRUE)
-
-  backup_dir <- NULL
-  if (create_backup) {
-    backup_dir <- file.path(input_dir, "parameterfile_backup")
-    if (!dir.exists(backup_dir)) dir.create(backup_dir, recursive = TRUE)
-  }
-
-  defaults_file <- file.path(input_dir, "defaults.txt")
-  current_settings <- NULL
-
-  if (file.exists(defaults_file)) {
-    current_settings <- read_defaults(defaults_file)
-    if (!is.null(defaults_settings)) {
-      if (create_backup) {
-        backup_file <- file.path(backup_dir, paste0("defaults.txt.backup_", timestamp))
-        file.copy(defaults_file, backup_file)
-        if (!quiet) cat("Backed up defaults.txt to:", backup_file, "\n")
-      }
-      modify_defaults(defaults_file, defaults_settings, quiet)
-      if (create_backup) {
-        used_file <- file.path(backup_dir, paste0("defaults.txt.used_", timestamp))
-        file.copy(defaults_file, used_file)
-        if (!quiet) cat("Saved used settings to:", used_file, "\n")
-      }
-    }
-  } else {
-    if (!is.null(defaults_settings)) {
-      modify_defaults(defaults_file, defaults_settings, quiet)
-    } else {
-      create_default_defaults(defaults_file, quiet)
-    }
-  }
-
-  return(list(
-    input_dir = input_dir,
-    output_dir = output_dir,
-    defaults_file = defaults_file,
-    current_settings = current_settings,
-    backup_dir = backup_dir
-  ))
-}
-
-# 4 COSERO Execution #####
-
-# 4.1 Commands File Creation #####
-create_commands_file <- function(commands_file, auto_answers, quiet = FALSE) {
+create_commands_file <- function(commands_file,
+                                 statevar_source,
+                                 tmmon_option) {
   commands <- c(
-    auto_answers$simulate_option,
-    auto_answers$period_correct,
-    auto_answers$run_type,
-    auto_answers$statevar_source,
-    auto_answers$tmmon_option,
-    auto_answers$stats_option,
+    1,                  # simulate_option
+    "y",                # period_correct
+    1,                  # run_type
+    statevar_source,    # 1=cold start, 2=warm start
+    tmmon_option,       # 1=from file, 2=calculate
+    0,                  # stats_option
     "Pause"
   )
-
   writeLines(as.character(commands), commands_file)
-  if (!quiet) cat("Created commands file with", length(commands), "commands\n")
 }
 
-# 4.2 Model Execution #####
-execute_cosero <- function(project_path, exe_name, commands_file, capture_output, show_output) {
+# ============================================================================
+# Model Execution
+# ============================================================================
+
+#' @keywords internal
+execute_cosero <- function(project_path, exe_name,
+                           commands_file, capture_output,
+                           show_output) {
   old_wd <- getwd()
   setwd(project_path)
 
   tryCatch({
     if (file.exists(commands_file)) {
       batch_file <- "run_cosero_temp.bat"
-      batch_content <- paste0(exe_name, " < ", basename(commands_file))
+      batch_content <- paste0(
+        exe_name, " < ", basename(commands_file)
+      )
       writeLines(batch_content, batch_file)
 
-      # Capture output to check for errors
-      output <- system(paste0('"', batch_file, '"'),
-                      intern = TRUE,
-                      ignore.stderr = FALSE,
-                      wait = TRUE)
+      output <- system(
+        paste0('"', batch_file, '"'),
+        intern = TRUE,
+        ignore.stderr = FALSE,
+        wait = TRUE
+      )
 
       result_code <- attr(output, "status")
       if (is.null(result_code)) result_code <- 0
 
-      # Check for error messages in output
-      error_patterns <- c("ERROR:", "Error:", "error:", "could not find", "terminated")
-      has_error <- any(sapply(error_patterns, function(p) {
-        tryCatch(any(grepl(p, output, ignore.case = TRUE, useBytes = TRUE)),
-                 error = function(e) FALSE)
-      }))
+      has_error <- detect_cosero_errors(output)
 
       if (show_output) {
         cat(paste(output, collapse = "\n"), "\n")
       }
 
-      return(list(exit_code = result_code, output = output, has_error = has_error))
+      list(
+        exit_code = result_code,
+        output = output,
+        has_error = has_error
+      )
     } else {
-      output <- system2(exe_name,
-                       stdout = TRUE,
-                       stderr = TRUE,
-                       wait = TRUE)
+      output <- system2(
+        exe_name,
+        stdout = TRUE,
+        stderr = TRUE,
+        wait = TRUE
+      )
 
       result_code <- attr(output, "status")
       if (is.null(result_code)) result_code <- 0
 
-      error_patterns <- c("ERROR:", "Error:", "error:", "could not find", "terminated")
-      has_error <- any(sapply(error_patterns, function(p) {
-        tryCatch(any(grepl(p, output, ignore.case = TRUE, useBytes = TRUE)),
-                 error = function(e) FALSE)
-      }))
+      has_error <- detect_cosero_errors(output)
 
       if (show_output) {
         cat(paste(output, collapse = "\n"), "\n")
       }
 
-      return(list(exit_code = result_code, output = output, has_error = has_error))
+      list(
+        exit_code = result_code,
+        output = output,
+        has_error = has_error
+      )
     }
   }, finally = {
     setwd(old_wd)
   })
 }
 
-# 5 Main COSERO Interface #####
+#' Check COSERO output for error patterns
+#' @keywords internal
+detect_cosero_errors <- function(output) {
+  error_patterns <- c(
+    "ERROR:", "Error:", "error:",
+    "could not find", "terminated"
+  )
+  any(sapply(error_patterns, function(p) {
+    tryCatch(
+      any(grepl(p, output,
+                ignore.case = TRUE, useBytes = TRUE)),
+      error = function(e) FALSE
+    )
+  }))
+}
+
+#' Find error lines in COSERO output
+#' @keywords internal
+extract_error_lines <- function(output) {
+  output[sapply(output, function(line) {
+    tryCatch(
+      grepl("ERROR:|Error:|error:|could not find|terminated",
+            line, ignore.case = TRUE, useBytes = TRUE),
+      error = function(e) FALSE
+    )
+  })]
+}
+
+# ============================================================================
+# Console Output Helpers
+# ============================================================================
+
+#' Print a separator line
+#' @keywords internal
+print_header <- function(title) {
+  line <- paste0(
+    strrep("\u2500", 2), " ", title, " ",
+    strrep("\u2500", max(1, 50 - nchar(title) - 4))
+  )
+  cat("\n", line, "\n", sep = "")
+}
+
+#' Format COSERO date vector as readable string
+#' @keywords internal
+format_period_string <- function(settings) {
+  format_one <- function(date_val) {
+    if (is.numeric(date_val) && length(date_val) == 5) {
+      sprintf("%04d-%02d-%02d",
+              date_val[1], date_val[2], date_val[3])
+    } else if (is.character(date_val)) {
+      parts <- as.numeric(strsplit(date_val, "\\s+")[[1]])
+      if (length(parts) >= 3) {
+        sprintf("%04d-%02d-%02d",
+                parts[1], parts[2], parts[3])
+      } else {
+        date_val
+      }
+    } else {
+      as.character(date_val)
+    }
+  }
+
+  start <- if (!is.null(settings$STARTDATE)) {
+    format_one(settings$STARTDATE)
+  } else {
+    "?"
+  }
+  end <- if (!is.null(settings$ENDDATE)) {
+    format_one(settings$ENDDATE)
+  } else {
+    "?"
+  }
+  spinup <- if (!is.null(settings$SPINUP)) {
+    settings$SPINUP
+  } else {
+    "?"
+  }
+
+  sprintf("%s to %s | Spinup: %s", start, end, spinup)
+}
+
+#' Print the run header block
+#' @keywords internal
+print_run_header <- function(project_path,
+                             defaults_settings,
+                             statevar_source,
+                             tmmon_option) {
+  print_header("run_cosero")
+
+  cat("  Project: ", project_path, "\n", sep = "")
+
+  # Period info
+  if (!is.null(defaults_settings)) {
+    cat("  Period:  ",
+        format_period_string(defaults_settings),
+        "\n", sep = "")
+  }
+
+  # Start mode
+  start_mode <- if (statevar_source == 1) {
+    "cold start"
+  } else {
+    "warm start (statevar.dmp)"
+  }
+  tmmon_mode <- if (tmmon_option == 1) {
+    "TMMon from file"
+  } else {
+    "TMMon calculated"
+  }
+  cat("  Start:   ", start_mode, " | ", tmmon_mode,
+      "\n", sep = "")
+
+  # Changed settings
+  if (!is.null(defaults_settings) &&
+      length(defaults_settings) > 0) {
+    param_names <- paste(names(defaults_settings),
+                         collapse = ", ")
+    cat("  Changed: ", param_names, "\n", sep = "")
+  }
+}
+
+#' Print results summary with NSE/KGE table
+#' @keywords internal
+print_run_results <- function(output_data,
+                              runtime_seconds) {
+  print_header("Results")
+
+  if (!is.null(output_data)) {
+    # Compact file summary
+    files_read <- character(0)
+
+    if (!is.null(output_data$runoff)) {
+      n_sb <- attr(output_data$runoff, "n_subbasins")
+      if (is.null(n_sb)) {
+        cols <- grep("QOBS_", colnames(output_data$runoff))
+        n_sb <- length(cols)
+      }
+      files_read <- c(files_read,
+                       sprintf("runoff (%s sb)", n_sb))
+    }
+    for (f in c("precipitation", "runoff_components",
+                "water_balance")) {
+      if (!is.null(output_data[[f]])) {
+        short <- switch(f,
+          precipitation = "prec",
+          runoff_components = "plus",
+          water_balance = "plus1"
+        )
+        files_read <- c(files_read, short)
+      }
+    }
+    if (!is.null(output_data$topology)) {
+      files_read <- c(files_read, "topology")
+    }
+
+    if (length(files_read) > 0) {
+      cat("  Read: ",
+          paste(files_read, collapse = ", "),
+          "\n", sep = "")
+    }
+
+    # Second line: statistics and parameters
+    files2 <- character(0)
+    if (!is.null(output_data$statistics)) {
+      n_sb <- nrow(output_data$statistics)
+      files2 <- c(files2,
+                   sprintf("statistics (%s sb)", n_sb))
+    }
+    if (!is.null(output_data$parameters)) {
+      n_zones <- nrow(output_data$parameters)
+      files2 <- c(files2,
+                   sprintf("parameters (%s zones)", n_zones))
+    }
+    if (length(files2) > 0) {
+      cat("  Read: ",
+          paste(files2, collapse = ", "),
+          "\n", sep = "")
+    }
+
+    # NSE/KGE/BETA table from statistics
+    stats <- output_data$statistics
+    if (!is.null(stats) && "NSE" %in% colnames(stats) &&
+        "KGE" %in% colnames(stats) &&
+        "BETA" %in% colnames(stats)) {
+      cat("\n  Performance (NSE / KGE / BETA):\n")
+      for (i in seq_len(nrow(stats))) {
+        cat(sprintf(
+          "    Subbasin %s:  NSE = %.4f  |  KGE = %.4f  |  BETA = %.4f\n",
+          stats$sb[i],
+          as.numeric(stats$NSE[i]),
+          as.numeric(stats$KGE[i]),
+          as.numeric(stats$BETA[i])))
+      }
+    } else if (!is.null(stats) &&
+               "NSE" %in% colnames(stats) &&
+               "KGE" %in% colnames(stats)) {
+      cat("\n  Performance (NSE / KGE):\n")
+      for (i in seq_len(nrow(stats))) {
+        cat(sprintf(
+          "    Subbasin %s:  NSE = %.4f  |  KGE = %.4f\n",
+          stats$sb[i],
+          as.numeric(stats$NSE[i]),
+          as.numeric(stats$KGE[i])))
+      }
+    }
+  }
+
+  cat(sprintf("\n  Completed in %.2f seconds\n",
+              runtime_seconds))
+}
+
+# ============================================================================
+# Main COSERO Interface
+# ============================================================================
 
 #' Run COSERO Hydrological Model
 #'
-#' Main interface for executing COSERO simulation with custom settings.
-#' Automatically manages configuration files, executes the model, and optionally
-#' reads output files.
+#' Main interface for executing COSERO simulation with custom
+#' settings. Automatically manages configuration files, executes
+#' the model, and optionally reads output files.
 #'
-#' @param project_path Path to COSERO project directory (must contain COSERO.exe)
-#' @param defaults_settings Named list of configuration settings to override in defaults.txt.
-#'        Available settings include:
-#'        \itemize{
-#'          \item \strong{STARTDATE} - Simulation start date as "YYYY MM DD HH MM" (e.g., "2015 1 1 0 0")
-#'          \item \strong{ENDDATE} - Simulation end date as "YYYY MM DD HH MM" (e.g., "2015 12 31 23 59")
-#'          \item \strong{SPINUP} - Spin-up period in timesteps (must be >= 1)
-#'          \item \strong{OUTPUTTYPE} - Output detail level: 1 (basic), 2 (+glacier/met), 3 (+monitor/longterm)
-#'          \item \strong{PARAFILE} - Parameter filename (e.g., "para.txt", "para_calibrated.txt")
-#'          \item \strong{DATAFILE} - Input data filename (e.g., "data.txt")
-#'          \item \strong{PROJECTINFO} - Project name/description
-#'          \item \strong{IKL} - Integer parameter
-#'          \item \strong{NCLASS} - Number of classes
-#'          \item \strong{SC_FLAG} - Snow cover flag (0 or 1)
-#'          \item \strong{RUNOFFFILE} - Runoff output filename
-#'          \item \strong{STATSFILE} - Statistics output filename
-#'          \item \strong{OPTFILE} - Optimization output filename
-#'          \item \strong{WRITERASTERS} - Write raster outputs
-#'          \item \strong{OUTCONTROL} - Output control flag
-#'          \item \strong{ADDFLUXCONT} - Additional flux control flag (0 or 1)
-#'          \item \strong{ADDFLUXFILE} - Additional flux filename
-#'        }
-#'        Use \code{\link{show_cosero_defaults}} to see all available parameters.
-#' @param exe_name Name of COSERO executable (default: "COSERO.exe")
-#' @param capture_output Whether to capture and parse model output (default: TRUE)
-#' @param read_outputs Whether to read output files after successful execution (default: TRUE)
-#' @param quiet Suppress console output except for runtime and errors (default: FALSE)
+#' @param project_path Path to COSERO project directory
+#'   (must contain COSERO.exe)
+#' @param defaults_settings Named list of configuration settings
+#'   to override in defaults.txt. Available settings include:
+#'   \itemize{
+#'     \item \strong{STARTDATE} - Simulation start date as
+#'       "YYYY MM DD HH MM" (e.g., "2015 1 1 0 0")
+#'     \item \strong{ENDDATE} - Simulation end date as
+#'       "YYYY MM DD HH MM" (e.g., "2015 12 31 23 59")
+#'     \item \strong{SPINUP} - Spin-up period in timesteps
+#'       (must be >= 1)
+#'     \item \strong{OUTPUTTYPE} - Output detail level:
+#'       1 (basic), 2 (+glacier/met), 3 (+monitor/longterm)
+#'     \item \strong{PARAFILE} - Parameter filename
+#'     \item \strong{DATAFILE} - Input data filename
+#'     \item \strong{PROJECTINFO} - Project name/description
+#'     \item \strong{IKL} - Integer parameter
+#'     \item \strong{NCLASS} - Number of classes
+#'     \item \strong{SC_FLAG} - Snow cover flag (0 or 1)
+#'     \item \strong{RUNOFFFILE} - Runoff output filename
+#'     \item \strong{STATSFILE} - Statistics output filename
+#'     \item \strong{OPTFILE} - Optimization output filename
+#'     \item \strong{WRITERASTERS} - Write raster outputs
+#'     \item \strong{OUTCONTROL} - Output control flag
+#'     \item \strong{ADDFLUXCONT} - Additional flux control
+#'       flag (0 or 1)
+#'     \item \strong{ADDFLUXFILE} - Additional flux filename
+#'   }
+#'   Use \code{\link{show_cosero_defaults}} to see all
+#'   available parameters.
+#' @param exe_name Name of COSERO executable
+#'   (default: "COSERO.exe")
+#' @param capture_output Whether to capture and parse model
+#'   output (default: TRUE)
+#' @param read_outputs Whether to read output files after
+#'   successful execution (default: TRUE)
+#' @param quiet Suppress console output except for runtime
+#'   and errors (default: FALSE)
 #' @param statevar_source State variable source:
-#'        \itemize{
-#'          \item 1 = read from parameter file (cold start, default)
-#'          \item 2 = read from statevar.dmp file (warm start from previous run)
-#'        }
+#'   \itemize{
+#'     \item 1 = read from parameter file (cold start, default)
+#'     \item 2 = read from statevar.dmp file (warm start)
+#'   }
 #' @param tmmon_option Monthly temperature option:
-#'        \itemize{
-#'          \item 1 = use TMMon values from parameter file (default)
-#'          \item 2 = calculate TMMon from input data
-#'        }
-#' @param auto_answers Custom automation answers for COSERO prompts (advanced users only).
-#'        Overrides statevar_source and tmmon_option if provided.
-#' @param create_backup If TRUE (default), creates backup of defaults.txt in
-#'        parameterfile_backup folder. Set to FALSE during optimization runs.
+#'   \itemize{
+#'     \item 1 = use TMMon values from parameter file (default)
+#'     \item 2 = calculate TMMon from input data
+#'   }
+#' @param create_backup If TRUE (default), creates backup
+#'   of defaults.txt in parameterfile_backup folder.
+#'   Set to FALSE during optimization runs.
 #'
 #' @return List containing:
 #'   \item{exit_code}{Integer exit code (0 = success)}
 #'   \item{success}{Logical indicating simulation success}
-#'   \item{has_error}{Logical indicating if error messages were detected}
-#'   \item{error_message}{String with error message (NULL if no error)}
-#'   \item{output_data}{Parsed output data (if read_outputs = TRUE and successful).
-#'                      See \code{\link{read_cosero_output}} for structure details.}
-#'   \item{defaults_settings}{Configuration settings used for this run}
+#'   \item{has_error}{Logical indicating if error messages
+#'     were detected}
+#'   \item{error_message}{String with error message
+#'     (NULL if no error)}
+#'   \item{output_data}{Parsed output data (if
+#'     read_outputs = TRUE and successful).
+#'     See \code{\link{read_cosero_output}} for structure.}
+#'   \item{defaults_settings}{Configuration settings used}
 #'   \item{project_path}{Original project path}
 #'   \item{execution_time}{POSIXct timestamp of execution}
 #'   \item{runtime_seconds}{Numeric runtime in seconds}
@@ -531,20 +403,6 @@ execute_cosero <- function(project_path, exe_name, commands_file, capture_output
 #'   )
 #' )
 #'
-#' # Use custom parameter file
-#' result <- run_cosero(
-#'   "path/to/project",
-#'   defaults_settings = list(
-#'     STARTDATE = "1991 1 1 0 0",
-#'     ENDDATE = "2020 12 31 0 0",
-#'     SPINUP = 365,
-#'     OUTPUTTYPE = 1,
-#'     PARAFILE = "para_calibrated.txt"
-#'   ),
-#'   read_outputs = TRUE,
-#'   quiet = FALSE
-#' )
-#'
 #' # Warm start with calculated monthly temperature
 #' result <- run_cosero(
 #'   "path/to/project",
@@ -559,181 +417,136 @@ execute_cosero <- function(project_path, exe_name, commands_file, capture_output
 #'   read_outputs = FALSE,
 #'   quiet = TRUE
 #' )
-#'
-#' # Extract metrics after run
-#' nse <- extract_run_metrics(result, subbasin_id = "001", metric = "NSE")
-#' kge <- extract_run_metrics(result, subbasin_id = "001", metric = "KGE")
-#'
-#' # Launch interactive app with project
-#' launch_cosero_app("path/to/project")
 #' }
 #'
 run_cosero <- function(project_path,
-                      defaults_settings = NULL,
-                      exe_name = "COSERO.exe",
-                      capture_output = TRUE,
-                      read_outputs = TRUE,
-                      quiet = FALSE,
-                      statevar_source = 1,
-                      tmmon_option = 1,
-                      auto_answers = NULL,
-                      create_backup = TRUE) {
+                       defaults_settings = NULL,
+                       exe_name = "COSERO.exe",
+                       capture_output = TRUE,
+                       read_outputs = TRUE,
+                       quiet = FALSE,
+                       statevar_source = 1,
+                       tmmon_option = 1,
+                       create_backup = TRUE) {
 
-  # Validate inputs
-  if (!dir.exists(project_path)) stop("Project path does not exist: ", project_path, call. = FALSE)
-  if (!file.exists(file.path(project_path, exe_name))) stop("COSERO executable not found: ", exe_name, call. = FALSE)
-
-  # Validate statevar_source parameter
+  # -- Input Validation --
+  if (!dir.exists(project_path)) {
+    stop("Project path does not exist: ",
+         project_path, call. = FALSE)
+  }
+  if (!file.exists(file.path(project_path, exe_name))) {
+    stop("COSERO executable not found: ",
+         exe_name, call. = FALSE)
+  }
   if (!statevar_source %in% c(1, 2)) {
-    stop("statevar_source must be 1 (parameter file) or 2 (statevar.dmp file)", call. = FALSE)
+    stop("statevar_source must be 1 (parameter file) ",
+         "or 2 (statevar.dmp file)", call. = FALSE)
   }
-
-  # Validate tmmon_option parameter
   if (!tmmon_option %in% c(1, 2)) {
-    stop("tmmon_option must be 1 (from parameter file) or 2 (calculate from data)", call. = FALSE)
+    stop("tmmon_option must be 1 (from parameter file) ",
+         "or 2 (calculate from data)", call. = FALSE)
   }
 
-  # Check if statevar.dmp exists when needed and copy from output to input if necessary
+  # -- State Variable Handling (silent) --
   if (statevar_source == 2) {
-    statevar_input <- file.path(project_path, "input", "statevar.dmp")
-    statevar_output <- file.path(project_path, "output", "statevar.dmp")
-
-    # First check if already in input folder
-    if (file.exists(statevar_input)) {
-      if (!quiet) cat("Using state variables from:", statevar_input, "\n")
-    }
-    # If not in input, try to copy from output folder
-    else if (file.exists(statevar_output)) {
-      if (!quiet) cat("Copying statevar.dmp from output to input folder...\n")
-      file.copy(statevar_output, statevar_input, overwrite = TRUE)
-      if (!quiet) cat("Using state variables from:", statevar_input, "\n")
-    }
-    # If not found anywhere, give warning
-    else {
-      warning("statevar_source=2 specified but statevar.dmp not found in input or output folder")
-      if (!quiet) cat("Note: COSERO will use default state variables if statevar.dmp is missing\n")
-    }
+    handle_statevar_dmp(project_path)
   }
 
   # Start runtime tracking
   start_time <- Sys.time()
 
-  # Extract run parameters from defaults_settings if provided
+  # -- Extract Run Parameters from Settings --
   if (!is.null(defaults_settings)) {
     if ("statevar_source" %in% names(defaults_settings)) {
       statevar_source <- defaults_settings$statevar_source
-      defaults_settings$statevar_source <- NULL  # Remove from settings list
-      if (!quiet) cat("Using statevar_source from settings:", statevar_source, "\n")
+      defaults_settings$statevar_source <- NULL
     }
     if ("tmmon_option" %in% names(defaults_settings)) {
       tmmon_option <- defaults_settings$tmmon_option
-      defaults_settings$tmmon_option <- NULL  # Remove from settings list
-      if (!quiet) cat("Using tmmon_option from settings:", tmmon_option, "\n")
+      defaults_settings$tmmon_option <- NULL
     }
   }
 
-  # Process settings (convert string dates to vectors if needed)
-  if (!is.null(defaults_settings) && length(defaults_settings) > 0) {
+  # -- Validate and Process Settings --
+  if (!is.null(defaults_settings) &&
+      length(defaults_settings) > 0) {
     validation <- validate_cosero_defaults(defaults_settings)
-    if (length(validation$messages) > 0) sapply(validation$messages, cat, "\n")
-    if (!validation$valid) {
-      stop("Invalid configuration settings provided", call. = FALSE)
+    if (length(validation$messages) > 0) {
+      sapply(validation$messages, cat, "\n")
     }
-    # Use the processed settings (with converted dates)
+    if (!validation$valid) {
+      stop("Invalid configuration settings provided",
+           call. = FALSE)
+    }
     defaults_settings <- validation$settings
   }
 
-  # Setup project
+  # -- Setup Project (silent) --
   timestamp <- format(Sys.time(), "%Y%m%d_%H%M%S")
-  project_setup <- setup_project_directories(project_path, defaults_settings, timestamp, quiet, create_backup)
+  project_setup <- setup_project_directories(
+    project_path, defaults_settings, timestamp,
+    quiet = TRUE, create_backup
+  )
 
-  # Build auto_answers from parameters
-  if (is.null(auto_answers)) {
-    # Use function parameters to build auto_answers
-    auto_answers <- list(
-      simulate_option = 1,
-      period_correct = "y",
-      run_type = 1,
-      statevar_source = statevar_source,  # Use parameter value
-      tmmon_option = tmmon_option,        # Use parameter value
-      stats_option = 0
+  # -- Print Header --
+  if (!quiet) {
+    print_run_header(
+      project_path, defaults_settings,
+      statevar_source, tmmon_option
     )
-    if (!quiet) cat("Run options: statevar_source =", statevar_source, ", tmmon_option =", tmmon_option, "\n")
-  } else {
-    # User provided custom auto_answers - override with explicit parameters
-    if (!is.null(auto_answers$statevar_source) && auto_answers$statevar_source != statevar_source) {
-      cat("Note: Overriding auto_answers$statevar_source with function parameter value:", statevar_source, "\n")
-    }
-    if (!is.null(auto_answers$tmmon_option) && auto_answers$tmmon_option != tmmon_option) {
-      cat("Note: Overriding auto_answers$tmmon_option with function parameter value:", tmmon_option, "\n")
-    }
-    auto_answers$statevar_source <- statevar_source
-    auto_answers$tmmon_option <- tmmon_option
+    print_header("COSERO output")
   }
 
-  # Execute COSERO
-  commands_file <- file.path(project_path, "cosero_commands.txt")
-  create_commands_file(commands_file, auto_answers, quiet)
-
-  if (!quiet) cat("Starting COSERO simulation...\n")
+  # -- Build Commands File & Execute --
+  commands_file <- file.path(
+    project_path, "cosero_commands.txt"
+  )
+  create_commands_file(
+    commands_file, statevar_source, tmmon_option
+  )
 
   tryCatch({
     show_output <- !quiet && capture_output
-    exec_result <- execute_cosero(project_path, exe_name, commands_file, capture_output, show_output)
+    exec_result <- execute_cosero(
+      project_path, exe_name, commands_file,
+      capture_output, show_output
+    )
 
-    # Calculate runtime
     end_time <- Sys.time()
-    runtime_seconds <- as.numeric(difftime(end_time, start_time, units = "secs"))
+    runtime_seconds <- as.numeric(
+      difftime(end_time, start_time, units = "secs")
+    )
 
-    # Check for errors
-    if (exec_result$has_error || exec_result$exit_code != 0) {
-      cat("\n!!! COSERO execution failed !!!\n")
-      cat(sprintf("Runtime: %.2f seconds (%.2f minutes)\n", runtime_seconds, runtime_seconds/60))
-      if (exec_result$has_error) {
-        cat("Error detected in output:\n")
-        error_lines <- exec_result$output[sapply(exec_result$output, function(line) {
-          tryCatch(grepl("ERROR:|Error:|error:|could not find|terminated", line,
-                        ignore.case = TRUE, useBytes = TRUE),
-                  error = function(e) FALSE)
-        })]
-        cat(paste(error_lines, collapse = "\n"), "\n")
-      }
-
-      return(list(
-        exit_code = exec_result$exit_code,
-        success = FALSE,
-        has_error = exec_result$has_error,
-        error_message = if(exec_result$has_error) paste(error_lines, collapse = "; ") else NULL,
-        output_data = NULL,
-        project_path = project_path,
-        execution_time = end_time,
-        runtime_seconds = runtime_seconds
+    # -- Handle Errors --
+    if (exec_result$has_error ||
+        exec_result$exit_code != 0) {
+      return(handle_execution_failure(
+        exec_result, runtime_seconds, project_path
       ))
     }
 
-    # Read outputs if successful and requested
+    # -- Read Outputs (silently) --
     output_data <- NULL
-    if (read_outputs && exec_result$exit_code == 0 && !exec_result$has_error) {
-      if (!quiet) cat("Reading output files...\n")
-      # Load readers if not already loaded
-      if (!exists("read_cosero_output")) {
-        source("02_cosero_readers.R")
-      }
+    if (read_outputs && exec_result$exit_code == 0 &&
+        !exec_result$has_error) {
       tryCatch({
-        output_data <- read_cosero_output(project_setup$output_dir, project_setup$defaults_file, quiet = quiet)
+        output_data <- read_cosero_output(
+          project_setup$output_dir,
+          project_setup$defaults_file,
+          quiet = TRUE
+        )
       }, error = function(e) {
-        warning("Could not read output files: ", e$message)
+        warning("Could not read output files: ",
+                e$message)
       })
-    } else if (!read_outputs && !quiet) {
-      cat("Skipping output file reading (read_outputs = FALSE)\n")
     }
 
+    # -- Print Results Summary --
     if (!quiet) {
-      cat("\nCOSERO simulation completed successfully!\n")
-      cat(sprintf("Runtime: %.2f seconds (%.2f minutes)\n", runtime_seconds, runtime_seconds/60))
+      print_run_results(output_data, runtime_seconds)
     }
 
-    return(list(
+    list(
       exit_code = exec_result$exit_code,
       success = TRUE,
       has_error = FALSE,
@@ -743,249 +556,71 @@ run_cosero <- function(project_path,
       project_path = project_path,
       execution_time = end_time,
       runtime_seconds = runtime_seconds
-    ))
+    )
 
   }, error = function(e) {
-    stop("Error running COSERO: ", e$message, call. = FALSE)
+    stop("Error running COSERO: ", e$message,
+         call. = FALSE)
   })
 }
 
-# 6 Single Run Metrics #####
+# ============================================================================
+# Internal Helpers
+# ============================================================================
 
-#' Extract Pre-calculated Metrics from Single COSERO Run
-#'
-#' Extracts performance metrics (NSE, KGE, etc.) from a single COSERO run's
-#' statistics output. This is the recommended approach for standard metrics
-#' as it uses COSERO's pre-calculated values.
-#'
-#' @param run_result Result object from run_cosero()
-#' @param subbasin_id Subbasin ID(s) to extract metrics for. Can be:
-#'   - Single ID: "001" or 1 (returns scalar)
-#'   - Multiple IDs: c("001", "002") (returns named vector)
-#'   - "all": Extract for all subbasins (returns named vector)
-#' @param metric Performance metric to extract ("NSE", "KGE", "BIAS", "RMSE", etc.)
-#'        Must be a column name in the statistics data frame
-#'
-#' @return Single numeric value (if one subbasin) or named vector (if multiple/all)
-#'
-#' @seealso
-#' \code{\link{calculate_run_metrics}} to calculate metrics from QSIM/QOBS (slower but more flexible),
-#' \code{\link{extract_ensemble_metrics}} for ensemble results,
-#' \code{\link{calculate_ensemble_metrics}} to calculate metrics for ensembles
-#'
-#' @export
-#' @examples
-#' \dontrun{
-#' result <- run_cosero("path/to/project")
-#'
-#' # Single subbasin (returns scalar)
-#' nse <- extract_run_metrics(result, subbasin_id = "001", metric = "NSE")
-#'
-#' # Multiple subbasins (returns named vector)
-#' nse_multi <- extract_run_metrics(result, c("001", "002"), "NSE")
-#'
-#' # All subbasins (returns named vector)
-#' kge_all <- extract_run_metrics(result, subbasin_id = "all", metric = "KGE")
-#' }
-extract_run_metrics <- function(run_result, subbasin_id = "001", metric = "NSE") {
+#' Handle statevar.dmp file location (silent)
+#' @keywords internal
+handle_statevar_dmp <- function(project_path) {
+  statevar_input <- file.path(
+    project_path, "input", "statevar.dmp"
+  )
+  statevar_output <- file.path(
+    project_path, "output", "statevar.dmp"
+  )
 
-  # Check if run was successful
-  if (!run_result$success) {
-    stop("Run failed - cannot extract metrics", call. = FALSE)
-  }
-
-  # Check if statistics data exists
-  if (is.null(run_result$output_data) || is.null(run_result$output_data$statistics)) {
-    stop("No statistics data found in run result", call. = FALSE)
-  }
-
-  stats <- run_result$output_data$statistics
-
-  # Check if metric exists
-  if (!metric %in% colnames(stats)) {
-    stop("Metric '", metric, "' not found. Available metrics: ",
-         paste(setdiff(colnames(stats), "sb"), collapse = ", "), call. = FALSE)
-  }
-
-  # Handle "all" subbasins case
-  if (length(subbasin_id) == 1 && is.character(subbasin_id) && tolower(subbasin_id) == "all") {
-    result <- stats[[metric]]
-    names(result) <- stats$sb
-    return(result)
-  }
-
-  # Handle multiple subbasin IDs
-  sb_id_nums <- as.numeric(subbasin_id)
-  sb_id_strs <- sprintf("%04d", sb_id_nums)
-
-  # Filter for specified subbasins
-  mask <- stats$sb %in% sb_id_strs | stats$sb %in% sb_id_nums
-  sb_stats <- stats[mask, ]
-
-  if (nrow(sb_stats) == 0) {
-    stop("Subbasin(s) '", paste(subbasin_id, collapse = ", "),
-         "' not found in statistics. Available: ", paste(stats$sb, collapse = ", "),
-         call. = FALSE)
-  }
-
-  result <- sb_stats[[metric]]
-  names(result) <- sb_stats$sb
-
-  # Return scalar if single subbasin, named vector if multiple
-  if (length(result) == 1) {
-    return(as.numeric(result))
-  }
-  return(result)
-}
-
-#' Calculate Performance Metrics from Single COSERO Run
-#'
-#' Calculates performance metrics by comparing simulated (QSIM) against observed (QOBS)
-#' discharge from a single COSERO run. Automatically applies spin-up period from
-#' run settings.
-#'
-#' For standard metrics (NSE, KGE) already calculated by COSERO, use
-#' \code{\link{extract_run_metrics}} instead - it's faster and guaranteed to match
-#' COSERO's evaluation.
-#'
-#' @param run_result Result object from run_cosero()
-#' @param subbasin_id Subbasin ID(s) to calculate metrics for. Can be:
-#'   - Single ID: "001" or 1 (returns scalar)
-#'   - Multiple IDs: c("001", "002") (returns named vector)
-#'   - "all": Calculate for all subbasins (returns named vector)
-#' @param metric Performance metric ("NSE", "KGE", "RMSE", "PBIAS")
-#' @param spinup Spin-up period in timesteps (optional). If NULL, reads from
-#'        run_result$defaults_settings$SPINUP
-#'
-#' @return Single numeric value (if one subbasin) or named vector (if multiple/all)
-#'
-#' @seealso
-#' \code{\link{extract_run_metrics}} to extract pre-calculated metrics (faster),
-#' \code{\link{extract_ensemble_metrics}} for ensemble results,
-#' \code{\link{calculate_ensemble_metrics}} to calculate metrics for ensembles
-#'
-#' @export
-#' @examples
-#' \dontrun{
-#' result <- run_cosero("path/to/project",
-#'                     defaults_settings = list(SPINUP = 365))
-#'
-#' # Calculate PBIAS for subbasin 001 (auto-detects spin-up)
-#' pbias <- calculate_run_metrics(result, subbasin_id = "001", metric = "PBIAS")
-#'
-#' # Multiple subbasins (returns named vector)
-#' nse_multi <- calculate_run_metrics(result, c("001", "002"), "NSE")
-#'
-#' # All subbasins (returns named vector)
-#' nse_all <- calculate_run_metrics(result, subbasin_id = "all", metric = "NSE")
-#'
-#' # Override spin-up period
-#' kge <- calculate_run_metrics(result, subbasin_id = "001",
-#'                              metric = "KGE", spinup = 100)
-#' }
-calculate_run_metrics <- function(run_result, subbasin_id = "001",
-                                  metric = "KGE", spinup = NULL) {
-
-  # Check if run was successful
-  if (!run_result$success) {
-    stop("Run failed - cannot calculate metrics", call. = FALSE)
-  }
-
-  # Check if runoff data exists
-  if (is.null(run_result$output_data) || is.null(run_result$output_data$runoff)) {
-    stop("No runoff data found in run result", call. = FALSE)
-  }
-
-  runoff <- run_result$output_data$runoff
-
-  # Get spin-up duration
-  if (!is.null(spinup)) {
-    spinup_duration <- as.numeric(spinup)
+  if (file.exists(statevar_input)) {
+    # Already in input folder, nothing to do
+  } else if (file.exists(statevar_output)) {
+    file.copy(statevar_output, statevar_input,
+              overwrite = TRUE)
   } else {
-    spinup_duration <- 0
-    if (!is.null(run_result$defaults_settings) &&
-        !is.null(run_result$defaults_settings$SPINUP)) {
-      spinup_duration <- as.numeric(run_result$defaults_settings$SPINUP)
-    }
+    warning(
+      "statevar_source=2 specified but statevar.dmp ",
+      "not found in input or output folder"
+    )
   }
-
-  # Helper function to calculate metric for one subbasin
-  calc_single_subbasin <- function(sb_id) {
-    # Format subbasin ID
-    if (is.numeric(sb_id)) {
-      sb_id_num <- sb_id
-    } else {
-      sb_id_num <- as.numeric(sb_id)
-    }
-    sb_id_formatted <- sprintf("%04d", sb_id_num)
-
-    # Column names
-    qsim_col <- paste0("QSIM_", sb_id_formatted)
-    qobs_col <- paste0("QOBS_", sb_id_formatted)
-
-    # Check if columns exist
-    if (!qsim_col %in% colnames(runoff)) {
-      stop("Column '", qsim_col, "' not found in runoff data", call. = FALSE)
-    }
-    if (!qobs_col %in% colnames(runoff)) {
-      stop("Column '", qobs_col, "' not found in runoff data", call. = FALSE)
-    }
-
-    # Extract data
-    simulated <- runoff[[qsim_col]]
-    observed <- runoff[[qobs_col]]
-
-    # Apply spin-up exclusion
-    if (spinup_duration > 0 && length(simulated) > spinup_duration) {
-      simulated <- simulated[(spinup_duration + 1):length(simulated)]
-      observed <- observed[(spinup_duration + 1):length(observed)]
-    }
-
-    # Calculate metric
-    result <- tryCatch({
-      if (metric == "KGE") {
-        hydroGOF::KGE(simulated, observed)
-      } else if (metric == "NSE") {
-        hydroGOF::NSE(simulated, observed)
-      } else if (metric == "RMSE") {
-        hydroGOF::rmse(simulated, observed)
-      } else if (metric == "PBIAS") {
-        hydroGOF::pbias(simulated, observed)
-      } else {
-        stop("Unknown metric: ", metric,
-             ". Supported: KGE, NSE, RMSE, PBIAS", call. = FALSE)
-      }
-    }, error = function(e) {
-      warning("Error calculating ", metric, " for subbasin ", sb_id, ": ", e$message)
-      return(NA)
-    })
-
-    return(result)
-  }
-
-  # Handle "all" subbasins case
-  if (length(subbasin_id) == 1 && is.character(subbasin_id) && tolower(subbasin_id) == "all") {
-    qsim_cols <- grep("^QSIM_", colnames(runoff), value = TRUE)
-    if (length(qsim_cols) == 0) {
-      stop("No QSIM columns found in runoff data", call. = FALSE)
-    }
-    subbasin_ids <- gsub("^QSIM_", "", qsim_cols)
-    results <- sapply(subbasin_ids, calc_single_subbasin)
-    names(results) <- subbasin_ids
-    return(results)
-  }
-
-  # Handle multiple subbasins
-  if (length(subbasin_id) > 1) {
-    results <- sapply(subbasin_id, calc_single_subbasin)
-    names(results) <- sprintf("%04d", as.numeric(subbasin_id))
-    return(results)
-  }
-
-  # Single subbasin case
-  return(calc_single_subbasin(subbasin_id))
 }
 
-# 7 Utility Functions #####
-# Note: Direct list format is now preferred for settings
-# Example: list(STARTDATE = "2015 1 1 0 0", ENDDATE = "2015 12 31 23 59", SPINUP = 365)
+#' Handle execution failure reporting
+#' @keywords internal
+handle_execution_failure <- function(exec_result,
+                                     runtime_seconds,
+                                     project_path) {
+  print_header("FAILED")
+  cat(sprintf(
+    "  Runtime: %.2f seconds\n",
+    runtime_seconds
+  ))
+
+  error_lines <- NULL
+  if (exec_result$has_error) {
+    cat("  Error detected in output:\n")
+    error_lines <- extract_error_lines(exec_result$output)
+    cat("  ", paste(error_lines, collapse = "\n  "), "\n")
+  }
+
+  list(
+    exit_code = exec_result$exit_code,
+    success = FALSE,
+    has_error = exec_result$has_error,
+    error_message = if (exec_result$has_error) {
+      paste(error_lines, collapse = "; ")
+    } else {
+      NULL
+    },
+    output_data = NULL,
+    project_path = project_path,
+    execution_time = Sys.time(),
+    runtime_seconds = runtime_seconds
+  )
+}

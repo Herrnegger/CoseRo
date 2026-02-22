@@ -8,7 +8,7 @@
 # This test includes alternative visualizations suitable for SCE-UA results.
 # =============================================================================
 devtools::document()
-devtools::load_all("D:/OneDrive - Universität für Bodenkultur Wien/github/COSERO-R")
+devtools::load_all()
 
 library(ggplot2)
 library(patchwork)  # For combining plots
@@ -114,7 +114,7 @@ result_sce <- optimize_cosero_sce(
     SPINUP = spinup,
     OUTPUTTYPE = 1
   ),
-  maxn = max_evaluations,
+  maxn = max_evaluations*0.1,
   kstop = 5,       # Check convergence every 5 shuffling loops
   pcento = 0.01,   # 1% improvement threshold for convergence
   ngs = 3,         # Number of complexes
@@ -321,9 +321,9 @@ if (!is.null(result_sce$final_run) && !is.null(result_sce$final_run$output_data$
       coord_equal() +
       theme_bw()
 
-    p_scatter_combined <- p_scatter_init + p_scatter_opt +
-      plot_annotation(title = "Observed vs Simulated Discharge",
-                      theme = theme(plot.title = element_text(size = 14, face = "bold")))
+    p_scatter_combined <- patchwork::wrap_plots(p_scatter_init, p_scatter_opt, ncol = 2) +
+      patchwork::plot_annotation(title = "Observed vs Simulated Discharge",
+                                 theme = theme(plot.title = element_text(size = 14, face = "bold")))
 
     ggsave(file.path(results_dir, "scatter_comparison.png"), p_scatter_combined, width = 12, height = 6, dpi = 150)
     cat("Scatter comparison plot saved\n")
@@ -428,8 +428,12 @@ if (!is.null(result_sce$final_run) && !is.null(result_sce$final_run$output_data$
 
 # Create a summary combining key plots
 if (exists("p_hydro") && exists("p_params")) {
-  p_summary <- (p_params | p_fdc) / p_hydro +
-    plot_annotation(
+  p_summary <- patchwork::wrap_plots(
+    patchwork::wrap_plots(p_params, p_fdc, ncol = 2),
+    p_hydro,
+    nrow = 2
+  ) +
+    patchwork::plot_annotation(
       title = "SCE-UA Optimization Summary",
       subtitle = sprintf("Subbasins: %s | NSE improvement: %.3f -> %.3f",
                         paste(target_subbasin, collapse = ", "),

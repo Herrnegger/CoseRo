@@ -15,7 +15,8 @@ write_spartacus_temp(
   tmin_weight = 0.5,
   lat = NULL,
   n_cores = 1,
-  write_binary = FALSE
+  write_binary = FALSE,
+  time_shift = TRUE
 )
 }
 \arguments{
@@ -56,6 +57,10 @@ and reported to the user. Ignored for \code{tmean_method = "simple"}.}
 \item{n_cores}{Number of cores for parallel processing (default: 1)}
 
 \item{write_binary}{If TRUE, also writes a Fortran-compatible binary file}
+
+\item{time_shift}{If TRUE (default), applies a temporal correction to align
+SPARTACUS temperature to the 00:00-00:00 day definition used by HZB/eHYD
+discharge data. See Details.}
 }
 \value{
 Invisibly returns a list with paths to the generated files:
@@ -74,16 +79,44 @@ Austria. The filename patterns \code{SPARTACUS2-DAILY_TN_YYYY.nc} (Tmin) and
 Mean temperature is calculated at the pixel level BEFORE spatial aggregation,
 then aggregated to zones.
 
+\strong{Temporal Alignment (\code{time_shift = TRUE})}
+
+SPARTACUS daily Tmin and Tmax are defined as the extremes of the 19:00-19:00
+CET interval (Hiebl & Frei, 2016), whereas discharge data from HZB/eHYD uses
+the standard calendar day 00:00-00:00 CET. To harmonise both datasets, the
+mean temperature for each target day \eqn{t} is redistributed as:
+
+\deqn{Tm_{00,t} = \frac{19}{24} \cdot Tm_t + \frac{5}{24} \cdot Tm_{t+1}}
+
+The last day of the series has no \eqn{t+1} available; it is kept as-is
+(i.e. the full value of the last day is used without adjustment).
+
 \strong{Why not use simple arithmetic mean?}
 The simple mean \code{(Tmin + Tmax) / 2} assumes symmetric diurnal temperature,
 but Tmin occurs briefly before sunrise while most of the day is closer to Tmin.
 This overestimates Tmean by 0.5-2 degrees C, significantly affecting snow accumulation.
 }
 \references{
+Hiebl, J. and Frei, C. (2016). Daily temperature grids for Austria since 1961 —
+concept, creation and applicability. \emph{Theor. Appl. Climatol.}
+\strong{124}(1):161-178.
+\href{https://doi.org/10.1007/s00704-015-1411-4}{doi:10.1007/s00704-015-1411-4}
+
+Hiebl, J. and Frei, C. (2018). Daily precipitation grids for Austria since 1961 —
+development and evaluation of a spatial dataset for hydroclimatic monitoring and
+modelling. \emph{Theor. Appl. Climatol.} \strong{132}(1):327-345.
+\href{https://doi.org/10.1007/s00704-017-2093-x}{doi:10.1007/s00704-017-2093-x}
+
+GeoSphere Austria (2023). SPARTACUS v2 — Spatial Reanalysis of Temperature and
+Precipitation for Austria.
+\href{https://doi.org/10.60669/m6w8-s545}{doi:10.60669/m6w8-s545}
+
 Dall'Amico, M. and Hornsteiner, M. (2006). A simple method for estimating daily
 and monthly mean temperatures from daily minima and maxima. \emph{Int. J. Climatol.}
-\strong{26}(13):1929-1936. \doi{10.1002/joc.1363}
+\strong{26}(13):1929-1936.
+\href{https://doi.org/10.1002/joc.1363}{doi:10.1002/joc.1363}
 
 Parton, W.J. and Logan, J.A. (1981). A model for diurnal variation in soil and
-air temperature. \emph{Agric. Meteorol.} \strong{23}:205-216. \doi{10.1016/0002-1571(81)90105-9}
+air temperature. \emph{Agric. Meteorol.} \strong{23}:205-216.
+\href{https://doi.org/10.1016/0002-1571(81)90105-9}{doi:10.1016/0002-1571(81)90105-9}
 }

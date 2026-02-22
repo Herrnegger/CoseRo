@@ -12,7 +12,7 @@
 #'
 #' ## The Sparse Weight Matrix Approach
 #'
-#' The key innovation is building a sparse weight matrix that maps directly to
+#' The innovation is building a sparse weight matrix that maps directly to
 #' the raw (unflipped) NetCDF storage layout. This avoids expensive raster
 #' transformations during processing:
 #'
@@ -26,7 +26,7 @@
 #'
 #' 3. A sparse matrix W where `W[zone, cell] = coverage_fraction`.
 #'    Computing zonal means becomes a single matrix multiplication:
-#'    `zonal_means = W %*% cell_values` - highly optimized by the Matrix package.
+#'    \code{zonal_means = W \%*\% cell_values} - highly optimized by the Matrix package.
 #'
 #' This approach is ~10x faster than traditional methods because:
 #' - We extract only the cells we need (not the entire grid)
@@ -38,6 +38,21 @@
 #'   \item \code{\link{write_spartacus_precip}}: For precipitation (RR).
 #'   \item \code{\link{write_spartacus_temp}}: For mean temperature (from TN and TX).
 #' }
+#'
+#' @references
+#' Hiebl, J. and Frei, C. (2016). Daily temperature grids for Austria since 1961 —
+#' concept, creation and applicability. \emph{Theor. Appl. Climatol.}
+#' \strong{124}(1):161-178.
+#' \href{https://doi.org/10.1007/s00704-015-1411-4}{doi:10.1007/s00704-015-1411-4}
+#'
+#' Hiebl, J. and Frei, C. (2018). Daily precipitation grids for Austria since 1961 —
+#' development and evaluation of a spatial dataset for hydroclimatic monitoring and
+#' modelling. \emph{Theor. Appl. Climatol.} \strong{132}(1):327-345.
+#' \href{https://doi.org/10.1007/s00704-017-2093-x}{doi:10.1007/s00704-017-2093-x}
+#'
+#' GeoSphere Austria (2023). SPARTACUS v2 — Spatial Reanalysis of Temperature and
+#' Precipitation for Austria.
+#' \href{https://doi.org/10.60669/m6w8-s545}{doi:10.60669/m6w8-s545}
 #'
 #' @name spartacus_preprocessing
 #' @keywords internal
@@ -85,6 +100,9 @@ get_solar_parameters <- function(doy, lat) {
 #' @param years Optional integer vector of years to process (default: all available)
 #' @param n_cores Number of cores for parallel processing (default: 1)
 #' @param write_binary If TRUE, also writes a Fortran-compatible binary file
+#' @param time_shift If TRUE (default), applies a temporal correction to align
+#'   SPARTACUS precipitation to the 00:00-00:00 day definition used by HZB/eHYD
+#'   discharge data. See Details.
 #'
 #' @details
 #' **Note**: This function only works with SPARTACUS NetCDF files from GeoSphere
@@ -92,6 +110,28 @@ get_solar_parameters <- function(doy, lat) {
 #'
 #' The sparse weight matrix approach (see \code{\link{spartacus_preprocessing}})
 #' enables processing of 60+ years of daily data.
+#'
+#' **Temporal Alignment (\code{time_shift = TRUE})**
+#'
+#' SPARTACUS daily precipitation sums are defined over the interval 07:00-07:00
+#' CET (Hiebl & Frei, 2018), whereas discharge data from HZB/eHYD uses the
+#' standard calendar day 00:00-00:00 CET. To harmonise both datasets, the
+#' precipitation for each target day \eqn{t} is redistributed as:
+#'
+#' \deqn{RR_{00,t} = \frac{7}{24} \cdot RR_{t-1} + \frac{17}{24} \cdot RR_t}
+#'
+#' The first day of the series has no \eqn{t-1} available; it is kept as-is
+#' (i.e. the full value of day 1 is used without adjustment).
+#'
+#' @references
+#' Hiebl, J. and Frei, C. (2018). Daily precipitation grids for Austria since 1961 —
+#' development and evaluation of a spatial dataset for hydroclimatic monitoring and
+#' modelling. \emph{Theor. Appl. Climatol.} \strong{132}(1):327-345.
+#' \href{https://doi.org/10.1007/s00704-017-2093-x}{doi:10.1007/s00704-017-2093-x}
+#'
+#' GeoSphere Austria (2023). SPARTACUS v2 — Spatial Reanalysis of Temperature and
+#' Precipitation for Austria.
+#' \href{https://doi.org/10.60669/m6w8-s545}{doi:10.60669/m6w8-s545}
 #'
 #' @return Invisibly returns a list with paths to the generated files:
 #'   \item{txt}{Path to the text output file}
@@ -117,7 +157,8 @@ get_solar_parameters <- function(doy, lat) {
 #' }
 write_spartacus_precip <- function(nc_dir, output_dir, model_zones,
                                    nz_col = "NZ", years = NULL,
-                                   n_cores = 1, write_binary = FALSE) {
+                                   n_cores = 1, write_binary = FALSE,
+                                   time_shift = TRUE) {
 
   # Check for required suggested packages
   required_pkgs <- c("terra", "sf", "exactextractr", "Matrix", "future", "furrr")
@@ -282,6 +323,30 @@ write_spartacus_precip <- function(nc_dir, output_dir, model_zones,
     close(pb)
   }
 
+  # -- Temporal Alignment (07:00-07:00 → 00:00-00:00) --
+  if (time_shift) {
+    message("Applying temporal shift for precipitation (07:00-07:00 -> 00:00-00:00)...")
+
+    # Concatenate all raw_vals [n_zones x n_days_total] and dates
+    all_vals  <- do.call(cbind, lapply(results, `[[`, "raw_vals"))
+    all_dates <- do.call(rbind, lapply(results, `[[`, "raw_dates"))
+    n_days    <- ncol(all_vals)
+
+    # RR_00[t] = (7/24) * RR[t-1] + (17/24) * RR[t]
+    # Boundary: day 1 has no t-1, keep as-is (full weight on day 1)
+    shifted <- all_vals
+    shifted[, 2:n_days] <- (7/24) * all_vals[, 1:(n_days - 1)] +
+                           (17/24) * all_vals[, 2:n_days]
+    # day 1 already correct (shifted == all_vals for col 1)
+
+    # Rebuild results list with shifted values
+    results <- list(list(
+      raw_vals  = shifted,
+      raw_dates = all_dates,
+      txt_data  = cbind(all_dates, round(t(shifted), 2))
+    ))
+  }
+
   # -- Write Output Files --
   message("Writing output files...")
 
@@ -345,6 +410,9 @@ write_spartacus_precip <- function(nc_dir, output_dir, model_zones,
 #'   and reported to the user. Ignored for \code{tmean_method = "simple"}.
 #' @param n_cores Number of cores for parallel processing (default: 1)
 #' @param write_binary If TRUE, also writes a Fortran-compatible binary file
+#' @param time_shift If TRUE (default), applies a temporal correction to align
+#'   SPARTACUS temperature to the 00:00-00:00 day definition used by HZB/eHYD
+#'   discharge data. See Details.
 #'
 #' @details
 #' **Note**: This function only works with SPARTACUS NetCDF files from GeoSphere
@@ -354,18 +422,46 @@ write_spartacus_precip <- function(nc_dir, output_dir, model_zones,
 #' Mean temperature is calculated at the pixel level BEFORE spatial aggregation,
 #' then aggregated to zones.
 #'
+#' **Temporal Alignment (\code{time_shift = TRUE})**
+#'
+#' SPARTACUS daily Tmin and Tmax are defined as the extremes of the 19:00-19:00
+#' CET interval (Hiebl & Frei, 2016), whereas discharge data from HZB/eHYD uses
+#' the standard calendar day 00:00-00:00 CET. To harmonise both datasets, the
+#' mean temperature for each target day \eqn{t} is redistributed as:
+#'
+#' \deqn{Tm_{00,t} = \frac{19}{24} \cdot Tm_t + \frac{5}{24} \cdot Tm_{t+1}}
+#'
+#' The last day of the series has no \eqn{t+1} available; it is kept as-is
+#' (i.e. the full value of the last day is used without adjustment).
+#'
 #' **Why not use simple arithmetic mean?**
 #' The simple mean \code{(Tmin + Tmax) / 2} assumes symmetric diurnal temperature,
 #' but Tmin occurs briefly before sunrise while most of the day is closer to Tmin.
 #' This overestimates Tmean by 0.5-2 degrees C, significantly affecting snow accumulation.
 #'
 #' @references
+#' Hiebl, J. and Frei, C. (2016). Daily temperature grids for Austria since 1961 —
+#' concept, creation and applicability. \emph{Theor. Appl. Climatol.}
+#' \strong{124}(1):161-178.
+#' \href{https://doi.org/10.1007/s00704-015-1411-4}{doi:10.1007/s00704-015-1411-4}
+#'
+#' Hiebl, J. and Frei, C. (2018). Daily precipitation grids for Austria since 1961 —
+#' development and evaluation of a spatial dataset for hydroclimatic monitoring and
+#' modelling. \emph{Theor. Appl. Climatol.} \strong{132}(1):327-345.
+#' \href{https://doi.org/10.1007/s00704-017-2093-x}{doi:10.1007/s00704-017-2093-x}
+#'
+#' GeoSphere Austria (2023). SPARTACUS v2 — Spatial Reanalysis of Temperature and
+#' Precipitation for Austria.
+#' \href{https://doi.org/10.60669/m6w8-s545}{doi:10.60669/m6w8-s545}
+#'
 #' Dall'Amico, M. and Hornsteiner, M. (2006). A simple method for estimating daily
 #' and monthly mean temperatures from daily minima and maxima. \emph{Int. J. Climatol.}
-#' \strong{26}(13):1929-1936. \doi{10.1002/joc.1363}
+#' \strong{26}(13):1929-1936.
+#' \href{https://doi.org/10.1002/joc.1363}{doi:10.1002/joc.1363}
 #'
 #' Parton, W.J. and Logan, J.A. (1981). A model for diurnal variation in soil and
-#' air temperature. \emph{Agric. Meteorol.} \strong{23}:205-216. \doi{10.1016/0002-1571(81)90105-9}
+#' air temperature. \emph{Agric. Meteorol.} \strong{23}:205-216.
+#' \href{https://doi.org/10.1016/0002-1571(81)90105-9}{doi:10.1016/0002-1571(81)90105-9}
 #'
 #' @return Invisibly returns a list with paths to the generated files:
 #'   \item{txt}{Path to the text output file}
@@ -378,7 +474,8 @@ write_spartacus_temp <- function(tmin_dir, tmax_dir, output_dir, model_zones,
                                  tmean_method = c("simple", "dall_amico", "parton_logan"),
                                  tmin_weight = 0.5,
                                  lat = NULL,
-                                 n_cores = 1, write_binary = FALSE) {
+                                 n_cores = 1, write_binary = FALSE,
+                                 time_shift = TRUE) {
 
   # Check for required suggested packages
   required_pkgs <- c("terra", "sf", "exactextractr", "Matrix", "future", "furrr")
@@ -622,6 +719,30 @@ write_spartacus_temp <- function(tmin_dir, tmax_dir, output_dir, model_zones,
                       tmax_files = tmax_files, cells = all_raw_cells, weight_matrix = W,
                       method = tmean_method, w_min = tmin_weight, w_max = tmax_weight,
                       latitude = lat)
+  }
+
+  # -- Temporal Alignment (19:00-19:00 → 00:00-00:00) --
+  if (time_shift) {
+    message("Applying temporal shift for temperature (19:00-19:00 -> 00:00-00:00)...")
+
+    # Concatenate all raw_vals [n_zones x n_days_total] and dates
+    all_vals  <- do.call(cbind, lapply(results, `[[`, "raw_vals"))
+    all_dates <- do.call(rbind, lapply(results, `[[`, "raw_dates"))
+    n_days    <- ncol(all_vals)
+
+    # Tm_00[t] = (19/24) * Tm[t] + (5/24) * Tm[t+1]
+    # Boundary: last day has no t+1, keep as-is (full weight on last day)
+    shifted <- all_vals
+    shifted[, 1:(n_days - 1)] <- (19/24) * all_vals[, 1:(n_days - 1)] +
+                                  (5/24)  * all_vals[, 2:n_days]
+    # last day already correct (shifted == all_vals for last col)
+
+    # Rebuild results list with shifted values
+    results <- list(list(
+      raw_vals  = shifted,
+      raw_dates = all_dates,
+      txt_data  = cbind(all_dates, round(t(shifted), 2))
+    ))
   }
 
   # -- Write Output Files --
