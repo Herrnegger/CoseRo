@@ -23,7 +23,9 @@
       "Bash(printf:*)",
       "Bash(./COSERO.exe:*)",
       "Bash(cmd /c \"run_cosero_temp.bat > /dev/null 2>&1\")",
-      "Bash(echo:*)"
+      "Bash(echo:*)",
+      "Bash(python3 -:*)",
+      "Bash(cmd.exe /c \"Rscript -e \"\"cat\\(readLines\\(''D:/OneDrive - Universitat fur Bodenkunde Wien/github/COSERO-R/R/cosero_config.R'', n=5\\), sep=''\\\\n''\\)\"\"\")"
     ],
     "deny": [],
     "ask": []

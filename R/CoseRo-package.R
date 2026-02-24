@@ -10,7 +10,9 @@
 #'   \item Output reading for 13+ file formats
 #'   \item Interactive Shiny visualization app
 #'   \item Sobol-based global sensitivity analysis framework
-#'   \item SPARTACUS climate data preprocessing
+#'   \item Parameter optimization with DDS and SCE-UA algorithms
+#'   \item GeoSphere Austria data download (SPARTACUS, WINFORE)
+#'   \item SPARTACUS/WINFORE climate data and eHYD discharge preprocessing for COSERO input
 #' }
 #'
 #' @section Main Functions:
@@ -61,10 +63,13 @@
 #'   \item \code{\link{export_cosero_optimization}} - Export optimization results to CSV
 #' }
 #'
-#' **SPARTACUS Preprocessing:**
+#' **Input Data Preprocessing:**
 #' \itemize{
+#'   \item \code{\link{download_geosphere_data}} - Download SPARTACUS/WINFORE NetCDF files from GeoSphere Austria
 #'   \item \code{\link{write_spartacus_precip}} - Convert precipitation to COSERO format
 #'   \item \code{\link{write_spartacus_temp}} - Convert temperature to COSERO format
+#'   \item \code{\link{write_winfore_et0}} - Convert WINFORE ET0 to COSERO format
+#'   \item \code{\link{write_ehyd_qobs}} - Convert eHYD discharge CSV files to COSERO QOBS format
 #' }
 #'
 #' @seealso

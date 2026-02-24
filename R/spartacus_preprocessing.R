@@ -123,6 +123,11 @@ get_solar_parameters <- function(doy, lat) {
 #' The first day of the series has no \eqn{t-1} available; it is kept as-is
 #' (i.e. the full value of day 1 is used without adjustment).
 #'
+#' **Missing Data:** If the NetCDF contains days with no valid data (all NA),
+#' these are filled by carrying forward the last valid day's values. A warning
+#' is issued listing the affected dates. Filling is applied before the temporal
+#' shift to prevent NA propagation into adjacent days.
+#'
 #' @references
 #' Hiebl, J. and Frei, C. (2018). Daily precipitation grids for Austria since 1961 —
 #' development and evaluation of a spatial dataset for hydroclimatic monitoring and
@@ -177,6 +182,7 @@ write_spartacus_precip <- function(nc_dir, output_dir, model_zones,
   if (!dir.exists(nc_dir)) stop("nc_dir does not exist: ", nc_dir, call. = FALSE)
   if (!inherits(model_zones, "sf")) stop("model_zones must be an sf object", call. = FALSE)
   if (!nz_col %in% names(model_zones)) stop("Column '", nz_col, "' not found", call. = FALSE)
+  n_cores <- min(n_cores, max(1L, parallel::detectCores(logical = FALSE) - 1L))
 
   # Find SPARTACUS precipitation files (strict naming pattern)
   files <- sort(list.files(nc_dir, pattern = "SPARTACUS2-DAILY_RR_\\d{4}\\.nc$",
@@ -276,6 +282,26 @@ write_spartacus_precip <- function(nc_dir, output_dir, model_zones,
 
     # Zonal means via sparse matrix multiplication [n_zones x n_days]
     result <- as.matrix(weight_matrix %*% cell_vals)
+
+    # Handle missing days: fill with last valid day (carry forward)
+    na_days <- which(colSums(is.na(result)) == nrow(result))
+    if (length(na_days) > 0) {
+      na_dates <- format(dates[na_days], "%Y-%m-%d")
+      warning("Missing data for ", length(na_days), " day(s) in ",
+              basename(f), ": ", paste(na_dates, collapse = ", "),
+              ". Filling with last valid day.", call. = FALSE)
+      for (d in na_days) {
+        prev <- d - 1L
+        while (prev >= 1L && all(is.na(result[, prev]))) prev <- prev - 1L
+        if (prev >= 1L) {
+          result[, d] <- result[, prev]
+        } else {
+          nxt <- d + 1L
+          while (nxt <= ncol(result) && all(is.na(result[, nxt]))) nxt <- nxt + 1L
+          if (nxt <= ncol(result)) result[, d] <- result[, nxt] else result[, d] <- 0
+        }
+      }
+    }
 
     # Format dates for COSERO (YYYY MM DD HH MM)
     date_mat <- cbind(
@@ -439,6 +465,11 @@ write_spartacus_precip <- function(nc_dir, output_dir, model_zones,
 #' but Tmin occurs briefly before sunrise while most of the day is closer to Tmin.
 #' This overestimates Tmean by 0.5-2 degrees C, significantly affecting snow accumulation.
 #'
+#' **Missing Data:** If the NetCDF contains days with no valid data (all NA),
+#' these are filled by carrying forward the last valid day's values. A warning
+#' is issued listing the affected dates. Filling is applied before the temporal
+#' shift to prevent NA propagation into adjacent days.
+#'
 #' @references
 #' Hiebl, J. and Frei, C. (2016). Daily temperature grids for Austria since 1961 —
 #' concept, creation and applicability. \emph{Theor. Appl. Climatol.}
@@ -499,6 +530,7 @@ write_spartacus_temp <- function(tmin_dir, tmax_dir, output_dir, model_zones,
   if (tmean_method == "simple" && (tmin_weight < 0 || tmin_weight > 1)) {
     stop("tmin_weight must be between 0 and 1", call. = FALSE)
   }
+  n_cores <- min(n_cores, max(1L, parallel::detectCores(logical = FALSE) - 1L))
 
   # Find SPARTACUS temperature files (strict naming patterns)
   tmin_files <- list.files(tmin_dir, pattern = "SPARTACUS2-DAILY_TN_\\d{4}\\.nc$", full.names = TRUE)
@@ -688,6 +720,27 @@ write_spartacus_temp <- function(tmin_dir, tmax_dir, output_dir, model_zones,
 
     # Zonal means via sparse matrix multiplication
     result <- as.matrix(weight_matrix %*% v_mean)
+
+    # Handle missing days: fill with last valid day (carry forward)
+    na_days <- which(colSums(is.na(result)) == nrow(result))
+    if (length(na_days) > 0) {
+      yr_label <- paste0(basename(f_min), "/", basename(f_max))
+      na_dates <- format(dates[na_days], "%Y-%m-%d")
+      warning("Missing data for ", length(na_days), " day(s) in ",
+              yr_label, ": ", paste(na_dates, collapse = ", "),
+              ". Filling with last valid day.", call. = FALSE)
+      for (d in na_days) {
+        prev <- d - 1L
+        while (prev >= 1L && all(is.na(result[, prev]))) prev <- prev - 1L
+        if (prev >= 1L) {
+          result[, d] <- result[, prev]
+        } else {
+          nxt <- d + 1L
+          while (nxt <= ncol(result) && all(is.na(result[, nxt]))) nxt <- nxt + 1L
+          if (nxt <= ncol(result)) result[, d] <- result[, nxt] else result[, d] <- 0
+        }
+      }
+    }
 
     # Format dates for COSERO
     date_mat <- cbind(as.integer(format(dates, "%Y")), 

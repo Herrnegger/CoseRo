@@ -95,6 +95,11 @@ The last day of the series has no \eqn{t+1} available; it is kept as-is
 The simple mean \code{(Tmin + Tmax) / 2} assumes symmetric diurnal temperature,
 but Tmin occurs briefly before sunrise while most of the day is closer to Tmin.
 This overestimates Tmean by 0.5-2 degrees C, significantly affecting snow accumulation.
+
+\strong{Missing Data:} If the NetCDF contains days with no valid data (all NA),
+these are filled by carrying forward the last valid day's values. A warning
+is issued listing the affected dates. Filling is applied before the temporal
+shift to prevent NA propagation into adjacent days.
 }
 \references{
 Hiebl, J. and Frei, C. (2016). Daily temperature grids for Austria since 1961 —

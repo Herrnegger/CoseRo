@@ -48,7 +48,8 @@ Suggests:
     Matrix (>= 1.5.0),
     kaleido,
     webshot,
-    rtop
+    rtop,
+    httr (>= 1.4.0)
 RoxygenNote: 7.3.3
 Roxygen: list(markdown = TRUE)
 URL: https://github.com/Herrnegger/CoseRo

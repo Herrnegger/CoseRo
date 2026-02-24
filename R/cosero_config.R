@@ -201,21 +201,25 @@ validate_cosero_defaults <- function(settings) {
 
 #' @keywords internal
 get_default_cosero_values <- function() {
+  # Kept for backward compatibility with modify_defaults(); not used by
+  # create_default_defaults() anymore.
   list(
     PROJECTINFO = "COSERO_Project",
-    DATAFILE = "data.txt",
-    PARAFILE = "para.txt",
-    IKL = 1,
-    NCLASS = 1,
-    OUTPUTTYPE = 1,
-    STARTDATE = "2010 1 1 0 0",
-    ENDDATE = "2015 12 31 23 59",
-    SPINUP = 365,
-    SC_FLAG = 0,
-    RUNOFFFILE = "runoff.txt",
-    STATSFILE = "statistics.txt",
-    OPTFILE = "opt.txt",
-    OUTCONTROL = 1,
+    DATAFILE    = "Qobs.txt",
+    BINDATAFILE = "not_used.dat",
+    PARAFILE    = "para_ini.txt",
+    IKL         = 5,
+    NCLASS      = 10,
+    OUTPUTTYPE  = 1,
+    SC_FLAG     = 1,
+    OUTCONTROL  = 0,
+    STARTDATE   = "2010 1 1 0 0",
+    ENDDATE     = "2015 12 31 0 0",
+    SPINUP      = 365,
+    RUNOFFFILE  = "COSERO.runoff",
+    STATSFILE   = "statistics.txt",
+    OPTFILE     = "optprogress.txt",
+    WRITERASTERS = "raster_write.txt",
     ADDFLUXCONT = 0,
     ADDFLUXFILE = "addflux.txt"
   )
@@ -270,15 +274,75 @@ modify_defaults <- function(defaults_file, settings, quiet = FALSE) {
 
 #' @keywords internal
 create_default_defaults <- function(defaults_file, quiet = FALSE) {
-  default_values <- get_default_cosero_values()
-  content <- character(0)
-  for (param_name in names(default_values)) {
-    content <- c(
-      content, param_name,
-      as.character(default_values[[param_name]])
-    )
-  }
-  writeLines(content, defaults_file)
+  lines <- c(
+    "This file contains default settings for the COSERO Model.",
+    "",
+    "PROJECTINFO (default project info, written into first line of each output file)",
+    "COSERO_Project",
+    "",
+    "DATAFILE (default input data file, read in from directory \"input\")",
+    "Qobs.txt",
+    "",
+    "BINDATAFILE (default input binary data file, read in from directory \"cdr/input\")",
+    "not_used.dat",
+    "",
+    "PARAFILE (default input parameter file, read in from directory \"input\")",
+    "para_ini.txt",
+    "",
+    "IKL (# of snow classes)",
+    "5",
+    "",
+    "NCLASS (# of Landuse classes)",
+    "10",
+    "",
+    paste0(
+      "OUTPUTTYPE (Sets the output evaluation extent:",
+      " 1 - only ZRVIEW; 2 - ZRVIEW and some Sums; 3 - full evaluation)"
+    ),
+    "1",
+    "",
+    paste0(
+      "SC_FLAG (Use local subbasin area (EZFL_B, \"0\") or total upstream",
+      " catchment area (EZFL_T, \"1\") for runoff depth / flux calculations)"
+    ),
+    "1",
+    "",
+    paste0(
+      "OUTCONTROL (if set to \"1\", zonal values will be written for every time step:",
+      " folder cdr/output is needed; very slow; outputtype must be \"3\";",
+      " otherwise set OUTCONTROL to \"0\")"
+    ),
+    "0",
+    "",
+    "STARTDATE (start date of simulation period in format yyyy mm dd hh mm)",
+    "2010 1 1 0 0",
+    "",
+    "ENDDATE (end date of simulation period in format yyyy mm dd hh mm)",
+    "2015 12 31 0 0",
+    "",
+    "SPINUP (length of spin-up period without evaluation [time-steps])",
+    "365",
+    "",
+    "RUNOFFFILE (default output file for runoff of single run, written to directory \"output\")",
+    "COSERO.runoff",
+    "",
+    "STATSFILE (default output file for statistics of single run, written to directory \"output\")",
+    "statistics.txt",
+    "",
+    "OPTFILE (default output file for progress of optimization, written to directory \"output\")",
+    "optprogress.txt",
+    "",
+    "WRITERASTERS (write state/flux-rasters for the use in FEWS)",
+    "raster_write.txt",
+    "",
+    "ADDFLUXCONT ()",
+    "0",
+    "",
+    "ADDFLUXFILE ()",
+    "addflux.txt",
+    ""
+  )
+  writeLines(lines, defaults_file)
   if (!quiet) {
     cat("Created default defaults.txt at:", defaults_file, "\n")
   }

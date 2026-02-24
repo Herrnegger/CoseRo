@@ -123,7 +123,6 @@ setup_cosero_project_example <- function(project_path, overwrite = FALSE) {
 #'   "package" (default), path to folder with binaries, or path to zip file.
 #' @param create_defaults Create a defaults.txt file? (default: TRUE)
 #' @param defaults_settings Optional list of settings for defaults.txt.
-#' @param template "minimal" (folders + binaries) or "example" (if available).
 #' @param overwrite Overwrite existing files? (default: FALSE)
 #' @param quiet Suppress progress messages? (default: FALSE)
 #'
@@ -150,17 +149,12 @@ setup_cosero_project <- function(project_path,
                                  cosero_bin_source = "package",
                                  create_defaults = TRUE,
                                  defaults_settings = NULL,
-                                 template = "minimal",
                                  overwrite = FALSE,
                                  quiet = FALSE) {
 
   # Validate inputs
   if (is.null(project_path) || nchar(project_path) == 0) {
     stop("project_path must be specified", call. = FALSE)
-  }
-
-  if (!template %in% c("minimal", "example")) {
-    stop("template must be 'minimal' or 'example'", call. = FALSE)
   }
 
   # Create main project directory
@@ -225,11 +219,6 @@ setup_cosero_project <- function(project_path,
         modify_defaults(defaults_file, validation$settings, quiet = quiet)
       }
     }
-  }
-
-  # Add example/template files if requested
-  if (template == "example") {
-    copy_template_files(input_dir, overwrite = overwrite, quiet = quiet)
   }
 
   # Return project structure info
@@ -414,82 +403,125 @@ copy_template_files <- function(input_dir, overwrite = FALSE, quiet = FALSE) {
 
 #' Show Required COSERO Input Files
 #'
-#' Displays a checklist of required and optional input files for COSERO projects.
-#' Useful reference when setting up a new project or troubleshooting missing files.
+#' Displays a structured overview of required input files for COSERO projects,
+#' grouped by fixed-name control files and user-defined data files.
+#' Includes formatting requirements and configuration notes.
 #'
-#' @param show_details Logical. Show detailed format descriptions? (default: TRUE)
-#'
-#' @return Invisibly returns a data frame with file information
+#' @return Invisibly returns a data frame with file information.
 #' @export
 #' @examples
 #' \dontrun{
-#' # Show file requirements
 #' show_required_files()
-#'
-#' # Brief list only
-#' show_required_files(show_details = FALSE)
 #' }
-show_required_files <- function(show_details = TRUE) {
-  # File requirements data
+show_required_files <- function() {
+
+  cat("=== COSERO Input File Requirements ===\n")
+
+  # --- Section 1: Fixed-name control files ---
+  cat("\nFIXED-NAME CONTROL FILES\n")
+  cat("  These files must use the exact names shown below.\n\n")
+
+  control_files <- list(
+    list(
+      name = "defaults.txt",
+      desc = "Master configuration file linking simulation dates, land use classes,\n",
+      note = "      and other filenames."
+    ),
+    list(
+      name = "MetDefaults.txt",
+      desc = "Defines meteorological data sources, the ETP calculation method,\n",
+      note = "      and the data format (ASCII vs. BIN)."
+    ),
+    list(
+      name = "radmat.par",
+      desc = "Average hourly diurnal cycle of solar radiation (W/m^2).\n",
+      note = "      Format: 12 rows (months) x 24 columns (hours)."
+    ),
+    list(
+      name = "raster_write.txt",
+      desc = "Controls writing of state/flux rasters for external tools."
+    )
+  )
+
+  for (f in control_files) {
+    cat(sprintf("  %-20s %s", f$name, f$desc))
+    if (!is.null(f$note))  cat(f$note)
+    if (!is.null(f$note2)) cat(f$note2)
+    cat("\n")
+  }
+
+  # --- Section 2: User-defined data files ---
+  cat("\nUSER-DEFINED ASCII DATA FILES\n")
+  cat("  Names for these files are specified within defaults.txt or MetDefaults.txt.\n\n")
+
+  cat(sprintf("  %-20s %-18s %s\n", "File Type", "Mapping Keyword", "Required ASCII Formatting"))
+  cat(sprintf("  %-20s %-18s %s\n",
+              "--------------------", "------------------",
+              "---------------------------------------------------"))
+
+  data_files <- list(
+    list(
+      type    = "Parameter File",
+      keyword = "PARAFILE",
+      format  = "169 columns; Row 1: Project Name; Row 2: Headers; Row 3+: one row per zone (NZ)."
+    ),
+    list(
+      type    = "Precipitation",
+      keyword = "PRECFILE",
+      format  = "No header. Columns: YYYY MM DD hh mm followed by one column per zone (NZ)."
+    ),
+    list(
+      type    = "Temperature",
+      keyword = "TEMPFILE",
+      format  = "No header. Format identical to the Precipitation file."
+    ),
+    list(
+      type    = "Runoff Obs",
+      keyword = "DATAFILE",
+      format  = "Header line + YYYY MM DD hh mm + one column per subbasin. Must use blanks (not tabs)."
+    )
+  )
+
+  for (f in data_files) {
+    cat(sprintf("  %-20s %-18s %s\n", f$type, f$keyword, f$format))
+  }
+
+  # --- Section 3: Performance and formatting notes ---
+  cat("\nPERFORMANCE & FORMATTING NOTES\n\n")
+
+  notes <- c(
+    "Binary Mode:      Set ASCIIorBIN to 1 in MetDefaults.txt to use binary files.\n                  Recommended for larger modeling domains (significant speed increase).",
+    "Missing Data:     In the runoff file (DATAFILE), use -0.01 or any value < 0\n                  for missing observations.",
+    "ETP Options:      If ETPCONTROL is 0, the model uses the Thornthwaite method\n                  (requires TMMon parameters in PARAFILE).\n                  If ETPCONTROL is 1, an external ETPFILE (same format as Precip)\n                  must be provided.",
+    "External Inflow:  If ADDFLUXCONT is 1, an ADDFLUXFILE is required, starting\n                  with an NB-TONZ mapping header followed by the time series."
+  )
+
+  for (note in notes) {
+    cat(sprintf("  %s\n\n", note))
+  }
+
+  # Return data invisibly for programmatic use
   files_df <- data.frame(
     Category = c(
-      "REQUIRED", "REQUIRED", "REQUIRED", "REQUIRED", "REQUIRED", "REQUIRED",
-      "OPTIONAL", "OPTIONAL", "OPTIONAL"
+      rep("CONTROL", 4),
+      rep("DATA", 4)
     ),
     Filename = c(
-      "defaults.txt", "MetDefaults.txt", "para.txt",
-      "Precipitation file", "Temperature file", "Runoff observations",
-      "ETP file", "Additional inflow", "statevar.dmp"
+      "defaults.txt", "MetDefaults.txt", "radmat.par", "raster_write.txt",
+      "PARAFILE", "PRECFILE", "TEMPFILE", "DATAFILE"
     ),
     Description = c(
-      "Model configuration settings",
-      "Meteorological input file definitions",
+      "Master configuration file",
+      "Meteorological data source and format definitions",
+      "Solar radiation diurnal cycle (12 months x 24 hours)",
+      "Raster output control",
       "Model parameters (169 columns x NZ+2 rows)",
-      "Precipitation time series",
-      "Temperature time series",
-      "Observed discharge data",
-      "Potential evapotranspiration (if ETPCONTROL=1)",
-      "External inflow data (if ADDFLUXCONT=1)",
-      "Initial state variables (for warm start)"
-    ),
-    Details = c(
-      "Created by setup_cosero_project() or run_cosero()",
-      "Define ASCII(0)/Binary(1), PRECFILE, TEMPFILE, ETPCONTROL, ETPFILE",
-      "Contains NB, IZ, NZ, coordinates, parameters, initial states",
-      "Format: YYYY MM DD hh mm [value1] [value2] ... [valueN] (N = # zones)",
-      "Format: YYYY MM DD hh mm [value1] [value2] ... [valueN] (same as precip)",
-      "Format: Header + YYYY MM DD hh mm [Q1] [Q2] ... [Qn] (n = # subbasins)",
-      "Same format as precipitation/temperature files",
-      "Format: NB-TONZ mapping + time series like runoff observations",
-      "Binary file with state variables from previous run"
+      "Precipitation time series (no header, one column per zone)",
+      "Temperature time series (identical format to PRECFILE)",
+      "Runoff observations (header + one column per subbasin, blanks not tabs)"
     ),
     stringsAsFactors = FALSE
   )
-
-  cat("=== COSERO Input File Requirements ===\n\n")
-
-  # Required files
-  cat("REQUIRED FILES:\n")
-  req_files <- files_df[files_df$Category == "REQUIRED", ]
-  for (i in 1:nrow(req_files)) {
-    cat(sprintf("  [x] %-22s - %s\n", req_files$Filename[i], req_files$Description[i]))
-    if (show_details) {
-      cat(sprintf("      %s\n", req_files$Details[i]))
-    }
-  }
-
-  # Optional files
-  cat("\nOPTIONAL FILES:\n")
-  opt_files <- files_df[files_df$Category == "OPTIONAL", ]
-  for (i in 1:nrow(opt_files)) {
-    cat(sprintf("  [ ] %-22s - %s\n", opt_files$Filename[i], opt_files$Description[i]))
-    if (show_details) {
-      cat(sprintf("      %s\n", opt_files$Details[i]))
-    }
-  }
-
-  cat("\nLocation: All files must be in the project's 'input/' folder\n")
-  cat("\nFor more details, see COSERO documentation or run: ?setup_cosero_project\n")
 
   invisible(files_df)
 }

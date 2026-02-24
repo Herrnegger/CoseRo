@@ -16,7 +16,7 @@ spinup       <- 365
 # Parameter file (PARAFILE in defaults.txt): filename relative to input/.
 # The default defined in defaults.txt is "para.txt". Change to use another file, e.g.:
 #   param_file <- "para_optimized_NB3_NSE_20260101_120000.txt"
-param_file <- "para_optimized_NB1_2_3_NSE_20260221_133902.txt"
+param_file <- "para_ini_mod_somehow.txt"
 
 subbasins <- c("001", "002", "003")
 

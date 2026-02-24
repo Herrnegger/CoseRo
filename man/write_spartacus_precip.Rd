@@ -62,6 +62,11 @@ precipitation for each target day \eqn{t} is redistributed as:
 
 The first day of the series has no \eqn{t-1} available; it is kept as-is
 (i.e. the full value of day 1 is used without adjustment).
+
+\strong{Missing Data:} If the NetCDF contains days with no valid data (all NA),
+these are filled by carrying forward the last valid day's values. A warning
+is issued listing the affected dates. Filling is applied before the temporal
+shift to prevent NA propagation into adjacent days.
 }
 \examples{
 \dontrun{

@@ -578,7 +578,7 @@ convert_parameter_types <- function(param_data) {
     } else {
       tryCatch({
         numeric_vals <- as.numeric(param_data[[col_name]])
-        numeric_vals[numeric_vals %in% c(-999.0000, 9999.0000, 99999.0000)] <- NA
+        numeric_vals[numeric_vals == -999.0000] <- NA
         param_data[[col_name]] <- numeric_vals
       }, error = function(e) {
         warning("Could not convert column ", col_name, " to numeric")

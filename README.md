@@ -19,52 +19,67 @@
 -   ✅ **Interactive Visualization**: Modern Shiny web application with 5 analysis tabs
 -   ✅ **Parameter Optimization**: DDS and SCE-UA algorithms for automated parameter calibration
 -   ✅ **Sensitivity Analysis**: Sobol-based global sensitivity analysis framework with parallel computing
--   ✅ **Input Data Preprocessing**: Convert SPARTACUS gridded climate data to COSERO input format
+-   ✅ **Input Data Download**: Download SPARTACUS and WINFORE NetCDF files from GeoSphere Austria data hub
+-   ✅ **Input Data Preprocessing**: Convert SPARTACUS/WINFORE gridded climate data and eHYD discharge records to COSERO input format
 -   ✅ **Flexible Usage**: Use as scripting library OR interactive GUI
 
 ## Installation
 
-### Option 1: For Package Developers (Recommended)
+### Option 1: Install from GitHub (Recommended for most users)
 
-If you're developing or modifying the package, load it directly from source:
-
-``` r
-# Install devtools if you don't have it
-install.packages("devtools")
-
-# Load all functions from your package for development
-devtools::load_all()
-
-# Now you can use all CoseRo functions without installing
-launch_cosero_app()
-```
-
-### Option 2: Install as Regular Package
-
-``` r
-devtools::install()
-library(CoseRo)
-launch_cosero_app()
-```
-
-### Option 3: Install from GitHub
+Install directly from the GitHub repository. This requires the `remotes` package:
 
 ``` r
 install.packages("remotes")
 remotes::install_github("Herrnegger/CoseRo")
+
+library(CoseRo)
+launch_cosero_app()
+```
+
+### Option 2: Install from a local clone
+
+If you have cloned the repository to a local folder (e.g. `D:/github/CoseRo`), install from there:
+
+``` r
+install.packages("devtools")
+devtools::install("D:/github/CoseRo")
+
+library(CoseRo)
+launch_cosero_app()
+```
+
+### Option 3: Load without installing (for developers)
+
+If you are actively developing or modifying the package, use `load_all()` to load all functions directly from source without a formal install. Run this from the package root directory or pass the path explicitly:
+
+``` r
+devtools::load_all("D:/github/CoseRo")
+
+# All CoseRo functions are now available without installing
+launch_cosero_app()
 ```
 
 ### System Requirements
 
 -   **R**: Version 4.0.0 or higher
--   **COSERO.exe**: Windows executable for the COSERO hydrological model
 -   **Operating System**: Windows (required for COSERO.exe execution)
--   **Required R Packages**: See DESCRIPTION file for full list (automatically installed)
-    -   Core: shiny, bslib, plotly, dplyr, tidyr, lubridate, data.table
-    -   Analysis: sensobol, hydroGOF, parallel, pbapply
-    -   Visualization: ggplot2, DT
-    -   Spatial: terra, sf, exactextractr (for SPARTACUS preprocessing)
-    -   Parallel: future, furrr (for parallel data processing)
+-   **COSERO.exe**: The COSERO hydrological model executable — bundled in the package or provided separately
+
+**R packages installed automatically (Imports):**
+
+-   Core: shiny, bslib, plotly, htmlwidgets, dplyr, tidyr, purrr, lubridate, data.table, tibble
+-   Analysis: sensobol, hydroGOF, parallel, foreach, doSNOW
+-   Visualization: ggplot2
+
+**Optional R packages (Suggests) — install manually if needed:**
+
+-   Shiny UI: `DT`, `shinyFiles`, `shinyjs`
+-   SPARTACUS/WINFORE preprocessing: `terra`, `sf`, `exactextractr`, `Matrix`, `future`, `furrr`
+-   Data download: `httr`
+-   SCE-UA optimization: `rtop`
+-   Plot export: `kaleido` or `webshot`
+-   Progress bars: `pbapply`
 
 ## Quick Start
 
@@ -217,7 +232,7 @@ plot_cosero_optimization(result_dds)
 export_cosero_optimization(result_dds, "D:/optimization_results")
 ```
 
-**DDS vs SCE-UA:** DDS is fast and efficient for most calibrations (3-10 parameters). SCE-UA is more robust for complex problems but requires more evaluations. The original parameter file is never modified — it is backed up and restored automatically.
+**DDS vs SCE-UA:** DDS is fast and efficient for most calibrations (3-10 parameters). SCE-UA is more robust for complex problems but requires more evaluations. The original parameter file is never modified — it is backed up and restored automatically. After each run, a formatted optimization report (`.txt`) is automatically saved alongside the optimized parameter file in `output/`. Pass `subbasin_weights` only together with `aggregation = "weighted"`; providing weights with any other aggregation method raises a warning.
 
 #### Sensitivity Analysis
 
@@ -247,6 +262,21 @@ plot_sobol(sobol_indices)
 plot_dotty(samples$parameter_sets, Y, y_label = "KGE")
 export_sensitivity_results("sensitivity_results", sobol_indices, samples$parameter_sets, Y)
 ```
+
+#### GeoSphere Austria Data Download
+
+``` r
+library(CoseRo)
+
+# Download SPARTACUS precipitation and WINFORE ET0 for 2010-2025
+download_geosphere_data(
+  product    = c("SPARTACUS_RR", "SPARTACUS_TN", "SPARTACUS_TX", "WINFORE_ET0"),
+  output_dir = "D:/Data/GeoSphere",
+  years      = 2010:2025   # or years = "all" to query all available years
+)
+```
+
+Files are saved to `output_dir/{product}/` subdirectories. Existing files are skipped by default (`overwrite = FALSE`). Requires the `httr` package.
 
 #### SPARTACUS Data Preprocessing
 
@@ -281,6 +311,51 @@ write_spartacus_temp(
 
 **SPARTACUS Dataset (GeoSphere Austria):** 1 km daily gridded data for Austria (1961–present), DOI: <https://doi.org/10.60669/m6w8-s545>.
 
+#### WINFORE ET0 Preprocessing
+
+``` r
+library(CoseRo)
+library(sf)
+
+zones <- st_read("path/to/model_zones.shp")
+
+# ET0: WINFORE2_ET0_YYYY.nc → ET0_NZ_<years>.txt
+write_winfore_et0(
+  nc_dir      = "data/WINFORE_ET0",
+  output_dir  = "output/cosero_input",
+  model_zones = zones,
+  nz_col      = "NZ",
+  n_cores     = 4
+)
+```
+
+**WINFORE Dataset (GeoSphere Austria):** 1 km daily potential evapotranspiration for Austria, same grid as SPARTACUS.
+
+#### eHYD Discharge Preprocessing
+
+``` r
+library(CoseRo)
+
+# Map eHYD HZB-Nummer to COSERO subbasin IDs
+gauge_mapping <- c(
+  "210864" = 1,  # Gusswerk / Salza
+  "210880" = 2,  # Weichselboden / Radmerbach
+  "210898" = 3   # Wildalpen / Salza
+)
+
+# Q-Tagesmittel-*.csv files → COSERO QOBS format
+write_ehyd_qobs(
+  input_dir      = "data/eHYD/raw",
+  output_file    = "D:/COSERO_project/input/Qobs.txt",
+  gauge_to_nb    = gauge_mapping,
+  catchment_name = "COSERO-Wildalpen",
+  start_date     = "1991-01-01",   # NULL = auto from files
+  end_date       = "2024-12-31"    # NULL = auto from files
+)
+```
+
+**eHYD** is the Austrian Hydrographic Service (BML) discharge portal. Files are named `Q-Tagesmittel-{HZB-Nummer}.csv`. Missing days and gaps (`Luecke`) are filled with `na_value` (default: `-0.01` as required by COSERO). See <https://ehyd.gv.at/>.
+
 ### 3. Understanding COSERO Output Types
 
 **OUTPUTTYPE 1** — `COSERO.runoff`, `COSERO.prec`, `COSERO.plus`, `COSERO.plus1`, `statistics.txt`, `topology.txt`
@@ -299,7 +374,10 @@ CoseRo/
 │   ├── cosero_readers.R          # Output file readers
 │   ├── cosero_optimize.R         # DDS and SCE-UA optimization
 │   ├── sensitivity_analysis.R    # Sobol sensitivity analysis
+│   ├── geosphere_download.R      # GeoSphere Austria data download
 │   ├── spartacus_preprocessing.R # SPARTACUS NetCDF → COSERO input
+│   ├── winfore_preprocessing.R   # WINFORE ET0 NetCDF → COSERO input
+│   ├── ehyd_preprocessing.R      # eHYD discharge CSV → COSERO QOBS
 │   ├── app_helpers.R             # Plotting & data processing
 │   └── launch_app.R              # App launcher
 ├── inst/
@@ -346,7 +424,6 @@ CoseRo/
 |---|---|
 | `read_defaults()` | Read defaults.txt configuration file |
 | `show_cosero_defaults()` | Display available configuration parameters |
-| `validate_cosero_defaults()` | Validate configuration parameters |
 
 ### Parameter Optimization
 
@@ -355,8 +432,9 @@ CoseRo/
 | `optimize_cosero_dds()` | Optimize parameters with DDS (fast, greedy search) |
 | `optimize_cosero_sce()` | Optimize parameters with SCE-UA (robust, population-based) |
 | `create_optimization_bounds()` | Define parameter bounds for optimization |
+| `load_parameter_bounds()` | Load bounds from bundled CSV (30 pre-defined parameters) |
 | `plot_cosero_optimization()` | Plot optimization convergence history |
-| `export_cosero_optimization()` | Export results to CSV (parameters, history, summary) |
+| `export_cosero_optimization()` | Export results to CSV and copy report to export folder |
 
 ### Sensitivity Analysis
 
@@ -378,8 +456,11 @@ CoseRo/
 
 | Function | Description |
 |---|---|
+| `download_geosphere_data()` | Download SPARTACUS/WINFORE annual NetCDF files from GeoSphere Austria |
 | `write_spartacus_precip()` | Convert SPARTACUS precipitation NetCDF to COSERO format |
 | `write_spartacus_temp()` | Convert SPARTACUS Tmin/Tmax NetCDF to COSERO Tmean format |
+| `write_winfore_et0()` | Convert WINFORE ET0 NetCDF to COSERO format |
+| `write_ehyd_qobs()` | Convert eHYD discharge CSV files to COSERO QOBS format |
 
 ## Common Use Cases
 

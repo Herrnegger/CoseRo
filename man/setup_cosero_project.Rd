@@ -9,7 +9,6 @@ setup_cosero_project(
   cosero_bin_source = "package",
   create_defaults = TRUE,
   defaults_settings = NULL,
-  template = "minimal",
   overwrite = FALSE,
   quiet = FALSE
 )
@@ -23,8 +22,6 @@ setup_cosero_project(
 \item{create_defaults}{Create a defaults.txt file? (default: TRUE)}
 
 \item{defaults_settings}{Optional list of settings for defaults.txt.}
-
-\item{template}{"minimal" (folders + binaries) or "example" (if available).}
 
 \item{overwrite}{Overwrite existing files? (default: FALSE)}
 

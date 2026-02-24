@@ -4,24 +4,18 @@
 \alias{show_required_files}
 \title{Show Required COSERO Input Files}
 \usage{
-show_required_files(show_details = TRUE)
-}
-\arguments{
-\item{show_details}{Logical. Show detailed format descriptions? (default: TRUE)}
+show_required_files()
 }
 \value{
-Invisibly returns a data frame with file information
+Invisibly returns a data frame with file information.
 }
 \description{
-Displays a checklist of required and optional input files for COSERO projects.
-Useful reference when setting up a new project or troubleshooting missing files.
+Displays a structured overview of required input files for COSERO projects,
+grouped by fixed-name control files and user-defined data files.
+Includes formatting requirements and configuration notes.
 }
 \examples{
 \dontrun{
-# Show file requirements
 show_required_files()
-
-# Brief list only
-show_required_files(show_details = FALSE)
 }
 }
