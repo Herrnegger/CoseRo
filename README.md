@@ -95,7 +95,7 @@ launch_cosero_app("D:/COSERO_example")
 
 ## Usage
 
-### 1. Interactive Shiny App (Recommended for Beginners)
+### 1. Interactive Shiny App
 
 ``` r
 library(CoseRo)
@@ -132,7 +132,7 @@ result <- run_cosero(
     STARTDATE = "2015 1 1 0 0",
     ENDDATE   = "2015 12 31 23 59",
     SPINUP    = 365,
-    OUTPUTTYPE = 3  # 1=basic, 2=+glacier/met, 3=+monitor/longterm
+    OUTPUTTYPE = 3  # 1=QSIM only, 2=ZRVIEW compatible, 3=full evaluation
   ),
   statevar_source = 1,  # 1 = cold start, 2 = warm start (statevar.dmp)
   read_outputs    = TRUE
@@ -358,11 +358,11 @@ write_ehyd_qobs(
 
 ### 3. Understanding COSERO Output Types
 
-**OUTPUTTYPE 1** — `COSERO.runoff`, `COSERO.prec`, `COSERO.plus`, `COSERO.plus1`, `statistics.txt`, `topology.txt`
+**OUTPUTTYPE 1 — QSIM only** — `COSERO.runoff`, `COSERO.prec`, `COSERO.plus`, `COSERO.plus1`, `statistics.txt`, `topology.txt`
 
-**OUTPUTTYPE 2** — All OUTPUTTYPE 1 files + `var_glac.txt`, `var_MET.txt`
+**OUTPUTTYPE 2 — ZRVIEW compatible** — All OUTPUTTYPE 1 files + `var_glac.txt`, `var_MET.txt`
 
-**OUTPUTTYPE 3** — All OUTPUTTYPE 2 files + `monitor.txt`, `monitor_sb*.txt`, `rundepth.txt`, `long-term_annual_means.txt`, `long-term_seasonal_means.txt`
+**OUTPUTTYPE 3 — Full evaluation** — All OUTPUTTYPE 2 files + `monitor.txt`, `monitor_sb*.txt`, `rundepth.txt`, `long-term_annual_means.txt`, `long-term_seasonal_means.txt`
 
 ## Package Structure
 

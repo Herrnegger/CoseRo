@@ -1194,7 +1194,9 @@ read_cosero_defaults_safe <- function(project_path) {
     OPTFILE = "opt.txt",
     OUTCONTROL = 1,
     ADDFLUXCONT = 0,
-    ADDFLUXFILE = "addflux.txt"
+    ADDFLUXFILE = "Qadd.txt",
+    ADDREGCONT = 0,
+    ADDREGFILE = "reg_para.txt"
   )
 
   # Try to read from defaults.txt if it exists

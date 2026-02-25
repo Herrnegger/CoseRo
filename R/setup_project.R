@@ -243,7 +243,7 @@ setup_cosero_project <- function(project_path,
     cat("  - para.txt (model parameters)\n")
     cat("  - Precipitation and temperature files\n")
     cat("  - Runoff observations (DATAFILE)\n")
-    cat("\nSee: show_required_files() for details\n")
+    cat("\nSee: show_required_files() for a list of all files\n")
     cat("Or use setup_cosero_project_example() for a working template\n")
   }
 
@@ -493,7 +493,8 @@ show_required_files <- function() {
     "Binary Mode:      Set ASCIIorBIN to 1 in MetDefaults.txt to use binary files.\n                  Recommended for larger modeling domains (significant speed increase).",
     "Missing Data:     In the runoff file (DATAFILE), use -0.01 or any value < 0\n                  for missing observations.",
     "ETP Options:      If ETPCONTROL is 0, the model uses the Thornthwaite method\n                  (requires TMMon parameters in PARAFILE).\n                  If ETPCONTROL is 1, an external ETPFILE (same format as Precip)\n                  must be provided.",
-    "External Inflow:  If ADDFLUXCONT is 1, an ADDFLUXFILE is required, starting\n                  with an NB-TONZ mapping header followed by the time series."
+    "External Inflow:  If ADDFLUXCONT is 1, an ADDFLUXFILE (e.g., Qadd.txt) is required,\n                  starting with an NB-TONZ mapping header followed by the time series.",
+    "Regression Inflow: If ADDREGCONT is 1, an ADDREGFILE (e.g., reg_para.txt) is required.\n                  Format: NB Intercept num_predictors Slope1 Pred1 [Slope2 Pred2 ...]\n                  Estimates inflow for a subbasin from up to 3 predictor subbasins."
   )
 
   for (note in notes) {

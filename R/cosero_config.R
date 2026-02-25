@@ -11,16 +11,33 @@ NULL
 
 cosero_defaults <- data.frame(
   parameter = c(
-    "PROJECTINFO", "DATAFILE", "PARAFILE", "IKL", "NCLASS", "OUTPUTTYPE",
-    "STARTDATE", "ENDDATE", "SPINUP", "SC_FLAG", "RUNOFFFILE", "STATSFILE",
-    "OPTFILE", "WRITERASTERS", "OUTCONTROL", "ADDFLUXCONT", "ADDFLUXFILE"
+    # Project identity
+    "PROJECTINFO",
+    # Input files
+    "DATAFILE", "PARAFILE",
+    # Model structure
+    "IKL", "NCLASS",
+    # Simulation period
+    "STARTDATE", "ENDDATE", "SPINUP",
+    # Output control
+    "OUTPUTTYPE", "SC_FLAG", "OUTCONTROL",
+    "RUNOFFFILE", "STATSFILE", "OPTFILE",
+    # Optional boundary inputs
+    "ADDFLUXCONT", "ADDFLUXFILE", "ADDREGCONT", "ADDREGFILE",
+    # Rarely changed
+    "WRITERASTERS"
   ),
   type = c(
-    "character", "character", "character", "integer", "integer", "integer",
-    "date", "date", "integer", "flag", "character", "character",
-    "character", "character", "integer", "flag", "character"
+    "character",
+    "character", "character",
+    "integer", "integer",
+    "date", "date", "integer",
+    "integer", "flag", "integer",
+    "character", "character", "character",
+    "flag", "character", "flag", "character",
+    "character"
   ),
-  required = rep(TRUE, 17),
+  required = rep(TRUE, 19),
   stringsAsFactors = FALSE
 )
 
@@ -221,7 +238,9 @@ get_default_cosero_values <- function() {
     OPTFILE     = "optprogress.txt",
     WRITERASTERS = "raster_write.txt",
     ADDFLUXCONT = 0,
-    ADDFLUXFILE = "addflux.txt"
+    ADDFLUXFILE = "Qadd.txt",
+    ADDREGCONT  = 0,
+    ADDREGFILE  = "reg_para.txt"
   )
 }
 
@@ -275,29 +294,40 @@ modify_defaults <- function(defaults_file, settings, quiet = FALSE) {
 #' @keywords internal
 create_default_defaults <- function(defaults_file, quiet = FALSE) {
   lines <- c(
-    "This file contains default settings for the COSERO Model.",
+    "This file contains default settings for COSERO",
     "",
+    # --- Project identity ---
     "PROJECTINFO (default project info, written into first line of each output file)",
     "COSERO_Project",
     "",
-    "DATAFILE (default input data file, read in from directory \"input\")",
+    # --- Input files ---
+    "DATAFILE (default input data file containing observed discharge, read in from directory \"input\")",
     "Qobs.txt",
-    "",
-    "BINDATAFILE (default input binary data file, read in from directory \"cdr/input\")",
-    "not_used.dat",
     "",
     "PARAFILE (default input parameter file, read in from directory \"input\")",
     "para_ini.txt",
     "",
+    # --- Model structure ---
     "IKL (# of snow classes)",
     "5",
     "",
     "NCLASS (# of Landuse classes)",
     "10",
     "",
+    # --- Simulation period ---
+    "STARTDATE (start date of simulation period in format yyyy mm dd hh mm)",
+    "2010 1 1 0 0",
+    "",
+    "ENDDATE (end date of simulation period in format yyyy mm dd hh mm)",
+    "2015 12 31 0 0",
+    "",
+    "SPINUP (length of spin-up period without evaluation [time-steps])",
+    "365",
+    "",
+    # --- Output control ---
     paste0(
       "OUTPUTTYPE (Sets the output evaluation extent:",
-      " 1 - only ZRVIEW; 2 - ZRVIEW and some Sums; 3 - full evaluation)"
+      " 1 - only QSIM; 2 - ZRVIEW compatible; 3 - full evaluation)"
     ),
     "1",
     "",
@@ -309,37 +339,52 @@ create_default_defaults <- function(defaults_file, quiet = FALSE) {
     "",
     paste0(
       "OUTCONTROL (if set to \"1\", zonal values will be written for every time step:",
-      " folder cdr/output is needed; very slow; outputtype must be \"3\";",
-      " otherwise set OUTCONTROL to \"0\")"
+      " folder cdr/output is needed; very slow; outputtype must be \"3\"; otherwise set to \"0\")"
     ),
     "0",
     "",
-    "STARTDATE (start date of simulation period in format yyyy mm dd hh mm)",
-    "2010 1 1 0 0",
-    "",
-    "ENDDATE (end date of simulation period in format yyyy mm dd hh mm)",
-    "2015 12 31 0 0",
-    "",
-    "SPINUP (length of spin-up period without evaluation [time-steps])",
-    "365",
-    "",
-    "RUNOFFFILE (default output file for runoff of single run, written to directory \"output\")",
+    "RUNOFFFILE (default output file for simulated runoff of a single run, written to directory \"output\")",
     "COSERO.runoff",
     "",
-    "STATSFILE (default output file for statistics of single run, written to directory \"output\")",
+    "STATSFILE (default output file for performance statistics of a single run, written to directory \"output\")",
     "statistics.txt",
     "",
     "OPTFILE (default output file for progress of optimization, written to directory \"output\")",
     "optprogress.txt",
     "",
-    "WRITERASTERS (write state/flux-rasters for the use in FEWS)",
-    "raster_write.txt",
-    "",
-    "ADDFLUXCONT ()",
+    # --- Optional boundary inputs ---
+    paste0(
+      "ADDFLUXCONT (if set to \"1\", file Qadd with additional inflow from outside the",
+      " study area is read in; otherwise set to \"0\")"
+    ),
     "0",
     "",
-    "ADDFLUXFILE ()",
-    "addflux.txt",
+    paste0(
+      "ADDFLUXFILE (additional inflow in m\u00b3/s added to specified subbasins/zones.",
+      " Starts with an NB-TONZ mapping header, followed by the time series.",
+      " Read in from directory \"input\")"
+    ),
+    "Qadd.txt",
+    "",
+    paste0(
+      "ADDREGCONT (if set to \"1\", file Qreg with regression parameters for estimating",
+      " inflow from outside the study area is read in; otherwise set to \"0\")"
+    ),
+    "0",
+    "",
+    paste0(
+      "ADDREGFILE (regression parameters (up to 3 predictors) to calculate subbasin",
+      " inflow based on discharge in other (predictor) subbasins.",
+      " Read in from directory \"input\")"
+    ),
+    "reg_para.txt",
+    "",
+    # --- Rarely changed ---
+    "WRITERASTERS (write state/flux-rasters for use in FEWS)",
+    "raster_write.txt",
+    "",
+    "BINDATAFILE (default input binary data file, read in from directory \"cdr/input\", not used)",
+    "not_used.dat",
     ""
   )
   writeLines(lines, defaults_file)

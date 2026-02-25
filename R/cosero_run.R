@@ -324,6 +324,11 @@ print_run_results <- function(output_data,
 #' @param defaults_settings Named list of configuration settings
 #'   to override in defaults.txt. Available settings include:
 #'   \itemize{
+#'     \item \strong{PROJECTINFO} - Project name/description
+#'     \item \strong{DATAFILE} - Observed discharge filename
+#'     \item \strong{PARAFILE} - Parameter filename
+#'     \item \strong{IKL} - Number of snow classes
+#'     \item \strong{NCLASS} - Number of landuse classes
 #'     \item \strong{STARTDATE} - Simulation start date as
 #'       "YYYY MM DD HH MM" (e.g., "2015 1 1 0 0")
 #'     \item \strong{ENDDATE} - Simulation end date as
@@ -331,21 +336,24 @@ print_run_results <- function(output_data,
 #'     \item \strong{SPINUP} - Spin-up period in timesteps
 #'       (must be >= 1)
 #'     \item \strong{OUTPUTTYPE} - Output detail level:
-#'       1 (basic), 2 (+glacier/met), 3 (+monitor/longterm)
-#'     \item \strong{PARAFILE} - Parameter filename
-#'     \item \strong{DATAFILE} - Input data filename
-#'     \item \strong{PROJECTINFO} - Project name/description
-#'     \item \strong{IKL} - Integer parameter
-#'     \item \strong{NCLASS} - Number of classes
-#'     \item \strong{SC_FLAG} - Snow cover flag (0 or 1)
+#'       1 (QSIM only), 2 (ZRVIEW compatible), 3 (full evaluation)
+#'     \item \strong{SC_FLAG} - Runoff depth area basis:
+#'       0 = local subbasin (EZFL_B), 1 = total upstream (EZFL_T)
+#'     \item \strong{OUTCONTROL} - Write zonal time series flag
+#'       (0 or 1; requires OUTPUTTYPE=3)
 #'     \item \strong{RUNOFFFILE} - Runoff output filename
 #'     \item \strong{STATSFILE} - Statistics output filename
-#'     \item \strong{OPTFILE} - Optimization output filename
-#'     \item \strong{WRITERASTERS} - Write raster outputs
-#'     \item \strong{OUTCONTROL} - Output control flag
-#'     \item \strong{ADDFLUXCONT} - Additional flux control
-#'       flag (0 or 1)
-#'     \item \strong{ADDFLUXFILE} - Additional flux filename
+#'     \item \strong{OPTFILE} - Optimization progress filename
+#'     \item \strong{ADDFLUXCONT} - Enable additional inflow from
+#'       outside the study area (0 or 1)
+#'     \item \strong{ADDFLUXFILE} - Additional inflow filename
+#'       (NB-TONZ header + time series, read from "input")
+#'     \item \strong{ADDREGCONT} - Enable regression-based inflow
+#'       estimation from predictor subbasins (0 or 1)
+#'     \item \strong{ADDREGFILE} - Regression parameter filename
+#'       (NB, intercept, num_predictors, slope/predictor pairs,
+#'       read from "input")
+#'     \item \strong{WRITERASTERS} - Raster output control filename
 #'   }
 #'   Use \code{\link{show_cosero_defaults}} to see all
 #'   available parameters.
