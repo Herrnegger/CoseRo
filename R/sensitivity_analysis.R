@@ -7,6 +7,7 @@
 #' @importFrom purrr map map_dbl map_dfr map2_df
 #' @importFrom tibble as_tibble
 #' @importFrom ggplot2 ggplot aes geom_bar geom_point geom_line geom_ribbon geom_hline
+#' @importFrom ggplot2 geom_histogram geom_density geom_vline annotate after_stat
 #' @importFrom ggplot2 coord_flip coord_cartesian facet_wrap
 #' @importFrom ggplot2 theme_minimal theme_bw theme element_text element_rect
 #' @importFrom ggplot2 labs ggtitle
@@ -23,7 +24,7 @@ NULL
 utils::globalVariables(c(
   "year_month", "year", "output", "parameter", "value", "date",
   "sensitivity", "original", "parameters", "std.error", "low.ci", "high.ci",
-  "q05", "q25", "q75", "q95", ".", "batch_position"
+  "q05", "q25", "q75", "q95", ".", "batch_position", "density"
 ))
 
 # Helper Functions #####
@@ -1649,11 +1650,49 @@ calculate_sobol_indices <- function(Y, sobol_samples, boot = TRUE, R = 100) {
 
 # 8 Visualization #####
 
-#' Plot Sobol Indices
+#' Plot Sobol Sensitivity Indices
 #'
-#' @param sobol_indices Result from calculate_sobol_indices()
-#' @param title Plot title
-#' @return ggplot object
+#' Creates a bar plot of first-order (Si) and total-order (Ti) Sobol sensitivity
+#' indices for each parameter. Uses the default plot method from the sensobol
+#' package with additional theme customization.
+#'
+#' @param sobol_indices Result from \code{\link{calculate_sobol_indices}}
+#' @param title Plot title. Default is "Sobol Sensitivity Indices"
+#'
+#' @return ggplot object showing Si and Ti indices per parameter
+#'
+#' @export
+#' @seealso \code{\link{calculate_sobol_indices}} to compute indices,
+#'   \code{\link{plot_dotty}} for parameter-output scatter plots,
+#'   \code{\link{plot_metric_distribution}} for metric histograms
+#' @examples
+#' \dontrun{
+#' # Full workflow: generate samples, run ensemble, compute indices, plot
+#' par_bounds <- load_parameter_bounds(parameters = c("BETA", "CTMAX", "M", "TAB1"))
+#' sobol_bounds <- create_sobol_bounds(par_bounds)
+#' sobol_samples <- generate_sobol_samples(sobol_bounds, n = 50)
+#'
+#' results <- run_cosero_ensemble_parallel(
+#'   project_path = "D:/COSERO_project",
+#'   parameter_sets = sobol_samples$parameter_sets,
+#'   par_bounds = par_bounds,
+#'   base_settings = list(SPINUP = 365, OUTPUTTYPE = 1),
+#'   n_cores = 4
+#' )
+#'
+#' nse <- extract_ensemble_metrics(results, subbasin_id = "001", metric = "NSE")
+#' sobol_ind <- calculate_sobol_indices(Y = nse, sobol_samples = sobol_samples)
+#'
+#' # Basic plot
+#' p <- plot_sobol(sobol_ind)
+#' print(p)
+#'
+#' # Custom title
+#' p <- plot_sobol(sobol_ind, title = "Parameter Sensitivity (NSE)")
+#'
+#' # Save to file
+#' ggplot2::ggsave("sobol_indices.png", p, width = 10, height = 6, dpi = 300)
+#' }
 plot_sobol <- function(sobol_indices, title = "Sobol Sensitivity Indices") {
   p <- plot(sobol_indices) +
     theme_bw() +
@@ -1665,13 +1704,55 @@ plot_sobol <- function(sobol_indices, title = "Sobol Sensitivity Indices") {
 
 #' Create Dotty Plots
 #'
-#' @param parameter_sets Parameter sets tibble
-#' @param Y Output vector
-#' @param y_label Y-axis label
-#' @param n_col Number of columns in facet
-#' @param reference_line Reference line value (optional)
-#' @param y_min Minimum Y-axis value (e.g., 0 to start from zero)
-#' @return ggplot object
+#' Creates faceted scatter plots showing the relationship between each parameter
+#' value and the model output (e.g., NSE, KGE). Each panel shows one parameter
+#' on the x-axis versus the output metric on the y-axis. Useful for identifying
+#' parameter sensitivity and equifinality.
+#'
+#' @param parameter_sets Parameter sets tibble or data frame (one column per
+#'   parameter, one row per ensemble run). Typically from
+#'   \code{sobol_samples$parameter_sets}
+#' @param Y Numeric vector of model outputs (same length as rows in parameter_sets)
+#' @param y_label Y-axis label. Default is "Output"
+#' @param n_col Number of columns in facet grid. Default is 3
+#' @param reference_line Optional numeric value to show as a horizontal red
+#'   dashed line (e.g., acceptable performance threshold)
+#' @param y_min Optional minimum Y-axis value (e.g., 0 to start from zero).
+#'   If NULL, ggplot2 auto-scales
+#'
+#' @return ggplot object with faceted scatter plots
+#'
+#' @details
+#' Points are colored dark blue with transparency (alpha = 0.6). Each facet
+#' has independent x-axis scaling (\code{scales = "free_x"}) since parameters
+#' have different ranges. A clear vertical spread of points for a parameter
+#' indicates low sensitivity; a structured pattern (e.g., funnel, trend)
+#' suggests the parameter has a strong influence on the output.
+#'
+#' @export
+#' @seealso \code{\link{plot_sobol}} for Sobol sensitivity bar plots,
+#'   \code{\link{plot_metric_distribution}} for metric histograms,
+#'   \code{\link{plot_ensemble_uncertainty}} for ensemble discharge visualization
+#' @examples
+#' \dontrun{
+#' # After running ensemble and extracting metrics
+#' nse <- extract_ensemble_metrics(results, subbasin_id = "001", metric = "NSE")
+#'
+#' # Basic dotty plot
+#' p <- plot_dotty(sobol_samples$parameter_sets, Y = nse, y_label = "NSE")
+#' print(p)
+#'
+#' # With reference line at NSE = 0.7 (behavioral threshold)
+#' p <- plot_dotty(sobol_samples$parameter_sets, Y = nse,
+#'                  y_label = "NSE", reference_line = 0.7)
+#'
+#' # Force y-axis to start at 0, use 4 columns
+#' p <- plot_dotty(sobol_samples$parameter_sets, Y = nse,
+#'                  y_label = "NSE", y_min = 0, n_col = 4)
+#'
+#' # Save to file
+#' ggplot2::ggsave("dotty_plots.png", p, width = 12, height = 10, dpi = 300)
+#' }
 plot_dotty <- function(parameter_sets, Y, y_label = "Output",
                        n_col = 3, reference_line = NULL, y_min = NULL) {
 
@@ -1709,32 +1790,47 @@ plot_dotty <- function(parameter_sets, Y, y_label = "Output",
 #' across multiple model runs. Works directly with output from
 #' run_cosero_ensemble() or run_cosero_ensemble_parallel().
 #'
+#' When \code{variable = "QSIM"} and \code{show_observed = TRUE} (default),
+#' the observed discharge (QOBS) is automatically extracted from the ensemble
+#' results and plotted as a black line. This can be overridden by providing
+#' a custom \code{observed} data frame.
+#'
 #' @param ensemble_output Output from run_cosero_ensemble_parallel() or
 #'   run_cosero_ensemble(), or a list of individual run results
 #' @param observed Optional data frame with observed data containing 'date'
-#'   and 'value' columns
+#'   and 'value' columns. If NULL and \code{show_observed = TRUE}, QOBS is
+#'   automatically extracted from the ensemble results (when available).
 #' @param subbasin_id Subbasin identifier (e.g., "0001"). Default is "0001"
 #' @param variable Variable to plot (e.g., "QSIM", "QOBS"). Default is "QSIM"
+#' @param show_observed Logical. If TRUE (default), show observed discharge.
+#'   When \code{observed = NULL} and \code{variable = "QSIM"}, QOBS is
+#'   automatically extracted from ensemble results.
 #'
 #' @return ggplot object showing median (blue line), 50% confidence interval
-#'   (dark gray ribbon), and 90% confidence interval (light gray ribbon)
+#'   (dark gray ribbon), 90% confidence interval (light gray ribbon),
+#'   and observed discharge (black line, if available)
 #'
 #' @export
+#' @seealso \code{\link{plot_metric_distribution}} for visualizing ensemble metric distributions
 #' @examples
 #' \dontrun{
 #' # After running ensemble
 #' results <- run_cosero_ensemble_parallel(...)
 #'
-#' # Plot uncertainty for subbasin 0001
+#' # Plot uncertainty with auto-extracted QOBS
 #' p <- plot_ensemble_uncertainty(results, subbasin_id = "0001")
 #' print(p)
 #'
-#' # With observed data
+#' # Without observed discharge
+#' p <- plot_ensemble_uncertainty(results, subbasin_id = "0001", show_observed = FALSE)
+#'
+#' # With custom observed data
 #' obs <- data.frame(date = dates, value = observed_discharge)
 #' p <- plot_ensemble_uncertainty(results, observed = obs, subbasin_id = "0001")
 #' }
 plot_ensemble_uncertainty <- function(ensemble_output, observed = NULL,
-                                      subbasin_id = "0001", variable = "QSIM") {
+                                      subbasin_id = "0001", variable = "QSIM",
+                                      show_observed = TRUE) {
 
   # Check if ensemble_output is the output from run_cosero_ensemble_parallel/run_cosero_ensemble
   if (!is.null(ensemble_output$results)) {
@@ -1750,6 +1846,7 @@ plot_ensemble_uncertainty <- function(ensemble_output, observed = NULL,
   timeseries_list <- vector("list", n_runs)
   dates <- NULL
   n_time <- NULL
+  qobs_data <- NULL  # Will hold observed discharge if auto-extracted
 
   for (i in 1:n_runs) {
     result <- results_list[[i]]
@@ -1765,7 +1862,7 @@ plot_ensemble_uncertainty <- function(ensemble_output, observed = NULL,
       if (col_name %in% colnames(runoff)) {
         timeseries_list[[i]] <- runoff[[col_name]]
 
-        # Get dates from first successful run
+        # Get dates and QOBS from first successful run
         if (is.null(dates)) {
           if ("date" %in% colnames(runoff)) {
             dates <- runoff$date
@@ -1774,6 +1871,17 @@ plot_ensemble_uncertainty <- function(ensemble_output, observed = NULL,
             dates <- as.Date(paste(runoff$yyyy, runoff$mm, runoff$dd, sep = "-"))
           }
           n_time <- length(dates)
+
+          # Auto-extract QOBS if showing observed and no custom observed data
+          if (show_observed && is.null(observed) && variable == "QSIM") {
+            qobs_col <- paste0("QOBS_", subbasin_id)
+            if (qobs_col %in% colnames(runoff)) {
+              qobs_values <- runoff[[qobs_col]]
+              # Replace -999 with NA (COSERO missing value code)
+              qobs_values[qobs_values == -999] <- NA
+              qobs_data <- data.frame(date = dates, value = qobs_values)
+            }
+          }
         }
       } else {
         warning(sprintf("Run %d: Column '%s' not found in runoff data", i, col_name))
@@ -1817,20 +1925,149 @@ plot_ensemble_uncertainty <- function(ensemble_output, observed = NULL,
   p <- ggplot(stats, aes(x = date)) +
     geom_ribbon(aes(ymin = q05, ymax = q95), fill = "gray80", alpha = 0.5) +
     geom_ribbon(aes(ymin = q25, ymax = q75), fill = "gray60", alpha = 0.5) +
-    geom_line(aes(y = median), color = "blue", linewidth = 1) +
+    geom_line(aes(y = median), color = "blue", linewidth = 0.8) +
     theme_bw() +
     labs(x = "Date",
          y = paste0(variable, " (Subbasin ", subbasin_id, ")"),
          title = paste0("Ensemble Uncertainty (", n_valid, "/", n_runs, " runs)"))
 
-  # Add observed data if provided
-  if (!is.null(observed)) {
-    if (is.data.frame(observed) && "date" %in% colnames(observed) && "value" %in% colnames(observed)) {
-      p <- p + geom_line(data = observed, aes(x = date, y = value),
-                        color = "black", linewidth = 1.2)
-    } else {
-      warning("Observed data must be a data frame with 'date' and 'value' columns")
+  # Add observed data
+  if (show_observed) {
+    if (!is.null(observed)) {
+      # Use user-provided observed data
+      if (is.data.frame(observed) && "date" %in% colnames(observed) && "value" %in% colnames(observed)) {
+        p <- p + geom_line(data = observed, aes(x = date, y = value),
+                          color = "black", linewidth = 0.6, alpha = 0.8)
+      } else {
+        warning("Observed data must be a data frame with 'date' and 'value' columns")
+      }
+    } else if (!is.null(qobs_data)) {
+      # Use auto-extracted QOBS from ensemble results
+      p <- p + geom_line(data = qobs_data, aes(x = date, y = value),
+                        color = "black", linewidth = 0.8, alpha = 0.8)
     }
+  }
+
+  return(p)
+}
+
+#' Plot Distribution of Performance Metrics
+#'
+#' Visualizes the distribution of a performance metric (e.g., NSE, KGE)
+#' across ensemble runs as a histogram with optional reference lines.
+#' The red dashed vertical line shows the median of the distribution.
+#'
+#' @param metric_values Numeric vector of metric values from
+#'   \code{\link{extract_ensemble_metrics}} or \code{\link{calculate_ensemble_metrics}}
+#' @param metric_name Name of the metric for axis labels (e.g., "NSE", "KGE").
+#'   Default is "Metric"
+#' @param reference_value Optional numeric value to show as a reference line
+#'   (e.g., baseline model performance). Shown as a blue dashed line.
+#' @param bins Number of histogram bins. Default is 30
+#' @param show_median Logical. If TRUE (default), show a red dashed vertical
+#'   line at the median of the distribution
+#' @param show_mean Logical. If TRUE, show a green dotted vertical line
+#'   at the mean of the distribution. Default is FALSE
+#'
+#' @return ggplot object showing histogram with density overlay and reference lines
+#'
+#' @details
+#' The plot includes:
+#' \itemize{
+#'   \item Gray histogram of metric values
+#'   \item Red dashed vertical line: median of the distribution
+#'   \item Green dotted vertical line: mean of the distribution (if \code{show_mean = TRUE})
+#'   \item Blue dashed vertical line: reference value (if provided)
+#' }
+#'
+#' @export
+#' @seealso \code{\link{extract_ensemble_metrics}} to extract pre-calculated metrics,
+#'   \code{\link{calculate_ensemble_metrics}} to calculate metrics from QSIM/QOBS,
+#'   \code{\link{plot_ensemble_uncertainty}} for ensemble discharge visualization
+#' @examples
+#' \dontrun{
+#' # After running ensemble
+#' results <- run_cosero_ensemble_parallel(...)
+#'
+#' # Extract NSE values
+#' nse <- extract_ensemble_metrics(results, subbasin_id = "001", metric = "NSE")
+#'
+#' # Plot distribution (red line = median)
+#' p <- plot_metric_distribution(nse, metric_name = "NSE")
+#' print(p)
+#'
+#' # With baseline reference and mean
+#' p <- plot_metric_distribution(nse, metric_name = "NSE",
+#'                                reference_value = 0.75,
+#'                                show_mean = TRUE)
+#' print(p)
+#'
+#' # Compare multiple metrics
+#' kge <- extract_ensemble_metrics(results, subbasin_id = "001", metric = "KGE")
+#' p1 <- plot_metric_distribution(nse, metric_name = "NSE")
+#' p2 <- plot_metric_distribution(kge, metric_name = "KGE")
+#' # patchwork::wrap_plots(p1, p2, ncol = 2)
+#' }
+plot_metric_distribution <- function(metric_values, metric_name = "Metric",
+                                      reference_value = NULL, bins = 30,
+                                      show_median = TRUE, show_mean = FALSE) {
+
+  # Remove NA values
+  valid_values <- metric_values[!is.na(metric_values)]
+  n_valid <- length(valid_values)
+  n_total <- length(metric_values)
+  n_na <- n_total - n_valid
+
+  if (n_valid == 0) {
+    stop("No valid (non-NA) metric values provided", call. = FALSE)
+  }
+
+  if (n_na > 0) {
+    message(sprintf("Note: %d of %d runs had NA metric values (excluded from plot)",
+                    n_na, n_total))
+  }
+
+  df <- data.frame(value = valid_values)
+
+  # Build subtitle with summary statistics
+  subtitle_parts <- sprintf("n = %d | range: [%.3f, %.3f]",
+                            n_valid, min(valid_values), max(valid_values))
+
+  # Create base plot
+  p <- ggplot(df, aes(x = value)) +
+    geom_histogram(aes(y = after_stat(density)), bins = bins,
+                   fill = "gray70", color = "gray40", alpha = 0.7) +
+    geom_density(color = "black", linewidth = 0.8) +
+    theme_bw() +
+    labs(x = metric_name,
+         y = "Density",
+         title = paste0("Distribution of ", metric_name, " Across Ensemble Runs"),
+         subtitle = subtitle_parts)
+
+  # Add median line (red dashed)
+  if (show_median) {
+    med_val <- median(valid_values)
+    p <- p + geom_vline(xintercept = med_val, color = "red",
+                        linetype = "dashed", linewidth = 1) +
+      annotate("text", x = med_val, y = Inf, label = sprintf("Median: %.3f", med_val),
+               color = "red", hjust = -0.1, vjust = 2, size = 3.5)
+  }
+
+  # Add mean line (green dotted)
+  if (show_mean) {
+    mean_val <- mean(valid_values)
+    p <- p + geom_vline(xintercept = mean_val, color = "darkgreen",
+                        linetype = "dotted", linewidth = 1) +
+      annotate("text", x = mean_val, y = Inf, label = sprintf("Mean: %.3f", mean_val),
+               color = "darkgreen", hjust = -0.1, vjust = 3.5, size = 3.5)
+  }
+
+  # Add reference line (blue dashed)
+  if (!is.null(reference_value)) {
+    p <- p + geom_vline(xintercept = reference_value, color = "blue",
+                        linetype = "dashed", linewidth = 1) +
+      annotate("text", x = reference_value, y = Inf, label = sprintf("Reference: %.3f", reference_value),
+               color = "blue", hjust = -0.1, vjust = 5, size = 3.5)
   }
 
   return(p)

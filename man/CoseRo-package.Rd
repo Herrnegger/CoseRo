@@ -56,7 +56,10 @@ The CoseRo R package provides an R interface for the COSERO hydrological model, 
 \item \code{\link{extract_ensemble_metrics}} - Extract metrics from ensemble statistics
 \item \code{\link{calculate_ensemble_metrics}} - Calculate metrics from ensemble output
 \item \code{\link{calculate_sobol_indices}} - Calculate sensitivity indices
-\item \code{\link{plot_sobol}} - Visualize sensitivity indices
+\item \code{\link{plot_sobol}} - Visualize Sobol sensitivity indices
+\item \code{\link{plot_dotty}} - Parameter-output scatter plots (dotty plots)
+\item \code{\link{plot_ensemble_uncertainty}} - Visualize ensemble discharge with observed data
+\item \code{\link{plot_metric_distribution}} - Visualize distribution of performance metrics
 }
 
 \strong{Parameter Optimization:}

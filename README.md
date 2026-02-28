@@ -257,9 +257,13 @@ ensemble_result <- run_cosero_ensemble_parallel(
 Y             <- extract_ensemble_metrics(ensemble_result, subbasin_id = "001", metric = "KGE")
 sobol_indices <- calculate_sobol_indices(Y, samples, boot = TRUE, R = 100)
 
-# 5. Visualize and export
+# 5. Visualize
 plot_sobol(sobol_indices)
-plot_dotty(samples$parameter_sets, Y, y_label = "KGE")
+plot_dotty(samples$parameter_sets, Y, y_label = "KGE", reference_line = 0.7)
+plot_metric_distribution(Y, metric_name = "KGE")
+plot_ensemble_uncertainty(ensemble_result, subbasin_id = "0001")  # QOBS shown automatically
+
+# 6. Export
 export_sensitivity_results("sensitivity_results", sobol_indices, samples$parameter_sets, Y)
 ```
 
@@ -449,7 +453,9 @@ CoseRo/
 | `calculate_ensemble_metrics()` | Calculate metrics from ensemble QSIM/QOBS |
 | `calculate_sobol_indices()` | Calculate Sobol sensitivity indices with bootstrap |
 | `plot_sobol()` | Visualize Sobol sensitivity indices |
-| `plot_dotty()` | Parameter scatter plots |
+| `plot_dotty()` | Parameter-output scatter plots (dotty plots) |
+| `plot_ensemble_uncertainty()` | Ensemble discharge uncertainty with observed data overlay |
+| `plot_metric_distribution()` | Distribution of performance metrics across ensemble runs |
 | `export_sensitivity_results()` | Export sensitivity results to files |
 
 ### Input Data Preprocessing

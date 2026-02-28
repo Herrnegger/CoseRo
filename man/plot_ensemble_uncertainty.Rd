@@ -8,7 +8,8 @@ plot_ensemble_uncertainty(
   ensemble_output,
   observed = NULL,
   subbasin_id = "0001",
-  variable = "QSIM"
+  variable = "QSIM",
+  show_observed = TRUE
 )
 }
 \arguments{
@@ -16,32 +17,50 @@ plot_ensemble_uncertainty(
 run_cosero_ensemble(), or a list of individual run results}
 
 \item{observed}{Optional data frame with observed data containing 'date'
-and 'value' columns}
+and 'value' columns. If NULL and \code{show_observed = TRUE}, QOBS is
+automatically extracted from the ensemble results (when available).}
 
 \item{subbasin_id}{Subbasin identifier (e.g., "0001"). Default is "0001"}
 
 \item{variable}{Variable to plot (e.g., "QSIM", "QOBS"). Default is "QSIM"}
+
+\item{show_observed}{Logical. If TRUE (default), show observed discharge.
+When \code{observed = NULL} and \code{variable = "QSIM"}, QOBS is
+automatically extracted from ensemble results.}
 }
 \value{
 ggplot object showing median (blue line), 50\% confidence interval
-(dark gray ribbon), and 90\% confidence interval (light gray ribbon)
+(dark gray ribbon), 90\% confidence interval (light gray ribbon),
+and observed discharge (black line, if available)
 }
 \description{
 Visualizes ensemble uncertainty by plotting median and quantile ranges
 across multiple model runs. Works directly with output from
 run_cosero_ensemble() or run_cosero_ensemble_parallel().
 }
+\details{
+When \code{variable = "QSIM"} and \code{show_observed = TRUE} (default),
+the observed discharge (QOBS) is automatically extracted from the ensemble
+results and plotted as a black line. This can be overridden by providing
+a custom \code{observed} data frame.
+}
 \examples{
 \dontrun{
 # After running ensemble
 results <- run_cosero_ensemble_parallel(...)
 
-# Plot uncertainty for subbasin 0001
+# Plot uncertainty with auto-extracted QOBS
 p <- plot_ensemble_uncertainty(results, subbasin_id = "0001")
 print(p)
 
-# With observed data
+# Without observed discharge
+p <- plot_ensemble_uncertainty(results, subbasin_id = "0001", show_observed = FALSE)
+
+# With custom observed data
 obs <- data.frame(date = dates, value = observed_discharge)
 p <- plot_ensemble_uncertainty(results, observed = obs, subbasin_id = "0001")
 }
+}
+\seealso{
+\code{\link{plot_metric_distribution}} for visualizing ensemble metric distributions
 }

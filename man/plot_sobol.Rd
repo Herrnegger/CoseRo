@@ -2,18 +2,54 @@
 % Please edit documentation in R/sensitivity_analysis.R
 \name{plot_sobol}
 \alias{plot_sobol}
-\title{Plot Sobol Indices}
+\title{Plot Sobol Sensitivity Indices}
 \usage{
 plot_sobol(sobol_indices, title = "Sobol Sensitivity Indices")
 }
 \arguments{
-\item{sobol_indices}{Result from calculate_sobol_indices()}
+\item{sobol_indices}{Result from \code{\link{calculate_sobol_indices}}}
 
-\item{title}{Plot title}
+\item{title}{Plot title. Default is "Sobol Sensitivity Indices"}
 }
 \value{
-ggplot object
+ggplot object showing Si and Ti indices per parameter
 }
 \description{
-Plot Sobol Indices
+Creates a bar plot of first-order (Si) and total-order (Ti) Sobol sensitivity
+indices for each parameter. Uses the default plot method from the sensobol
+package with additional theme customization.
+}
+\examples{
+\dontrun{
+# Full workflow: generate samples, run ensemble, compute indices, plot
+par_bounds <- load_parameter_bounds(parameters = c("BETA", "CTMAX", "M", "TAB1"))
+sobol_bounds <- create_sobol_bounds(par_bounds)
+sobol_samples <- generate_sobol_samples(sobol_bounds, n = 50)
+
+results <- run_cosero_ensemble_parallel(
+  project_path = "D:/COSERO_project",
+  parameter_sets = sobol_samples$parameter_sets,
+  par_bounds = par_bounds,
+  base_settings = list(SPINUP = 365, OUTPUTTYPE = 1),
+  n_cores = 4
+)
+
+nse <- extract_ensemble_metrics(results, subbasin_id = "001", metric = "NSE")
+sobol_ind <- calculate_sobol_indices(Y = nse, sobol_samples = sobol_samples)
+
+# Basic plot
+p <- plot_sobol(sobol_ind)
+print(p)
+
+# Custom title
+p <- plot_sobol(sobol_ind, title = "Parameter Sensitivity (NSE)")
+
+# Save to file
+ggplot2::ggsave("sobol_indices.png", p, width = 10, height = 6, dpi = 300)
+}
+}
+\seealso{
+\code{\link{calculate_sobol_indices}} to compute indices,
+\code{\link{plot_dotty}} for parameter-output scatter plots,
+\code{\link{plot_metric_distribution}} for metric histograms
 }

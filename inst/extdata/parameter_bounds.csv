@@ -14,11 +14,12 @@ INTMAX,Maximum interception storage capacity (mm),0.5,4,0,relchg,interception
 KBF,Recession constant base flow (h),2000,12000,3000,relchg,groundwater
 M,Soil storage capacity (mm),20,600,300,relchg,soil
 NVAR,Variance for distributing new snowfall,0.1,2.5,1.5,relchg,snow
-PCOR,Precipitation correction factor,0.9,1.5,1,relchg,precipitation
+PCOR,Precipitation correction factor,0.8,2,1,relchg,precipitation
 PWP,Permanent wilting point,0.03,0.12,0,relchg,soil
-RAINCOR,Rain correction factor,1.0,1.3,1,relchg,precipitation
+RAINCOR,Rain correction factor,0.8,2,1,relchg,precipitation
 RAINTRT,Transition temperature for pure rain (°C),1,4,3,abschg,snow
 SNOWTRT,Transition temperature for pure snow (°C),-2.5,2,0,abschg,snow
+SNOWCOR,Snow correction factor,0.8,2,1,relchg,precipitation
 TAB1,Recession constant surface flow (h),1,50,50,relchg,runoff
 TAB2,Recession constant inter flow (h),25,300,500,relchg,runoff
 TAB3,Recession constant base flow (h),500,5000,5000,relchg,groundwater
@@ -28,4 +29,4 @@ TCOR,Temperature correction constant (°C),0,3,0,abschg,temperature
 THRT,Threshold temperature for snow melt (°C),0,1,0,abschg,snow
 TVS1,Recession constant percolation from surface flow (h),5,150,100,relchg,runoff
 TVS2,Recession constant percolation from inter flow (h),45,1500,1000,relchg,runoff
-WATERBODY,Open water body flag (0/1),0,1,0,relchg,other
+,,,1,0,relchg,

@@ -76,3 +76,8 @@ CLAUDE.md
 .claude/settings.local.json
 .claude/settings.local.json
 .claude/settings.json
+.agent-ops/generate-map.js
+.agent-ops/INSTRUCTIONS.md
+.agent-ops/session-handoff.md
+.gitignore
+.agent-ops/PROJECT_MAP.md

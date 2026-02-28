@@ -4,12 +4,23 @@
 \alias{get_zones_for_subbasins}
 \title{Get Zones for Subbasins}
 \usage{
-get_zones_for_subbasins(cosero_path, subbasins = "all", quiet = FALSE)
+get_zones_for_subbasins(
+  cosero_path,
+  subbasins = "all",
+  defaults_settings = NULL,
+  quiet = FALSE
+)
 }
 \arguments{
 \item{cosero_path}{COSERO project path}
 
 \item{subbasins}{Subbasin IDs (character or numeric), or "all" for all subbasins}
+
+\item{defaults_settings}{Optional list of COSERO settings passed by the
+optimizer. If it contains \code{PARAFILE}, that filename takes precedence
+over what is currently in defaults.txt (since defaults.txt is only updated
+later by \code{run_cosero()}). If NULL, the filename is read from
+defaults.txt, falling back to "para.txt".}
 
 \item{quiet}{Suppress messages}
 }
@@ -17,6 +28,11 @@ get_zones_for_subbasins(cosero_path, subbasins = "all", quiet = FALSE)
 List with zones (integer vector) and subbasins (character vector)
 }
 \description{
-Returns zone IDs belonging to specified subbasins using topology.txt.
+Returns zone IDs belonging to specified subbasins by reading the NB_ and NZ_
+columns from the parameter file (e.g., para.txt). The parameter filename is
+determined from defaults.txt (PARAFILE entry). If \code{defaults_settings}
+contains a \code{PARAFILE} override, that takes precedence because
+defaults.txt has not yet been updated at the time this function is called
+during optimization setup.
 }
 \keyword{internal}

@@ -18,7 +18,7 @@ end_date   <- "2017 12 31 0 0"
 spinup     <- 365              # Days to exclude from metric calculation
 
 # ── Target subbasins ───────────────────────────────────────────────────────────
-# Zones are mapped automatically from topology.txt (requires prior COSERO run)
+# Zones are mapped automatically from the parameter file (NB_ and NZ_ columns)
 target_subbasins  <- c("001", "002", "003")
 subbasin_weights  <- c(0.2, 0.2, 0.6)  # Used only with aggregation = "weighted"
 
@@ -42,8 +42,8 @@ print(par_bounds[, c("parameter", "description", "min", "default", "max", "modif
 # optimize_cosero_sce(
 #   cosero_path        Path to project directory
 #   par_bounds         Parameter bounds data frame (from load_parameter_bounds or create_optimization_bounds)
-#   target_subbasins   Subbasin ID(s) to evaluate; zones mapped via topology.txt
-#   zones_to_modify    Override automatic zone mapping (NULL = auto from topology.txt)
+#   target_subbasins   Subbasin ID(s) to evaluate; zones mapped via parameter file (NB_/NZ_)
+#   zones_to_modify    Override automatic zone mapping (NULL = auto from parameter file)
 #   metric             "NSE", "KGE", "RMSE", "PBIAS", or c("NSE","KGE") for multi-objective
 #   metric_weights     Weights for multi-objective (e.g. c(0.6, 0.4)); must sum to 1
 #   subbasin_weights   Per-subbasin weights; only used with aggregation = "weighted"
@@ -103,7 +103,7 @@ result_sce <- optimize_cosero_sce(
   cosero_path       = cosero_path,
   par_bounds        = par_bounds,
   target_subbasins  = target_subbasins,
-  zones_to_modify   = NULL,          # NULL = auto-mapped from topology.txt
+  zones_to_modify   = NULL,          # NULL = auto-mapped from parameter file
   metric            = "NSE",         # Single objective
   metric_weights    = NULL,          # Only needed for multi-objective
   subbasin_weights  = subbasin_weights,
