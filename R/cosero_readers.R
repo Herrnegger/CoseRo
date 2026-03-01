@@ -924,6 +924,14 @@ read_var_glac <- function(output_dir, quiet = FALSE) {
   return(df)
 }
 
+#' Read var_MET.txt from output directory (OUTPUTTYPE >= 2)
+#'
+#' Reads meteorological variables (temperature) per subbasin.
+#'
+#' @param output_dir Path to COSERO output directory
+#' @param quiet Suppress messages
+#' @return Data frame or NULL if file not found
+#' @export
 read_var_met <- function(output_dir, quiet = FALSE) {
   file <- file.path(output_dir, "var_MET.txt")
   if (!file.exists(file)) return(NULL)

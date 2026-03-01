@@ -1096,42 +1096,41 @@ plot_seasonality_water_balance <- function(monthly_data, selected_vars = NULL) {
 # 4. Export Functions ####
 
 #' Export plot as PNG
+#'
+#' Exports a plotly object to a PNG file using kaleido (via reticulate) or webshot as fallback.
+#'
 #' @param plot Plotly object
 #' @param filename Output filename
 #' @param width Width in pixels
 #' @param height Height in pixels
-#' @return Logical indicating success
+#' @return Invisible TRUE on success, FALSE on failure
 #' @export
 export_plot_png <- function(plot, filename, width = 1200, height = 400) {
+
+  # Primary: plotly::save_image (uses kaleido via reticulate)
   tryCatch({
-    # Try kaleido first (preferred method for plotly)
-    if (requireNamespace("kaleido", quietly = TRUE)) {
-      plotly::save_image(plot, filename, width = width, height = height)
-      return(TRUE)
-    }
+    plotly::save_image(plot, file = filename, width = width, height = height)
+    return(invisible(TRUE))
+  }, error = function(e) {
+    message("plotly::save_image failed: ", e$message)
+  })
 
-    # Fallback to webshot (requires webshot package and phantomjs)
+  # Fallback: webshot
+  tryCatch({
     if (requireNamespace("webshot", quietly = TRUE)) {
-      # Use temporary directory to avoid permission issues
-      temp_dir <- tempdir()
-      temp_html <- file.path(temp_dir, paste0("temp_", Sys.getpid(), ".html"))
-
+      temp_html <- file.path(tempdir(), paste0("temp_", Sys.getpid(), ".html"))
+      on.exit(if (file.exists(temp_html)) file.remove(temp_html), add = TRUE)
       htmlwidgets::saveWidget(plot, temp_html, selfcontained = TRUE)
       webshot::webshot(temp_html, filename, vwidth = width, vheight = height)
-      if (file.exists(temp_html)) file.remove(temp_html)
-
-      return(TRUE)
+      return(invisible(TRUE))
     }
-
-    # If none of the above work, throw an informative error
-    stop("PNG export requires: kaleido package (recommended) or webshot + phantomjs.\n",
-         "Install with: install.packages('kaleido')", call. = FALSE)
-
   }, error = function(e) {
-    warning("Could not export PNG: ", e$message,
-            "\nPlease install kaleido: install.packages('kaleido')")
-    return(FALSE)
+    message("webshot failed: ", e$message)
   })
+
+  warning("Could not export PNG. Install kaleido: reticulate::py_install('kaleido')",
+          call. = FALSE)
+  return(invisible(FALSE))
 }
 
 # COSERO Run Configuration Helpers ####

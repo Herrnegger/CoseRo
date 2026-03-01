@@ -16,8 +16,8 @@ export_plot_png(plot, filename, width = 1200, height = 400)
 \item{height}{Height in pixels}
 }
 \value{
-Logical indicating success
+Invisible TRUE on success, FALSE on failure
 }
 \description{
-Export plot as PNG
+Exports a plotly object to a PNG file using kaleido (via reticulate) or webshot as fallback.
 }
