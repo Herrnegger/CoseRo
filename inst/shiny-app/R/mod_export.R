@@ -78,7 +78,7 @@ export_ui <- function(id) {
       col_widths = c(6, 6),
 
       card(
-        card_header("Export Data (CSV)", class = "bg-light py-1"),
+        card_header("Export Data (CSV)", class = "py-1"),
         card_body(
           class = "p-3",
           div(class = "d-grid gap-2",
@@ -97,7 +97,7 @@ export_ui <- function(id) {
       ),
 
       card(
-        card_header("Export Plots (PNG)", class = "bg-light py-1"),
+        card_header("Export Plots (PNG)", class = "py-1"),
         card_body(
           class = "p-3",
           div(class = "d-grid gap-2",

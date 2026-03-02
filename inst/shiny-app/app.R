@@ -50,12 +50,6 @@ app_theme <- bs_theme(
   heading_font = font_google("Raleway", wght = c(400, 500)),
   code_font = font_google("Fira Code"),
   font_scale = 0.95,
-  bg = "#f8f9fa",
-  fg = "#212529",
-  "body-bg" = "#f8f9fa",
-  "card-border-color" = "#e9ecef",
-  "card-cap-bg" = "#f8f9fa",
-  "well-bg" = "#f8f9fa",
   "nav-tabs-link-active-color" = "#1e3d53"
 )
 

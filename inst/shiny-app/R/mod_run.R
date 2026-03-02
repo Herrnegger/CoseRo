@@ -37,7 +37,10 @@ run_ui <- function(id) {
       shinyDirButton(ns("project_dir_btn"), "Select Project Folder",
                      "Select COSERO project directory",
                      icon = icon("folder-open"),
-                     class = "btn-primary btn-sm w-100 mb-2"),
+                     class = "btn-primary btn-sm w-100 mb-1"),
+      textInput(ns("project_dir_manual"), NULL,
+                placeholder = "Or paste path here\u2026",
+                width = "100%"),
 
       uiOutput(ns("project_status_ui")),
 
@@ -111,7 +114,7 @@ run_ui <- function(id) {
           gap = "1rem",
 
           card(
-            card_header("Time Period", class = "py-1 bg-light"),
+            card_header("Time Period", class = "py-1"),
             card_body(
               class = "p-2",
               div(class = "time-period-grid",
@@ -152,7 +155,7 @@ run_ui <- function(id) {
           ),
 
           card(
-            card_header("Output Control", class = "py-1 bg-light"),
+            card_header("Output Control", class = "py-1"),
             card_body(
               class = "p-2",
               selectInput(ns("output_type"), "Output Type (OUTPUTTYPE)", width = "100%",
@@ -185,7 +188,7 @@ run_ui <- function(id) {
           gap = "1rem",
 
           card(
-            card_header("Input Files", class = "py-1 bg-light"),
+            card_header("Input Files", class = "py-1"),
             card_body(
               class = "p-2",
 
@@ -222,7 +225,7 @@ run_ui <- function(id) {
           ),
 
           card(
-            card_header("Output Files", class = "py-1 bg-light"),
+            card_header("Output Files", class = "py-1"),
             card_body(
               class = "p-2",
               textInput(ns("runofffile"), "Runoff Output (RUNOFFFILE)",
@@ -247,7 +250,7 @@ run_ui <- function(id) {
           gap = "1rem",
 
           card(
-            card_header("Model Structure", class = "py-1 bg-light"),
+            card_header("Model Structure", class = "py-1"),
             card_body(
               class = "p-2",
               layout_column_wrap(
@@ -261,7 +264,7 @@ run_ui <- function(id) {
           ),
 
           card(
-            card_header("Other", class = "py-1 bg-light"),
+            card_header("Other", class = "py-1"),
             card_body(
               class = "p-2",
               textInput(ns("project_info"), "Project Description (PROJECTINFO)",
@@ -279,7 +282,7 @@ run_ui <- function(id) {
           ),
 
           card(
-            card_header("Boundary Conditions", class = "py-1 bg-light"),
+            card_header("Boundary Conditions", class = "py-1"),
             card_body(
               class = "p-2",
               div(class = "mb-2",
@@ -307,15 +310,103 @@ run_ui <- function(id) {
         )
       ),
 
-      # ── Tab 4: Parameter Table ──────────────────────────────────────
+      # ── Tab 4: Parameters (View + Modify) ─────────────────────────
       nav_panel(
         title = "Parameters",
         icon = icon("table"),
-        card(
-          card_body(
-            class = "p-2",
-            uiOutput(ns("param_table_info")),
-            DT::DTOutput(ns("param_table"), height = "auto")
+
+        navset_card_underline(
+          id = ns("param_subtabs"),
+
+          # ── Sub-tab: View All ───────────────────────────────────────
+          nav_panel(
+            title = "View All",
+            icon = icon("eye"),
+            card_body(
+              class = "p-2",
+              uiOutput(ns("param_table_info")),
+              DT::DTOutput(ns("param_table"), height = "auto")
+            )
+          ),
+
+          # ── Sub-tab: Model Structure ──────────────────────────────────
+          nav_panel(
+            title = "Model Structure",
+            icon = icon("diagram-project"),
+            card_body(
+              class = "p-2 text-center",
+              tags$p(class = "text-muted small mb-2",
+                     "Conceptual structure of the COSERO hydrological model.",
+                     "Parameter names correspond to those in the Modify tab."),
+              tags$img(src = "COSERO_Structure_1.png",
+                       alt = "COSERO Model Structure",
+                       style = "max-width: 100%; height: auto; border: 1px solid var(--bs-border-color); border-radius: 4px;")
+            )
+          ),
+
+          # ── Sub-tab: Modify ─────────────────────────────────────────
+          nav_panel(
+            title = "Modify",
+            icon = icon("pen-to-square"),
+            card_body(
+              class = "p-2",
+
+              # Parameter + subbasin selectors
+              layout_column_wrap(
+                width = 1/2, gap = "0.5rem",
+                div(
+                  tags$label("Parameters to Modify",
+                             class = "form-label small fw-bold mb-1"),
+                  selectizeInput(ns("mod_param_select"), NULL,
+                                 choices = NULL, multiple = TRUE, width = "100%",
+                                 options = list(
+                                   placeholder = "Choose parameters\u2026",
+                                   plugins = list("remove_button")
+                                 ))
+                ),
+                div(
+                  tags$label("Target Subbasins",
+                             class = "form-label small fw-bold mb-1"),
+                  selectizeInput(ns("mod_subbasin_select"), NULL,
+                                 choices = NULL, multiple = TRUE, width = "100%",
+                                 options = list(
+                                   placeholder = "All subbasins (default)",
+                                   plugins = list("remove_button")
+                                 )),
+                  tags$p(class = "text-muted small mb-0",
+                         "Leave empty to modify all zones.")
+                )
+              ),
+
+              # Current values + target inputs (dynamic table)
+              uiOutput(ns("mod_param_table_ui")),
+
+              tags$hr(class = "my-2"),
+
+              # Save controls
+              layout_column_wrap(
+                width = NULL, gap = "0.5rem",
+                style = css(grid_template_columns = "1fr auto"),
+                textInput(ns("mod_save_filename"), "Save As",
+                          placeholder = "para_modified.txt", width = "100%"),
+                div(style = "padding-top: 1.7rem;",
+                    checkboxInput(ns("mod_set_active"), "Set as active PARAFILE",
+                                  value = TRUE, width = "auto"))
+              ),
+
+              div(
+                class = "d-flex gap-2 mt-2",
+                actionButton(ns("mod_save_btn"), "Save Parameter File",
+                             icon = icon("save"), class = "btn-primary btn-sm"),
+                actionButton(ns("mod_save_run_btn"), "Save & Run",
+                             icon = icon("play"), class = "btn-success btn-sm"),
+                actionButton(ns("mod_reset_btn"), "Reset to Defaults",
+                             icon = icon("rotate-left"),
+                             class = "btn-outline-secondary btn-sm")
+              ),
+
+              uiOutput(ns("mod_save_status_ui"))
+            )
           )
         )
       ),
@@ -342,7 +433,8 @@ run_server <- function(id, shared) {
     rv <- reactiveValues(
       params          = NULL,   # Parameter file data (data.frame)
       run_in_progress = FALSE,
-      run_result      = NULL
+      run_result      = NULL,
+      trigger_run     = 0       # Increment to programmatically trigger a run
     )
 
     # ── File browser setup ────────────────────────────────────────────────
@@ -363,6 +455,26 @@ run_server <- function(id, shared) {
           shared$project_dir <- as.character(dir_path)
           shared$output_dir  <- normalizePath(
             file.path(dir_path, "output"), winslash = "/", mustWork = FALSE
+          )
+          updateTextInput(session, "project_dir_manual", value = shared$project_dir)
+        }
+      }
+    })
+
+    # Manual path entry — normalize slashes and validate
+    observeEvent(input$project_dir_manual, {
+      raw <- trimws(input$project_dir_manual)
+      if (is.null(raw) || !nzchar(raw)) return()
+      # Strip surrounding quotes if pasted from file explorer
+      raw <- gsub('^["\']|["\']$', '', raw)
+      # Normalize slashes (accept both / and \)
+      clean <- normalizePath(raw, winslash = "/", mustWork = FALSE)
+      if (dir.exists(clean)) {
+        # Only update if different to avoid infinite loop
+        if (is.null(shared$project_dir) || shared$project_dir != clean) {
+          shared$project_dir <- clean
+          shared$output_dir  <- normalizePath(
+            file.path(clean, "output"), winslash = "/", mustWork = FALSE
           )
         }
       }
@@ -595,6 +707,488 @@ run_server <- function(id, shared) {
       )
     }, server = TRUE)
 
+    # ── Modify Parameters ─────────────────────────────────────────────────
+
+    # Parameters with 12 monthly variants in the parameter file
+    MONTHLY_PARAMS <- c("TCOR", "PCOR", "TMMON", "INTMAX", "ETVEGCOR",
+                        "DAYSDRY", "DAYSWET", "ETSYSCOR")
+
+    # Load parameter_bounds.csv choices (grouped by category)
+    observe({
+      bounds <- tryCatch(load_parameter_bounds(), error = function(e) NULL)
+      if (is.null(bounds)) return()
+      # Build grouped choices: list(category = c(param1, param2, ...))
+      cats <- split(bounds$parameter, bounds$category)
+      grouped <- lapply(cats, function(params) setNames(params, params))
+      updateSelectizeInput(session, "mod_param_select", choices = grouped)
+    })
+
+    # Populate subbasin selector from parameter file (preserve current selection)
+    observe({
+      req(rv$params)
+      if ("NB_" %in% colnames(rv$params)) {
+        sbs <- sort(unique(as.character(rv$params[["NB_"]])))
+        choices <- setNames(sbs, paste0("Subbasin ", sbs))
+        # Keep current selection if still valid
+        current <- isolate(input$mod_subbasin_select)
+        keep <- if (!is.null(current)) intersect(current, sbs) else character(0)
+        updateSelectizeInput(session, "mod_subbasin_select",
+                             choices = choices,
+                             selected = if (length(keep) > 0) keep else character(0))
+      }
+    })
+
+    # Reactive: current spatial means for selected parameters (respecting subbasin filter)
+    # For monthly parameters (e.g., PCOR → PCor1_..PCor12_), computes mean across
+    # all 12 months × zones to give a representative single value.
+    mod_current_means <- reactive({
+      req(shared$project_dir, rv$params)
+      selected <- input$mod_param_select
+      if (is.null(selected) || length(selected) == 0) return(NULL)
+
+      par_file <- file.path(shared$project_dir, "input",
+                            input$parafile %||% "para.txt")
+      if (!file.exists(par_file)) return(NULL)
+
+      tryCatch({
+        # Read full parameter data for column lookups
+        full_data <- read_cosero_parameters(par_file, skip_lines = 1, quiet = TRUE)
+
+        # Determine zone mask from subbasin filter
+        target_sbs <- input$mod_subbasin_select
+        if (!is.null(target_sbs) && length(target_sbs) > 0 &&
+            "NB_" %in% colnames(full_data)) {
+          zone_mask <- full_data$NB_ %in% target_sbs
+        } else {
+          zone_mask <- rep(TRUE, nrow(full_data))
+        }
+
+        # Calculate spatial means, handling monthly params specially
+        means <- sapply(selected, function(p) {
+          is_monthly <- toupper(p) %in% MONTHLY_PARAMS
+          if (is_monthly) {
+            # Get all 12 monthly columns
+            month_cols <- find_parameter_column(p, colnames(full_data), return_all = TRUE)
+            if (length(month_cols) == 0) return(NA_real_)
+            # Mean across all months × zones
+            all_vals <- unlist(full_data[zone_mask, month_cols, drop = FALSE])
+            round(mean(all_vals, na.rm = TRUE), 4)
+          } else {
+            col <- find_parameter_column(p, colnames(full_data), return_all = FALSE)
+            if (length(col) == 0) return(NA_real_)
+            round(mean(full_data[zone_mask, col], na.rm = TRUE), 4)
+          }
+        })
+        setNames(means, selected)
+      }, error = function(e) NULL)
+    })
+
+    # Reactive: per-month spatial means for monthly params (for tooltip/detail)
+    mod_monthly_means <- reactive({
+      req(shared$project_dir, rv$params)
+      selected <- input$mod_param_select
+      if (is.null(selected) || length(selected) == 0) return(NULL)
+
+      par_file <- file.path(shared$project_dir, "input",
+                            input$parafile %||% "para.txt")
+      if (!file.exists(par_file)) return(NULL)
+
+      tryCatch({
+        full_data <- read_cosero_parameters(par_file, skip_lines = 1, quiet = TRUE)
+
+        target_sbs <- input$mod_subbasin_select
+        if (!is.null(target_sbs) && length(target_sbs) > 0 &&
+            "NB_" %in% colnames(full_data)) {
+          zone_mask <- full_data$NB_ %in% target_sbs
+        } else {
+          zone_mask <- rep(TRUE, nrow(full_data))
+        }
+
+        monthly_selected <- selected[toupper(selected) %in% MONTHLY_PARAMS]
+        if (length(monthly_selected) == 0) return(NULL)
+
+        result <- lapply(monthly_selected, function(p) {
+          month_cols <- find_parameter_column(p, colnames(full_data), return_all = TRUE)
+          if (length(month_cols) == 0) return(NULL)
+          sapply(month_cols, function(mc) round(mean(full_data[zone_mask, mc], na.rm = TRUE), 3))
+        })
+        setNames(result, monthly_selected)
+      }, error = function(e) NULL)
+    })
+
+    # Reactive: bounds for selected parameters
+    mod_bounds <- reactive({
+      selected <- input$mod_param_select
+      if (is.null(selected) || length(selected) == 0) return(NULL)
+      tryCatch(
+        load_parameter_bounds(parameters = selected),
+        error = function(e) NULL
+      )
+    })
+
+    # Dynamic UI: table of parameters with current mean + editable target
+    output$mod_param_table_ui <- renderUI({
+      selected <- input$mod_param_select
+      if (is.null(selected) || length(selected) == 0) {
+        return(tags$p(class = "text-muted small mt-2",
+                      icon("info-circle"),
+                      " Select parameters above to modify their spatial-mean targets."))
+      }
+
+      means <- mod_current_means()
+      bounds <- mod_bounds()
+      if (is.null(means) || is.null(bounds)) {
+        return(tags$p(class = "text-muted small", "Loading parameter data\u2026"))
+      }
+
+      # Subbasin scope label
+      target_sbs <- input$mod_subbasin_select
+      scope_label <- if (is.null(target_sbs) || length(target_sbs) == 0) {
+        "all zones"
+      } else {
+        paste0("subbasin ", paste(target_sbs, collapse = ", "))
+      }
+
+      # Per-month detail for monthly params
+      month_means <- mod_monthly_means()
+
+      MONTH_ABBR <- c("Jan","Feb","Mar","Apr","May","Jun",
+                      "Jul","Aug","Sep","Oct","Nov","Dec")
+
+      # Build table rows
+      rows <- lapply(selected, function(p) {
+        b <- bounds[bounds$parameter == p, ]
+        cur <- if (p %in% names(means)) means[[p]] else NA
+        mod_type <- if (nrow(b) > 0) b$modification_type[1] else "relchg"
+        p_min <- if (nrow(b) > 0) b$min[1] else NA
+        p_max <- if (nrow(b) > 0) b$max[1] else NA
+        desc <- if (nrow(b) > 0 && "description" %in% colnames(b)) b$description[1] else ""
+        badge_class <- if (mod_type == "relchg") "bg-info" else "bg-warning"
+        is_monthly <- toupper(p) %in% MONTHLY_PARAMS
+
+        # Per-month toggle state (FALSE on first render, preserved across re-renders)
+        per_month_on <- isTRUE(input[[paste0("mod_permonth_", p)]])
+
+        # Per-month spatial means
+        mv <- NULL
+        if (is_monthly && !is.null(month_means) && p %in% names(month_means)) {
+          mv <- month_means[[p]]
+        }
+
+        # Monthly detail string for compact display
+        monthly_detail <- NULL
+        if (is_monthly && !is.null(mv) && length(mv) > 0 && !per_month_on) {
+          monthly_detail <- paste(
+            paste0(MONTH_ABBR[seq_along(mv)], ":", format(mv, nsmall = 2)),
+            collapse = "  "
+          )
+        }
+
+        # Main row
+        main_row <- tags$tr(
+          tags$td(
+            tags$strong(p),
+            tags$span(class = paste("badge", badge_class, "ms-1"),
+                      style = "font-size: 0.65rem;", mod_type),
+            if (is_monthly) tags$span(class = "badge bg-secondary text-white ms-1",
+                                       style = "font-size: 0.65rem;", "\u00d712 months"),
+            if (is_monthly) tags$a(
+              href = "#",
+              class = paste0("badge ms-1 ",
+                             if (per_month_on) "bg-primary text-white"
+                             else "border text-secondary"),
+              style = "font-size: 0.65rem; text-decoration: none; cursor: pointer;",
+              onclick = sprintf(
+                "Shiny.setInputValue('%s', !%s, {priority: 'event'}); return false;",
+                ns(paste0("mod_permonth_", p)),
+                tolower(as.character(per_month_on))
+              ),
+              icon(if (per_month_on) "compress" else "expand"),
+              if (per_month_on) " Uniform" else " Per month"
+            ),
+            if (nzchar(desc)) tags$br(tags$span(class = "text-muted",
+                                                 style = "font-size: 0.72rem;", desc)),
+            if (!is.null(monthly_detail))
+              tags$br(tags$span(class = "text-muted",
+                                style = "font-size: 0.68rem; font-family: monospace;",
+                                monthly_detail))
+          ),
+          tags$td(style = "text-align: right; vertical-align: middle;",
+                  tags$code(format(cur, nsmall = 2))),
+          tags$td(style = "vertical-align: middle;",
+                  if (!per_month_on)
+                    numericInput(ns(paste0("mod_target_", p)), NULL,
+                                 value = cur, min = p_min, max = p_max,
+                                 step = if (!is.na(p_max) && !is.na(p_min))
+                                   round((p_max - p_min) / 50, 4) else 0.1,
+                                 width = "100%")
+                  else
+                    tags$span(class = "text-muted small", "\u2190 see below")
+          ),
+          tags$td(style = "text-align: center; vertical-align: middle; font-size: 0.75rem;",
+                  if (!is.na(p_min)) paste0("[", p_min, ", ", p_max, "]") else "\u2014")
+        )
+
+        # Expanded per-month row (4 columns × 3 rows grid)
+        month_row <- NULL
+        if (is_monthly && per_month_on && !is.null(mv) && length(mv) > 0) {
+          step_val <- if (!is.na(p_max) && !is.na(p_min))
+            round((p_max - p_min) / 50, 4) else 0.1
+
+          month_inputs <- lapply(seq_along(mv), function(m) {
+            tags$div(
+              style = "min-width: 0;",
+              tags$label(class = "form-label mb-0",
+                         style = "font-size: 0.7rem; color: var(--bs-secondary-color);",
+                         MONTH_ABBR[m],
+                         tags$span(style = "font-family: monospace; font-size: 0.65rem;",
+                                   paste0(" (", format(mv[m], nsmall = 2), ")"))),
+              numericInput(ns(paste0("mod_month_", p, "_", m)), NULL,
+                           value = round(mv[m], 4), min = p_min, max = p_max,
+                           step = step_val, width = "100%")
+            )
+          })
+
+          month_row <- tags$tr(
+            tags$td(
+              colspan = 4,
+              style = "padding: 0.3rem 0.5rem; border-top: none;",
+              tags$div(
+                style = "display: grid; grid-template-columns: repeat(4, 1fr); gap: 0.3rem 0.5rem;",
+                month_inputs
+              )
+            )
+          )
+        }
+
+        tagList(main_row, month_row)
+      })
+
+      tagList(
+        tags$p(class = "small text-muted mb-1 mt-2",
+               icon("crosshairs"), " Spatial-mean targets for ",
+               tags$strong(scope_label),
+               ". Spatial patterns preserved via relchg/abschg.",
+               " Click ", tags$em("Per month"), " to set individual monthly targets."),
+        tags$div(
+          style = "overflow-x: auto;",
+          tags$table(
+            class = "table table-sm table-hover mb-0",
+            style = "font-size: 0.82rem;",
+            tags$thead(
+              tags$tr(
+                tags$th("Parameter"),
+                tags$th(style = "text-align: right;", "Current Mean"),
+                tags$th(style = "min-width: 120px;", "New Target"),
+                tags$th(style = "text-align: center;", "Bounds")
+              )
+            ),
+            tags$tbody(rows)
+          )
+        )
+      )
+    })
+
+    # Reset targets to current means (both uniform and per-month inputs)
+    observeEvent(input$mod_reset_btn, {
+      means <- mod_current_means()
+      month_means_data <- mod_monthly_means()
+      if (is.null(means)) return()
+      for (p in names(means)) {
+        updateNumericInput(session, paste0("mod_target_", p), value = means[[p]])
+        # Also reset per-month inputs if they exist
+        if (toupper(p) %in% MONTHLY_PARAMS && !is.null(month_means_data) &&
+            p %in% names(month_means_data)) {
+          mv <- month_means_data[[p]]
+          for (m in seq_along(mv)) {
+            updateNumericInput(session, paste0("mod_month_", p, "_", m),
+                               value = round(mv[m], 4))
+          }
+        }
+      }
+      showNotification("Targets reset to current spatial means.", type = "message",
+                       duration = 3)
+    })
+
+    # Reusable: save modified parameter file. Returns save filename on success, FALSE on failure.
+    save_modified_params <- function() {
+      selected <- input$mod_param_select
+      if (is.null(selected) || length(selected) == 0) {
+        showNotification("No parameters selected.", type = "warning")
+        return(FALSE)
+      }
+
+      parafile_name <- input$parafile
+      if (is.null(parafile_name) || !nzchar(parafile_name)) parafile_name <- "para.txt"
+      par_file_src <- file.path(shared$project_dir, "input", parafile_name)
+      if (!file.exists(par_file_src)) {
+        showNotification(paste("Source parameter file not found:", parafile_name),
+                         type = "error")
+        return(FALSE)
+      }
+
+      save_name <- input$mod_save_filename
+      if (is.null(save_name) || !nzchar(trimws(save_name))) {
+        save_name <- paste0("para_modified_",
+                            format(Sys.time(), "%Y%m%d_%H%M%S"), ".txt")
+        updateTextInput(session, "mod_save_filename", value = save_name)
+      }
+      par_file_dst <- file.path(shared$project_dir, "input", save_name)
+
+      tryCatch({
+        # Read parameter file columns for month-name resolution
+        full_data <- read_cosero_parameters(par_file_src, skip_lines = 1, quiet = TRUE)
+
+        # If saving to the same file, work on a temp copy first
+        same_file <- normalizePath(par_file_src, winslash = "/", mustWork = FALSE) ==
+                     normalizePath(par_file_dst, winslash = "/", mustWork = FALSE)
+        if (same_file) {
+          tmp <- tempfile(fileext = ".txt")
+          file.copy(par_file_src, tmp, overwrite = TRUE)
+          par_file_work <- tmp
+        } else {
+          file.copy(par_file_src, par_file_dst, overwrite = TRUE)
+          par_file_work <- par_file_dst
+        }
+        all_cols <- colnames(full_data)
+
+        new_params <- list()
+        par_bounds <- load_parameter_bounds(parameters = selected)
+        extra_bounds <- list()  # per-month bound rows to append
+
+        for (p in selected) {
+          is_monthly <- toupper(p) %in% MONTHLY_PARAMS
+          per_month_on <- is_monthly && isTRUE(input[[paste0("mod_permonth_", p)]])
+
+          if (per_month_on) {
+            # Per-month mode: resolve actual column names and build individual entries
+            month_cols <- find_parameter_column(p, all_cols, return_all = TRUE)
+            b_row <- par_bounds[par_bounds$parameter == p, ]
+            for (m in seq_along(month_cols)) {
+              val <- input[[paste0("mod_month_", p, "_", m)]]
+              if (!is.null(val) && !is.na(val)) {
+                col_name <- month_cols[m]
+                new_params[[col_name]] <- val
+                # Create a bounds row for this individual month column
+                extra_bounds[[col_name]] <- data.frame(
+                  parameter = col_name,
+                  min = b_row$min, max = b_row$max,
+                  default = b_row$default,
+                  modification_type = b_row$modification_type,
+                  stringsAsFactors = FALSE
+                )
+              }
+            }
+          } else {
+            # Uniform mode (original behaviour)
+            val <- input[[paste0("mod_target_", p)]]
+            if (!is.null(val) && !is.na(val)) new_params[[p]] <- val
+          }
+        }
+
+        if (length(new_params) == 0) {
+          showNotification("No valid target values entered.", type = "warning")
+          return(FALSE)
+        }
+
+        # Append per-month bound rows so modify_parameter_table() can look them up
+        if (length(extra_bounds) > 0) {
+          extra_df <- do.call(rbind, extra_bounds)
+          # Ensure matching columns (fill missing with NA)
+          for (col in setdiff(colnames(par_bounds), colnames(extra_df)))
+            extra_df[[col]] <- NA
+          par_bounds <- rbind(par_bounds, extra_df[, colnames(par_bounds)])
+        }
+
+        original_values <- read_parameter_table(par_file_src, selected,
+                                                zone_id = "all", quiet = TRUE)
+
+        zones_to_mod <- NULL
+        target_sbs <- input$mod_subbasin_select
+        if (!is.null(target_sbs) && length(target_sbs) > 0) {
+          zone_map <- get_zones_for_subbasins(
+            shared$project_dir, subbasins = target_sbs,
+            defaults_settings = list(PARAFILE = parafile_name), quiet = TRUE
+          )
+          zones_to_mod <- zone_map$zones
+        }
+
+        modify_parameter_table(par_file_work, new_params, par_bounds,
+                               original_values, zones = zones_to_mod,
+                               add_timestamp = TRUE)
+
+        # If same file, copy the modified temp file back to destination
+        if (same_file) {
+          file.copy(par_file_work, par_file_dst, overwrite = TRUE)
+          unlink(par_file_work)
+        }
+
+        if (isTRUE(input$mod_set_active)) {
+          updateTextInput(session, "parafile", value = save_name)
+        }
+
+        rv$params <- read_cosero_parameters(par_file_dst)
+
+        showNotification(
+          paste0("Saved: input/", save_name,
+                 if (!is.null(zones_to_mod))
+                   paste0(" (", length(zones_to_mod), " zones modified)")
+                 else " (all zones modified)"),
+          type = "message", duration = 5
+        )
+        return(save_name)
+      }, error = function(e) {
+        showNotification(paste("Error saving parameters:", e$message),
+                         type = "error", duration = 8)
+        return(FALSE)
+      })
+    }
+
+    # Save only
+    observeEvent(input$mod_save_btn, {
+      req(shared$project_dir)
+      save_modified_params()
+    })
+
+    # Save & Run — save params, write defaults.txt, then trigger model run
+    observeEvent(input$mod_save_run_btn, {
+      req(shared$project_dir)
+      saved <- save_modified_params()
+      if (!isFALSE(saved)) {
+        # saved is the filename; write it to defaults.txt now
+        # (can't rely on updateTextInput round-trip before run)
+        if (isTRUE(input$mod_set_active)) {
+          defaults_file <- file.path(shared$project_dir, "input", "defaults.txt")
+          if (file.exists(defaults_file)) {
+            tryCatch(
+              modify_defaults(defaults_file, list(PARAFILE = saved), quiet = TRUE),
+              error = function(e) NULL
+            )
+          }
+        }
+        # Store the filename so execute_run can use it
+        rv$pending_parafile <- saved
+        rv$trigger_run <- rv$trigger_run + 1
+      }
+    })
+
+    # Save status feedback
+    output$mod_save_status_ui <- renderUI({
+      req(shared$project_dir)
+      save_name <- input$mod_save_filename
+      if (is.null(save_name) || !nzchar(trimws(save_name))) return(NULL)
+      full_path <- file.path(shared$project_dir, "input", save_name)
+      if (file.exists(full_path)) {
+        fi <- file.info(full_path)
+        tags$div(class = "alert alert-info py-1 px-2 small mt-2 mb-0",
+          icon("circle-info"),
+          sprintf(" File exists (%s KB, %s) \u2014 will be overwritten.",
+                  round(fi$size / 1024, 1),
+                  format(fi$mtime, "%Y-%m-%d %H:%M"))
+        )
+      }
+    })
+
     # ── Load Defaults ─────────────────────────────────────────────────────
     # Reusable function to load defaults into UI
     load_defaults_into_ui <- function(notify = TRUE) {
@@ -649,6 +1243,8 @@ run_server <- function(id, shared) {
     # Auto-load defaults when project dir is set
     observeEvent(shared$project_dir, {
       req(shared$project_dir)
+      # Sync the manual path text input
+      updateTextInput(session, "project_dir_manual", value = shared$project_dir)
       tryCatch(load_defaults_into_ui(notify = FALSE), error = function(e) NULL)
     })
 
@@ -704,8 +1300,8 @@ run_server <- function(id, shared) {
     })
 
     # ── Run COSERO ────────────────────────────────────────────────────────
-    observeEvent(input$run_btn, {
-      req(shared$project_dir)
+    # Reusable run function (called by Run button and Save & Run trigger)
+    execute_run <- function() {
       project_path <- shared$project_dir
 
       # Validations
@@ -734,7 +1330,6 @@ run_server <- function(id, shared) {
       rv$run_in_progress <- TRUE
       rv$run_result      <- NULL
 
-      # Build settings from all three tabs
       settings <- list(
         STARTDATE   = format_cosero_date(input$start_date,
                                          as.integer(input$start_hour),
@@ -746,7 +1341,7 @@ run_server <- function(id, shared) {
         OUTPUTTYPE  = as.integer(input$output_type),
         SC_FLAG     = as.integer(input$sc_flag),
         OUTCONTROL  = as.integer(input$outcontrol),
-        PARAFILE    = input$parafile,
+        PARAFILE    = if (!is.null(rv$pending_parafile)) rv$pending_parafile else input$parafile,
         DATAFILE    = input$datafile,
         RUNOFFFILE  = input$runofffile,
         STATSFILE   = input$statsfile,
@@ -790,7 +1385,21 @@ run_server <- function(id, shared) {
           showNotification(paste("Error:", e$message), type = "error", duration = 10)
         })
       })
+      # Clear pending parafile override after run
+      rv$pending_parafile <- NULL
+    }
+
+    # Run button handler
+    observeEvent(input$run_btn, {
+      req(shared$project_dir)
+      execute_run()
     })
+
+    # Triggered by Save & Run
+    observeEvent(rv$trigger_run, {
+      req(rv$trigger_run > 0, shared$project_dir)
+      execute_run()
+    }, ignoreInit = TRUE)
 
     # ── Run summary text ──────────────────────────────────────────────────
     output$run_summary <- renderText({

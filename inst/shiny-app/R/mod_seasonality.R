@@ -79,7 +79,7 @@ seasonality_ui <- function(id) {
     # Tier 2: Primary — Monthly Water Balance (Precip + Discharge)
     card(
       full_screen = TRUE,
-      card_header("Monthly Water Balance", class = "bg-light py-1"),
+      card_header("Monthly Water Balance", class = "py-1"),
       card_body(
         class = "p-0",
         plotlyOutput(ns("monthly_wb_plot"), height = "400px")

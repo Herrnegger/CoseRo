@@ -81,7 +81,7 @@ performance_ui <- function(id) {
     # Tier 2: Bar chart
     card(
       full_screen = TRUE,
-      card_header(textOutput(ns("bar_chart_title")), class = "bg-light py-1"),
+      card_header(textOutput(ns("bar_chart_title")), class = "py-1"),
       card_body(
         class = "p-0",
         plotlyOutput(ns("metric_bar_chart"), height = "400px")
@@ -91,7 +91,7 @@ performance_ui <- function(id) {
     # Tier 3: Table
     card(
       full_screen = TRUE,
-      card_header("All Metrics \u00d7 All Subbasins", class = "bg-light py-1"),
+      card_header("All Metrics \u00d7 All Subbasins", class = "py-1"),
       card_body(
         class = "p-2",
         DTOutput(ns("stats_table"))

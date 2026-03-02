@@ -42,7 +42,7 @@ timeseries_ui <- function(id) {
             actionButton(ns("load_data"), "Load Data",
                          class = "btn-primary btn-sm", icon = icon("download"))
           ),
-          verbatimTextOutput(ns("status_text"))
+          tags$small(class = "text-muted", textOutput(ns("status_text"), inline = TRUE))
         ),
 
         accordion_panel(
@@ -93,7 +93,7 @@ timeseries_ui <- function(id) {
     # Tier 2: Combined Hydrograph (Precip + Discharge)
     card(
       full_screen = TRUE,
-      card_header("Hydrograph & Precipitation", class = "bg-light py-1"),
+      card_header("Hydrograph & Precipitation", class = "py-1"),
       card_body(
         class = "p-0",
         plotlyOutput(ns("hydrograph_plot"), height = "420px")
@@ -535,14 +535,14 @@ build_discharge_subplot <- function(data) {
   if ("Q_obs" %in% colnames(data)) {
     p <- p |> add_trace(
       y = ~Q_obs, name = "Observed", type = "scatter", mode = "lines",
-      line = list(color = "#e74c3c", width = 1.2),
+      line = list(color = COLORS_DISCHARGE$Q_obs, width = 1.2),
       hovertemplate = "<b>Q Obs:</b> %{y:.2f} m\u00b3/s<extra></extra>"
     )
   }
   if ("Q_sim" %in% colnames(data)) {
     p <- p |> add_trace(
       y = ~Q_sim, name = "Simulated", type = "scatter", mode = "lines",
-      line = list(color = "#3498db", width = 1.2),
+      line = list(color = COLORS_DISCHARGE$Q_sim, width = 1.2),
       hovertemplate = "<b>Q Sim:</b> %{y:.2f} m\u00b3/s<extra></extra>"
     )
   }
