@@ -1,8 +1,8 @@
-# Title: Export Tab Module
-# Description: Download filtered data (CSV) and plots (PNG) with export controls
-# Author/Architect: Mathew Herrnegger
-# Coding: Claude/PI
-# Date: 2026-02-28
+# Title:       Export Tab Module
+# Description: Download filtered data (CSV) and plots (HTML always, PNG optional)
+# Author:      Mathew Herrnegger
+# Coding:      Claude/PI
+# Date:        2026-03-03
 
 # ── UI ────────────────────────────────────────────────────────────────────────
 export_ui <- function(id) {
@@ -40,15 +40,14 @@ export_ui <- function(id) {
         ),
 
         accordion_panel(
-          "Plot Formatting",
+          "PNG Settings",
           icon = icon("image"),
-          selectInput(ns("format"), "Format:", choices = c("PNG", "SVG"),
-                      selected = "PNG", width = "100%"),
           layout_column_wrap(
             width = 1 / 2, gap = "0.5rem",
             numericInput(ns("width"), "Width (px):", value = 1200, width = "100%"),
             numericInput(ns("height"), "Height (px):", value = 400, width = "100%")
-          )
+          ),
+          uiOutput(ns("png_status_ui"))
         )
       )
     ),
@@ -73,47 +72,82 @@ export_ui <- function(id) {
       )
     ),
 
-    # Tier 2: Export buttons
+    # Tier 2: Export cards — three columns
     layout_columns(
-      col_widths = c(6, 6),
+      col_widths = c(4, 4, 4),
 
+      # ── Column 1: CSV ──
       card(
-        card_header("Export Data (CSV)", class = "py-1"),
+        card_header(
+          class = "py-1",
+          icon("table", class = "me-1"), "Data (CSV)"
+        ),
         card_body(
           class = "p-3",
           div(class = "d-grid gap-2",
-              downloadButton(ns("dl_discharge_csv"), "Discharge Data",
-                             class = "btn-success"),
-              downloadButton(ns("dl_precip_csv"), "Precipitation Data",
-                             class = "btn-success"),
+              downloadButton(ns("dl_discharge_csv"), "Discharge",
+                             class = "btn-success btn-sm"),
+              downloadButton(ns("dl_precip_csv"), "Precipitation",
+                             class = "btn-success btn-sm"),
               downloadButton(ns("dl_runoff_csv"), "Runoff Components",
-                             class = "btn-success"),
-              downloadButton(ns("dl_wb_csv"), "Water Balance / States",
-                             class = "btn-success"),
-              downloadButton(ns("dl_stats_csv"), "Statistics (All Subbasins)",
-                             class = "btn-success")
+                             class = "btn-success btn-sm"),
+              downloadButton(ns("dl_wb_csv"), "Water Balance",
+                             class = "btn-success btn-sm"),
+              downloadButton(ns("dl_stats_csv"), "Statistics (All)",
+                             class = "btn-success btn-sm")
           )
         )
       ),
 
+      # ── Column 2: HTML (always works) ──
       card(
-        card_header("Export Plots (PNG)", class = "py-1"),
+        card_header(
+          class = "py-1",
+          icon("globe", class = "me-1"), "Plots (HTML)",
+          tags$span(class = "badge bg-success ms-1",
+                    style = "font-size: 0.65rem;", "always available")
+        ),
+        card_body(
+          class = "p-3",
+          div(class = "d-grid gap-2",
+              downloadButton(ns("dl_hydrograph_html"), "Hydrograph + Precip",
+                             class = "btn-primary btn-sm"),
+              downloadButton(ns("dl_runoff_html"), "Runoff Components",
+                             class = "btn-primary btn-sm"),
+              downloadButton(ns("dl_wb_html"), "Water Balance",
+                             class = "btn-primary btn-sm"),
+              downloadButton(ns("dl_temp_html"), "Temperature & ET",
+                             class = "btn-primary btn-sm")
+          ),
+          tags$p(class = "text-muted small mt-2 mb-0",
+                 icon("info-circle"),
+                 "Interactive files \u2014 open in any browser.",
+                 "Use the", icon("camera"), "toolbar icon to save as PNG.")
+        )
+      ),
+
+      # ── Column 3: PNG (needs backend) ──
+      card(
+        card_header(
+          class = "py-1",
+          icon("image", class = "me-1"), "Plots (PNG)",
+          uiOutput(ns("png_badge_ui"), inline = TRUE)
+        ),
         card_body(
           class = "p-3",
           div(class = "d-grid gap-2",
               downloadButton(ns("dl_hydrograph_png"), "Hydrograph + Precip",
-                             class = "btn-primary"),
+                             class = "btn-outline-primary btn-sm"),
               downloadButton(ns("dl_runoff_png"), "Runoff Components",
-                             class = "btn-primary"),
-              downloadButton(ns("dl_wb_png"), "Water Balance / States",
-                             class = "btn-primary"),
+                             class = "btn-outline-primary btn-sm"),
+              downloadButton(ns("dl_wb_png"), "Water Balance",
+                             class = "btn-outline-primary btn-sm"),
               downloadButton(ns("dl_temp_png"), "Temperature & ET",
-                             class = "btn-primary")
+                             class = "btn-outline-primary btn-sm")
           ),
-          tags$p(class = "text-muted small mt-2",
+          tags$p(class = "text-muted small mt-2 mb-0",
                  icon("info-circle"),
-                 "First export may take a few seconds (engine startup).",
-                 "Subsequent exports are fast.")
+                 "Static images for reports. Requires kaleido or webshot2.")
         )
       )
     )
@@ -126,6 +160,58 @@ export_ui <- function(id) {
 export_server <- function(id, shared) {
   moduleServer(id, function(input, output, session) {
     ns <- session$ns
+
+    # ── Check PNG backend availability (once) ─────────────────────────────
+    png_available <- local({
+      # kaleido via reticulate
+      has_kaleido <- tryCatch({
+        requireNamespace("reticulate", quietly = TRUE) &&
+          reticulate::py_module_available("kaleido")
+      }, error = function(e) FALSE)
+      if (has_kaleido) return(list(ok = TRUE, backend = "kaleido"))
+
+      # webshot2 (Chrome/chromote)
+      has_ws2 <- requireNamespace("webshot2", quietly = TRUE)
+      if (has_ws2) return(list(ok = TRUE, backend = "webshot2"))
+
+      # webshot (PhantomJS)
+      has_ws <- tryCatch({
+        requireNamespace("webshot", quietly = TRUE) &&
+          !is.null(webshot::find_phantom())
+      }, error = function(e) FALSE)
+      if (has_ws) return(list(ok = TRUE, backend = "webshot"))
+
+      list(ok = FALSE, backend = NULL)
+    })
+
+    output$png_badge_ui <- renderUI({
+      if (png_available$ok) {
+        tags$span(class = "badge bg-success ms-1",
+                  style = "font-size: 0.65rem;",
+                  png_available$backend)
+      } else {
+        tags$span(class = "badge bg-warning text-dark ms-1",
+                  style = "font-size: 0.65rem;",
+                  "not available")
+      }
+    })
+
+    output$png_status_ui <- renderUI({
+      if (png_available$ok) {
+        tags$div(class = "alert alert-success py-1 px-2 small mb-0",
+                 icon("check-circle"),
+                 paste(" PNG backend:", png_available$backend))
+      } else {
+        tags$div(class = "alert alert-warning py-1 px-2 small mb-0",
+                 icon("triangle-exclamation"),
+                 " No PNG backend found. Install one:",
+                 tags$br(),
+                 tags$code("install.packages('webshot2')"),
+                 tags$br(),
+                 tags$span(class = "text-muted",
+                           "or: reticulate::py_install('kaleido')"))
+      }
+    })
 
     # ── Subbasin selector ─────────────────────────────────────────────────
     output$subbasin_selector_ui <- renderUI({
@@ -146,7 +232,7 @@ export_server <- function(id, shared) {
     # ── Prepare data for export ───────────────────────────────────────────
     export_data <- reactive({
       req(shared$cosero_data, input$selected_subbasin)
-      prepare_subbasin_data(shared$cosero_data, input$selected_subbasin,
+      CoseRo::prepare_subbasin_data(shared$cosero_data, input$selected_subbasin,
                             input$date_range)
     })
 
@@ -158,8 +244,40 @@ export_server <- function(id, shared) {
     })
 
     output$vb_subbasin <- renderText({
-      input$selected_subbasin %||% "—"
+      input$selected_subbasin %||% "\u2014"
     })
+
+    # ── Plot builders (reused by HTML and PNG handlers) ───────────────────
+    build_hydrograph <- function() {
+      d <- export_data()
+      p_precip <- build_precip_subplot(d$precipitation)
+      p_q <- build_discharge_subplot(d$discharge)
+      subplot(p_precip, p_q, nrows = 2, shareX = TRUE,
+              heights = c(0.25, 0.75), titleY = TRUE)
+    }
+
+    build_runoff <- function() {
+      d <- export_data()
+      CoseRo::plot_runoff_components(d$runoff_components, glacier_data = d$glacier)
+    }
+
+    build_wb <- function() {
+      d <- export_data()
+      CoseRo::plot_water_balance(d$water_balance,
+                                 selected_vars = c("BW0", "BW3", "SWW",
+                                                   "P_cum", "ETAGEB_cum", "QABGEB_cum"),
+                                 show_cumulative = TRUE)
+    }
+
+    build_temp_et <- function() {
+      met <- extract_met_subbasin(
+        shared$cosero_data$meteorology, input$selected_subbasin, input$date_range
+      )
+      sb_data <- CoseRo::prepare_subbasin_data(
+        shared$cosero_data, input$selected_subbasin, input$date_range
+      )
+      build_temperature_et_plot(met, sb_data$water_balance)
+    }
 
     # ── CSV Downloads ─────────────────────────────────────────────────────
     output$dl_discharge_csv <- downloadHandler(
@@ -198,46 +316,76 @@ export_server <- function(id, shared) {
       }
     )
 
-    # ── PNG Downloads ─────────────────────────────────────────────────────
+    # ── HTML Downloads (always works, zero extra deps) ────────────────────
+    safe_export_html <- function(plot, file) {
+      tryCatch({
+        htmlwidgets::saveWidget(
+          plotly::partial_bundle(plot),
+          file = file,
+          selfcontained = TRUE
+        )
+      }, error = function(e) {
+        # If partial_bundle fails, try full widget
+        htmlwidgets::saveWidget(plot, file = file, selfcontained = TRUE)
+      })
+    }
+
+    output$dl_hydrograph_html <- downloadHandler(
+      filename = function() paste0("hydrograph_", input$selected_subbasin, "_", Sys.Date(), ".html"),
+      content = function(file) safe_export_html(build_hydrograph(), file)
+    )
+    output$dl_runoff_html <- downloadHandler(
+      filename = function() paste0("runoff_components_", input$selected_subbasin, "_", Sys.Date(), ".html"),
+      content = function(file) safe_export_html(build_runoff(), file)
+    )
+    output$dl_wb_html <- downloadHandler(
+      filename = function() paste0("water_balance_", input$selected_subbasin, "_", Sys.Date(), ".html"),
+      content = function(file) safe_export_html(build_wb(), file)
+    )
+    output$dl_temp_html <- downloadHandler(
+      filename = function() paste0("temperature_et_", input$selected_subbasin, "_", Sys.Date(), ".html"),
+      content = function(file) safe_export_html(build_temp_et(), file)
+    )
+
+    # ── PNG Downloads (needs backend) ─────────────────────────────────────
+    safe_export_png <- function(plot, file) {
+      if (!png_available$ok) {
+        # Write placeholder so download doesn't break
+        CoseRo::export_plot_png(plot, file,
+                                width = input$width, height = input$height)
+        showNotification(
+          tagList(
+            tags$strong("PNG backend not installed."), tags$br(),
+            "Use the ", tags$strong("HTML"), " export instead, or install:",
+            tags$br(), tags$code("install.packages('webshot2')")
+          ),
+          type = "warning", duration = 10
+        )
+        return()
+      }
+      ok <- CoseRo::export_plot_png(plot, file,
+                                     width = input$width, height = input$height)
+      if (!isTRUE(ok)) {
+        showNotification("PNG export failed unexpectedly. Try HTML export.",
+                         type = "error", duration = 8)
+      }
+    }
+
     output$dl_hydrograph_png <- downloadHandler(
       filename = function() paste0("hydrograph_", input$selected_subbasin, "_", Sys.Date(), ".png"),
-      content = function(file) {
-        d <- export_data()
-        p_precip <- build_precip_subplot(d$precipitation)
-        p_q <- build_discharge_subplot(d$discharge)
-        p <- subplot(p_precip, p_q, nrows = 2, shareX = TRUE,
-                     heights = c(0.25, 0.75), titleY = TRUE)
-        export_plot_png(p, file, width = input$width, height = input$height)
-      }
+      content = function(file) safe_export_png(build_hydrograph(), file)
     )
     output$dl_runoff_png <- downloadHandler(
       filename = function() paste0("runoff_components_", input$selected_subbasin, "_", Sys.Date(), ".png"),
-      content = function(file) {
-        d <- export_data()
-        p <- plot_runoff_components(d$runoff_components, glacier_data = d$glacier)
-        export_plot_png(p, file, width = input$width, height = input$height)
-      }
+      content = function(file) safe_export_png(build_runoff(), file)
     )
     output$dl_wb_png <- downloadHandler(
       filename = function() paste0("water_balance_", input$selected_subbasin, "_", Sys.Date(), ".png"),
-      content = function(file) {
-        d <- export_data()
-        p <- plot_water_balance(d$water_balance,
-                                selected_vars = c("BW0", "BW3", "SWW", "P_cum", "ETAGEB_cum", "QABGEB_cum"),
-                                show_cumulative = TRUE)
-        export_plot_png(p, file, width = input$width, height = input$height)
-      }
+      content = function(file) safe_export_png(build_wb(), file)
     )
     output$dl_temp_png <- downloadHandler(
       filename = function() paste0("temperature_et_", input$selected_subbasin, "_", Sys.Date(), ".png"),
-      content = function(file) {
-        met <- extract_met_subbasin(
-          shared$cosero_data$meteorology, input$selected_subbasin, input$date_range
-        )
-        sb_data <- prepare_subbasin_data(shared$cosero_data, input$selected_subbasin, input$date_range)
-        p <- build_temperature_et_plot(met, sb_data$water_balance)
-        export_plot_png(p, file, width = input$width, height = input$height)
-      }
+      content = function(file) safe_export_png(build_temp_et(), file)
     )
   })
 }

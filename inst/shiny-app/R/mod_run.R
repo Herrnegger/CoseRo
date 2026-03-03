@@ -486,12 +486,12 @@ run_server <- function(id, shared) {
       tryCatch({
         para_name <- input$parafile
         if (is.null(para_name) || !nzchar(para_name)) {
-          defaults <- read_cosero_defaults_safe(shared$project_dir)
+          defaults <- CoseRo::read_cosero_defaults_safe(shared$project_dir)
           para_name <- defaults$PARAFILE %||% "para.txt"
         }
         para_file <- file.path(shared$project_dir, "input", para_name)
         if (file.exists(para_file)) {
-          rv$params <- read_cosero_parameters(para_file)
+          rv$params <- CoseRo::read_cosero_parameters(para_file)
         }
       }, error = function(e) NULL)
     }
@@ -715,7 +715,7 @@ run_server <- function(id, shared) {
 
     # Load parameter_bounds.csv choices (grouped by category)
     observe({
-      bounds <- tryCatch(load_parameter_bounds(), error = function(e) NULL)
+      bounds <- tryCatch(CoseRo::load_parameter_bounds(), error = function(e) NULL)
       if (is.null(bounds)) return()
       # Build grouped choices: list(category = c(param1, param2, ...))
       cats <- split(bounds$parameter, bounds$category)
@@ -752,7 +752,7 @@ run_server <- function(id, shared) {
 
       tryCatch({
         # Read full parameter data for column lookups
-        full_data <- read_cosero_parameters(par_file, skip_lines = 1, quiet = TRUE)
+        full_data <- CoseRo::read_cosero_parameters(par_file, skip_lines = 1, quiet = TRUE)
 
         # Determine zone mask from subbasin filter
         target_sbs <- input$mod_subbasin_select
@@ -768,13 +768,13 @@ run_server <- function(id, shared) {
           is_monthly <- toupper(p) %in% MONTHLY_PARAMS
           if (is_monthly) {
             # Get all 12 monthly columns
-            month_cols <- find_parameter_column(p, colnames(full_data), return_all = TRUE)
+            month_cols <- CoseRo::find_parameter_column(p, colnames(full_data), return_all = TRUE)
             if (length(month_cols) == 0) return(NA_real_)
             # Mean across all months × zones
             all_vals <- unlist(full_data[zone_mask, month_cols, drop = FALSE])
             round(mean(all_vals, na.rm = TRUE), 4)
           } else {
-            col <- find_parameter_column(p, colnames(full_data), return_all = FALSE)
+            col <- CoseRo::find_parameter_column(p, colnames(full_data), return_all = FALSE)
             if (length(col) == 0) return(NA_real_)
             round(mean(full_data[zone_mask, col], na.rm = TRUE), 4)
           }
@@ -794,7 +794,7 @@ run_server <- function(id, shared) {
       if (!file.exists(par_file)) return(NULL)
 
       tryCatch({
-        full_data <- read_cosero_parameters(par_file, skip_lines = 1, quiet = TRUE)
+        full_data <- CoseRo::read_cosero_parameters(par_file, skip_lines = 1, quiet = TRUE)
 
         target_sbs <- input$mod_subbasin_select
         if (!is.null(target_sbs) && length(target_sbs) > 0 &&
@@ -808,7 +808,7 @@ run_server <- function(id, shared) {
         if (length(monthly_selected) == 0) return(NULL)
 
         result <- lapply(monthly_selected, function(p) {
-          month_cols <- find_parameter_column(p, colnames(full_data), return_all = TRUE)
+          month_cols <- CoseRo::find_parameter_column(p, colnames(full_data), return_all = TRUE)
           if (length(month_cols) == 0) return(NULL)
           sapply(month_cols, function(mc) round(mean(full_data[zone_mask, mc], na.rm = TRUE), 3))
         })
@@ -821,7 +821,7 @@ run_server <- function(id, shared) {
       selected <- input$mod_param_select
       if (is.null(selected) || length(selected) == 0) return(NULL)
       tryCatch(
-        load_parameter_bounds(parameters = selected),
+        CoseRo::load_parameter_bounds(parameters = selected),
         error = function(e) NULL
       )
     })
@@ -1037,7 +1037,7 @@ run_server <- function(id, shared) {
 
       tryCatch({
         # Read parameter file columns for month-name resolution
-        full_data <- read_cosero_parameters(par_file_src, skip_lines = 1, quiet = TRUE)
+        full_data <- CoseRo::read_cosero_parameters(par_file_src, skip_lines = 1, quiet = TRUE)
 
         # If saving to the same file, work on a temp copy first
         same_file <- normalizePath(par_file_src, winslash = "/", mustWork = FALSE) ==
@@ -1053,7 +1053,7 @@ run_server <- function(id, shared) {
         all_cols <- colnames(full_data)
 
         new_params <- list()
-        par_bounds <- load_parameter_bounds(parameters = selected)
+        par_bounds <- CoseRo::load_parameter_bounds(parameters = selected)
         extra_bounds <- list()  # per-month bound rows to append
 
         for (p in selected) {
@@ -1062,7 +1062,7 @@ run_server <- function(id, shared) {
 
           if (per_month_on) {
             # Per-month mode: resolve actual column names and build individual entries
-            month_cols <- find_parameter_column(p, all_cols, return_all = TRUE)
+            month_cols <- CoseRo::find_parameter_column(p, all_cols, return_all = TRUE)
             b_row <- par_bounds[par_bounds$parameter == p, ]
             for (m in seq_along(month_cols)) {
               val <- input[[paste0("mod_month_", p, "_", m)]]
@@ -1091,7 +1091,7 @@ run_server <- function(id, shared) {
           return(FALSE)
         }
 
-        # Append per-month bound rows so modify_parameter_table() can look them up
+        # Append per-month bound rows so CoseRo::modify_parameter_table() can look them up
         if (length(extra_bounds) > 0) {
           extra_df <- do.call(rbind, extra_bounds)
           # Ensure matching columns (fill missing with NA)
@@ -1100,20 +1100,20 @@ run_server <- function(id, shared) {
           par_bounds <- rbind(par_bounds, extra_df[, colnames(par_bounds)])
         }
 
-        original_values <- read_parameter_table(par_file_src, selected,
+        original_values <- CoseRo::read_parameter_table(par_file_src, selected,
                                                 zone_id = "all", quiet = TRUE)
 
         zones_to_mod <- NULL
         target_sbs <- input$mod_subbasin_select
         if (!is.null(target_sbs) && length(target_sbs) > 0) {
-          zone_map <- get_zones_for_subbasins(
+          zone_map <- CoseRo::get_zones_for_subbasins(
             shared$project_dir, subbasins = target_sbs,
             defaults_settings = list(PARAFILE = parafile_name), quiet = TRUE
           )
           zones_to_mod <- zone_map$zones
         }
 
-        modify_parameter_table(par_file_work, new_params, par_bounds,
+        CoseRo::modify_parameter_table(par_file_work, new_params, par_bounds,
                                original_values, zones = zones_to_mod,
                                add_timestamp = TRUE)
 
@@ -1127,7 +1127,7 @@ run_server <- function(id, shared) {
           updateTextInput(session, "parafile", value = save_name)
         }
 
-        rv$params <- read_cosero_parameters(par_file_dst)
+        rv$params <- CoseRo::read_cosero_parameters(par_file_dst)
 
         showNotification(
           paste0("Saved: input/", save_name,
@@ -1161,7 +1161,7 @@ run_server <- function(id, shared) {
           defaults_file <- file.path(shared$project_dir, "input", "defaults.txt")
           if (file.exists(defaults_file)) {
             tryCatch(
-              modify_defaults(defaults_file, list(PARAFILE = saved), quiet = TRUE),
+              CoseRo::modify_defaults(defaults_file, list(PARAFILE = saved), quiet = TRUE),
               error = function(e) NULL
             )
           }
@@ -1192,9 +1192,9 @@ run_server <- function(id, shared) {
     # ── Load Defaults ─────────────────────────────────────────────────────
     # Reusable function to load defaults into UI
     load_defaults_into_ui <- function(notify = TRUE) {
-      d <- read_cosero_defaults_safe(shared$project_dir)
-      sp <- parse_cosero_date(d$STARTDATE)
-      ep <- parse_cosero_date(d$ENDDATE)
+      d <- CoseRo::read_cosero_defaults_safe(shared$project_dir)
+      sp <- CoseRo::parse_cosero_date(d$STARTDATE)
+      ep <- CoseRo::parse_cosero_date(d$ENDDATE)
 
       # Simulation tab — date + time
       updateDateInput(session,    "start_date",    value    = sp$date)
@@ -1259,10 +1259,10 @@ run_server <- function(id, shared) {
       tryCatch({
         settings <- list(
           # Simulation
-          STARTDATE   = format_cosero_date(input$start_date,
+          STARTDATE   = CoseRo::format_cosero_date(input$start_date,
                                            as.integer(input$start_hour),
                                            as.integer(input$start_minute)),
-          ENDDATE     = format_cosero_date(input$end_date,
+          ENDDATE     = CoseRo::format_cosero_date(input$end_date,
                                            as.integer(input$end_hour),
                                            as.integer(input$end_minute)),
           SPINUP      = as.integer(input$spinup),
@@ -1284,7 +1284,7 @@ run_server <- function(id, shared) {
           ADDREGCONT  = as.integer(input$addregcont),
           ADDREGFILE  = input$addregfile
         )
-        modify_defaults(defaults_file, settings, quiet = TRUE)
+        CoseRo::modify_defaults(defaults_file, settings, quiet = TRUE)
         showNotification("defaults.txt saved!", type = "message", duration = 3)
       }, error = function(e) {
         showNotification(paste("Save error:", e$message), type = "error", duration = 5)
@@ -1331,10 +1331,10 @@ run_server <- function(id, shared) {
       rv$run_result      <- NULL
 
       settings <- list(
-        STARTDATE   = format_cosero_date(input$start_date,
+        STARTDATE   = CoseRo::format_cosero_date(input$start_date,
                                          as.integer(input$start_hour),
                                          as.integer(input$start_minute)),
-        ENDDATE     = format_cosero_date(input$end_date,
+        ENDDATE     = CoseRo::format_cosero_date(input$end_date,
                                          as.integer(input$end_hour),
                                          as.integer(input$end_minute)),
         SPINUP      = as.integer(input$spinup),
@@ -1357,7 +1357,7 @@ run_server <- function(id, shared) {
 
       withProgress(message = "Running COSERO\u2026", value = 0.1, {
         tryCatch({
-          result <- run_cosero(
+          result <- CoseRo::run_cosero(
             project_path      = project_path,
             defaults_settings = settings,
             statevar_source   = as.integer(input$run_mode),

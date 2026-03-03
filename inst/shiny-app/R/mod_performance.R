@@ -216,7 +216,7 @@ performance_server <- function(id, shared) {
     output$metric_bar_chart <- renderPlotly({
       mv <- metric_vals()
       if (is.null(mv) || is.null(input$threshold) || !is.character(input$metric)) {
-        return(plotly_empty("No statistics loaded"))
+        return(CoseRo::plotly_empty("No statistics loaded"))
       }
 
       cfg    <- metric_cfg()

@@ -108,6 +108,7 @@ format_time_duration <- function(seconds) {
 #' @param col_names Column names to search in
 #' @param return_all If TRUE, return all monthly variants (1-12); if FALSE, return first match
 #' @return Character vector of matching column names (empty if none found)
+#' @export
 find_parameter_column <- function(param_name, col_names, return_all = FALSE) {
   # Try direct match with case insensitivity and underscore variants
   patterns <- c(

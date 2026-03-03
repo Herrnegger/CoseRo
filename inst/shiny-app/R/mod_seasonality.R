@@ -153,7 +153,7 @@ seasonality_server <- function(id, shared) {
     # ── Prepare subbasin + seasonality data ───────────────────────────────
     subbasin_data <- reactive({
       req(shared$cosero_data, input$selected_subbasin)
-      sb <- prepare_subbasin_data(shared$cosero_data, input$selected_subbasin)
+      sb <- CoseRo::prepare_subbasin_data(shared$cosero_data, input$selected_subbasin)
       sb$meteorology <- extract_met_subbasin(
         shared$cosero_data$meteorology, input$selected_subbasin
       )
@@ -164,7 +164,7 @@ seasonality_server <- function(id, shared) {
       req(subbasin_data(), shared$cosero_data$statistics)
       spinup <- attr(shared$cosero_data$statistics, "spinup_timestep")
       if (is.null(spinup) || is.na(spinup)) spinup <- 0
-      prepare_seasonality_data(subbasin_data(), spinup)
+      CoseRo::prepare_seasonality_data(subbasin_data(), spinup)
     })
 
     # ── Value Boxes ───────────────────────────────────────────────────────
@@ -223,17 +223,17 @@ seasonality_server <- function(id, shared) {
         p <- plot_ly(pdata, x = ~month)
         if ("PRAIN" %in% colnames(pdata))
           p <- p |> add_trace(y = ~PRAIN, name = "Rain", type = "bar",
-                              marker = list(color = COLORS_PRECIPITATION$PRAIN),
+                              marker = list(color = CoseRo::COLORS_PRECIPITATION$PRAIN),
                               hovertemplate = "<b>Rain:</b> %{y:.1f} mm<extra></extra>")
         if ("PSNOW" %in% colnames(pdata))
           p <- p |> add_trace(y = ~PSNOW, name = "Snow", type = "bar",
-                              marker = list(color = COLORS_PRECIPITATION$PSNOW),
+                              marker = list(color = CoseRo::COLORS_PRECIPITATION$PSNOW),
                               hovertemplate = "<b>Snow:</b> %{y:.1f} mm<extra></extra>")
         p |> layout(barmode = "stack",
                     yaxis = list(title = "Precip (mm)", autorange = "reversed"),
                     xaxis = list(title = ""))
       } else {
-        plotly_empty("No precipitation data")
+        CoseRo::plotly_empty("No precipitation data")
       }
 
       # Discharge subplot
@@ -243,19 +243,19 @@ seasonality_server <- function(id, shared) {
         if ("Q_obs" %in% colnames(ddata))
           p <- p |> add_trace(y = ~Q_obs, name = "Q Observed", type = "scatter",
                               mode = "lines+markers",
-                              line = list(color = COLORS_DISCHARGE$Q_obs, width = 2),
-                              marker = list(size = 5, color = COLORS_DISCHARGE$Q_obs),
+                              line = list(color = CoseRo::COLORS_DISCHARGE$Q_obs, width = 2),
+                              marker = list(size = 5, color = CoseRo::COLORS_DISCHARGE$Q_obs),
                               hovertemplate = "<b>Q Obs:</b> %{y:.2f} m\u00b3/s<extra></extra>")
         if ("Q_sim" %in% colnames(ddata))
           p <- p |> add_trace(y = ~Q_sim, name = "Q Simulated", type = "scatter",
                               mode = "lines+markers",
-                              line = list(color = COLORS_DISCHARGE$Q_sim, width = 2),
-                              marker = list(size = 5, color = COLORS_DISCHARGE$Q_sim),
+                              line = list(color = CoseRo::COLORS_DISCHARGE$Q_sim, width = 2),
+                              marker = list(size = 5, color = CoseRo::COLORS_DISCHARGE$Q_sim),
                               hovertemplate = "<b>Q Sim:</b> %{y:.2f} m\u00b3/s<extra></extra>")
         p |> layout(yaxis = list(title = "Discharge (m\u00b3/s)"),
                     xaxis = list(title = "", dtick = 1))
       } else {
-        plotly_empty("No discharge data")
+        CoseRo::plotly_empty("No discharge data")
       }
 
       subplot(p_precip, p_q, nrows = 2, shareX = TRUE,
@@ -312,7 +312,7 @@ seasonality_server <- function(id, shared) {
       }
 
       if (is.null(temp_monthly) && is.null(et_monthly)) {
-        return(plotly_empty("No temperature/ET data (requires OUTPUTTYPE \u2265 2)"))
+        return(CoseRo::plotly_empty("No temperature/ET data (requires OUTPUTTYPE \u2265 2)"))
       }
 
       # Apply cumulative sums to ET if toggled
@@ -336,18 +336,18 @@ seasonality_server <- function(id, shared) {
           layout(yaxis = list(title = "Temperature (\u00b0C)"),
                  xaxis = list(title = ""))
       } else {
-        plotly_empty("No temperature data")
+        CoseRo::plotly_empty("No temperature data")
       }
 
       p_et <- if (!is.null(et_monthly)) {
         plot_ly(et_monthly, x = ~month) |>
           add_trace(y = ~ETA, name = "Actual ET", type = "bar",
-                    marker = list(color = COLORS_PRECIPITATION$ETA),
+                    marker = list(color = CoseRo::COLORS_PRECIPITATION$ETA),
                     hovertemplate = paste0("<b>ET:</b> %{y:.1f} mm<extra></extra>")) |>
           layout(yaxis = list(title = et_ylab),
                  xaxis = list(title = "", dtick = 1))
       } else {
-        plotly_empty("No ET data")
+        CoseRo::plotly_empty("No ET data")
       }
 
       subplot(p_temp, p_et, nrows = 2, shareX = TRUE,

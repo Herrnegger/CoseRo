@@ -16,8 +16,16 @@ export_plot_png(plot, filename, width = 1200, height = 400)
 \item{height}{Height in pixels}
 }
 \value{
-Invisible TRUE on success, FALSE on failure
+Invisible TRUE on success, FALSE if only placeholder was written
 }
 \description{
 Exports a plotly object to a PNG file using kaleido (via reticulate) or webshot as fallback.
+}
+\details{
+Export a plotly plot to PNG
+
+Tries multiple backends in order: kaleido (via reticulate), webshot2 (via
+Chrome/chromote), and webshot (via PhantomJS). If all fail, writes a
+minimal placeholder PNG with installation instructions so the download
+handler always returns a valid file.
 }

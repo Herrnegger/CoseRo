@@ -35,4 +35,3 @@ contains a \code{PARAFILE} override, that takes precedence because
 defaults.txt has not yet been updated at the time this function is called
 during optimization setup.
 }
-\keyword{internal}

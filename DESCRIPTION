@@ -48,6 +48,7 @@ Suggests:
     Matrix (>= 1.5.0),
     kaleido,
     webshot,
+    webshot2,
     rtop,
     httr (>= 1.4.0)
 RoxygenNote: 7.3.3

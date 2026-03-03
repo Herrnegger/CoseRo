@@ -30,7 +30,7 @@ utils::globalVariables(c("iteration", "metric"))
 #' @param quiet Suppress messages
 #'
 #' @return List with zones (integer vector) and subbasins (character vector)
-#' @keywords internal
+#' @export
 get_zones_for_subbasins <- function(cosero_path, subbasins = "all",
                                     defaults_settings = NULL, quiet = FALSE) {
   # Resolve parameter file path

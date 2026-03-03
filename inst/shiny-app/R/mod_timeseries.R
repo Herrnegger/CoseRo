@@ -195,30 +195,30 @@ timeseries_server <- function(id, shared) {
             shared$cosero_data <- readRDS(cache_file)
           } else {
             incProgress(0.1, detail = "Detecting output type")
-            outputtype <- detect_outputtype(out_dir)
+            outputtype <- CoseRo::detect_outputtype(out_dir)
 
             incProgress(0.1, detail = "Reading runoff")
-            runoff <- read_runoff(out_dir, quiet = TRUE)
+            runoff <- CoseRo::read_runoff(out_dir, quiet = TRUE)
 
             incProgress(0.1, detail = "Reading precipitation")
-            precipitation <- read_precipitation(out_dir, quiet = TRUE)
+            precipitation <- CoseRo::read_precipitation(out_dir, quiet = TRUE)
 
             incProgress(0.1, detail = "Reading runoff components")
-            runoff_comp <- read_plus(out_dir, quiet = TRUE)
+            runoff_comp <- CoseRo::read_plus(out_dir, quiet = TRUE)
 
             incProgress(0.1, detail = "Reading water balance")
-            water_balance <- read_plus1(out_dir, quiet = TRUE)
+            water_balance <- CoseRo::read_plus1(out_dir, quiet = TRUE)
 
             incProgress(0.05, detail = "Reading statistics")
-            statistics  <- read_statistics(out_dir, quiet = TRUE)
-            topology    <- read_topology(out_dir, quiet = TRUE)
+            statistics  <- CoseRo::read_statistics(out_dir, quiet = TRUE)
+            topology    <- CoseRo::read_topology(out_dir, quiet = TRUE)
 
             incProgress(0.05, detail = "Reading additional files")
             glacier     <- NULL
             meteorology <- NULL
             if (outputtype >= 2) {
-              glacier     <- read_var_glac(out_dir, quiet = TRUE)
-              meteorology <- read_var_met(out_dir, quiet = TRUE)
+              glacier     <- CoseRo::read_var_glac(out_dir, quiet = TRUE)
+              meteorology <- CoseRo::read_var_met(out_dir, quiet = TRUE)
             }
 
             shared$cosero_data <- list(
@@ -233,7 +233,7 @@ timeseries_server <- function(id, shared) {
               metadata = list(
                 outputtype = outputtype,
                 output_dir = out_dir,
-                subbasins  = detect_subbasins(out_dir)
+                subbasins  = CoseRo::detect_subbasins(out_dir)
               )
             )
 
@@ -347,7 +347,7 @@ timeseries_server <- function(id, shared) {
     subbasin_data <- reactive({
       req(shared$cosero_data, input$selected_subbasin)
       dr <- date_range_debounced()
-      sb_data <- prepare_subbasin_data(shared$cosero_data, input$selected_subbasin, dr)
+      sb_data <- CoseRo::prepare_subbasin_data(shared$cosero_data, input$selected_subbasin, dr)
 
       # Augment with meteorology (temperature)
       sb_data$meteorology <- extract_met_subbasin(
@@ -489,7 +489,7 @@ extract_met_subbasin <- function(meteorology, subbasin_id, date_range = NULL) {
 build_precip_subplot <- function(data) {
   if (is.null(data) || nrow(data) == 0) {
     return(
-      plotly_empty(text = "No precipitation data") |>
+      CoseRo::plotly_empty(text = "No precipitation data") |>
         layout(yaxis = list(title = "Precip (mm)", autorange = "reversed"))
     )
   }
@@ -527,7 +527,7 @@ build_precip_subplot <- function(data) {
 #' @keywords internal
 build_discharge_subplot <- function(data) {
   if (is.null(data) || nrow(data) == 0) {
-    return(plotly_empty(text = "No discharge data"))
+    return(CoseRo::plotly_empty(text = "No discharge data"))
   }
 
   p <- plot_ly(data, x = ~Date)
@@ -535,14 +535,14 @@ build_discharge_subplot <- function(data) {
   if ("Q_obs" %in% colnames(data)) {
     p <- p |> add_trace(
       y = ~Q_obs, name = "Observed", type = "scatter", mode = "lines",
-      line = list(color = COLORS_DISCHARGE$Q_obs, width = 1.2),
+      line = list(color = CoseRo::COLORS_DISCHARGE$Q_obs, width = 1.2),
       hovertemplate = "<b>Q Obs:</b> %{y:.2f} m\u00b3/s<extra></extra>"
     )
   }
   if ("Q_sim" %in% colnames(data)) {
     p <- p |> add_trace(
       y = ~Q_sim, name = "Simulated", type = "scatter", mode = "lines",
-      line = list(color = COLORS_DISCHARGE$Q_sim, width = 1.2),
+      line = list(color = CoseRo::COLORS_DISCHARGE$Q_sim, width = 1.2),
       hovertemplate = "<b>Q Sim:</b> %{y:.2f} m\u00b3/s<extra></extra>"
     )
   }
@@ -566,7 +566,7 @@ build_temperature_et_plot <- function(met, wb) {
   has_et   <- !is.null(wb) && nrow(wb) > 0 && "ETA" %in% colnames(wb) && "Date" %in% colnames(wb)
 
   if (!has_temp && !has_et) {
-    return(plotly_empty(text = "No temperature/ET data (requires OUTPUTTYPE \u2265 2)"))
+    return(CoseRo::plotly_empty(text = "No temperature/ET data (requires OUTPUTTYPE \u2265 2)"))
   }
 
   # Temperature subplot
@@ -590,7 +590,7 @@ build_temperature_et_plot <- function(met, wb) {
         xaxis = list(title = "")
       )
   } else {
-    plotly_empty(text = "No temperature data")
+    CoseRo::plotly_empty(text = "No temperature data")
   }
 
   # ET subplot
@@ -598,7 +598,7 @@ build_temperature_et_plot <- function(met, wb) {
     plot_ly(wb, x = ~Date) |>
       add_trace(
         y = ~ETA, name = "Actual ET", type = "scatter", mode = "lines",
-        line = list(color = COLORS_PRECIPITATION$ETA, width = 1.2),
+        line = list(color = CoseRo::COLORS_PRECIPITATION$ETA, width = 1.2),
         hovertemplate = "<b>ET:</b> %{y:.1f} mm<extra></extra>"
       ) |>
       layout(
@@ -612,7 +612,7 @@ build_temperature_et_plot <- function(met, wb) {
         )
       )
   } else {
-    plotly_empty(text = "No ET data")
+    CoseRo::plotly_empty(text = "No ET data")
   }
 
   subplot(p_temp, p_et, nrows = 2, shareX = TRUE,

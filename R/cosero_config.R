@@ -244,7 +244,13 @@ get_default_cosero_values <- function() {
   )
 }
 
-#' @keywords internal
+#' Modify COSERO defaults.txt settings
+#'
+#' @param defaults_file Path to defaults.txt
+#' @param settings Named list of settings to modify
+#' @param quiet Logical; suppress messages
+#' @return Invisible NULL
+#' @export
 modify_defaults <- function(defaults_file, settings, quiet = FALSE) {
   if (!file.exists(defaults_file)) {
     create_default_defaults(defaults_file, quiet)
