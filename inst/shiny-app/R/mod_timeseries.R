@@ -536,7 +536,7 @@ build_temperature_et_plot <- function(temp_data, wb) {
         hovertemplate = "<b>Temp:</b> %{y:.1f} \u00b0C<extra></extra>"
       ) |>
       add_trace(
-        y = rep(0, nrow(met)), name = "0 \u00b0C", type = "scatter", mode = "lines",
+        y = rep(0, nrow(temp_data)), name = "0 \u00b0C", type = "scatter", mode = "lines",
         line = list(color = "#aaaaaa", width = 0.8, dash = "dash"),
         showlegend = FALSE, hoverinfo = "skip"
       ) |>
