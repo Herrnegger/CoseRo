@@ -347,13 +347,7 @@ timeseries_server <- function(id, shared) {
     subbasin_data <- reactive({
       req(shared$cosero_data, input$selected_subbasin)
       dr <- date_range_debounced()
-      sb_data <- CoseRo::prepare_subbasin_data(shared$cosero_data, input$selected_subbasin, dr)
-
-      # Augment with meteorology (temperature)
-      sb_data$meteorology <- extract_met_subbasin(
-        shared$cosero_data$meteorology, input$selected_subbasin, dr
-      )
-      sb_data
+      CoseRo::prepare_subbasin_data(shared$cosero_data, input$selected_subbasin, dr)
     })
 
     observe({ rv$subbasin_data <- subbasin_data() })
@@ -440,48 +434,12 @@ timeseries_server <- function(id, shared) {
     # ── Temperature & ET ─────────────────────────────────────────────────
     output$temperature_plot <- renderPlotly({
       sb <- subbasin_data()
-      met <- sb$meteorology
-      wb  <- sb$water_balance
 
-      p <- build_temperature_et_plot(met, wb)
+      p <- build_temperature_et_plot(sb$temperature, sb$water_balance)
       p |> layout(title = list(text = ""), margin = list(t = 5)) |>
         config(scrollZoom = TRUE)
     })
   })
-}
-
-# ── Helper: Extract meteorology for one subbasin ─────────────────────────────
-#' @keywords internal
-extract_met_subbasin <- function(meteorology, subbasin_id, date_range = NULL) {
-  if (is.null(meteorology)) return(NULL)
-
-  sb_id <- if (is.numeric(subbasin_id)) sprintf("%04d", subbasin_id) else subbasin_id
-
-  # Find temperature column (patterns: TGEB_XXXX, T_XXXX, Temp_XXXX)
-  # Anchor with ^ to avoid matching ETPGEB (potential ET) which contains "TGEB"
-  temp_col <- grep(
-    paste0("^(TGEB|T_|Temp).*_?", sb_id), colnames(meteorology), value = TRUE
-  )[1]
-
-  if (is.na(temp_col)) {
-    # Fallback: try any column with the subbasin ID that looks like temperature
-    temp_col <- grep(paste0("_", sb_id, "$"), colnames(meteorology), value = TRUE)
-    # Pick first that isn't a known precip/ET variable
-    temp_col <- temp_col[!grepl("^(P|ET|PRAIN|PSNOW|ETP)", temp_col)]
-    temp_col <- temp_col[1]
-  }
-  if (is.na(temp_col) || is.null(temp_col)) return(NULL)
-
-  time_cols <- c("yyyy", "mm", "dd", "hh", "DateTime", "Date")
-  keep <- c(time_cols[time_cols %in% colnames(meteorology)], temp_col)
-  met <- meteorology[, keep, drop = FALSE]
-  names(met)[names(met) == temp_col] <- "Temperature"
-
-  if (!is.null(date_range) && "Date" %in% colnames(met)) {
-    met <- met[met$Date >= date_range[1] & met$Date <= date_range[2], ]
-  }
-
-  met
 }
 
 # ── Helper: Build inverted precipitation sub-plot ────────────────────────────
@@ -561,17 +519,17 @@ build_discharge_subplot <- function(data) {
 
 # ── Helper: Build temperature + ET subplot ───────────────────────────────────
 #' @keywords internal
-build_temperature_et_plot <- function(met, wb) {
-  has_temp <- !is.null(met) && nrow(met) > 0 && "Temperature" %in% colnames(met)
+build_temperature_et_plot <- function(temp_data, wb) {
+  has_temp <- !is.null(temp_data) && nrow(temp_data) > 0 && "Temperature" %in% colnames(temp_data)
   has_et   <- !is.null(wb) && nrow(wb) > 0 && "ETA" %in% colnames(wb) && "Date" %in% colnames(wb)
 
   if (!has_temp && !has_et) {
-    return(CoseRo::plotly_empty(text = "No temperature/ET data (requires OUTPUTTYPE \u2265 2)"))
+    return(CoseRo::plotly_empty(text = "No temperature/ET data available"))
   }
 
   # Temperature subplot
   p_temp <- if (has_temp) {
-    plot_ly(met, x = ~Date) |>
+    plot_ly(temp_data, x = ~Date) |>
       add_trace(
         y = ~Temperature, name = "Temperature", type = "scatter", mode = "lines",
         line = list(color = "#e67e22", width = 1.2),

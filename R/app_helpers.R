@@ -215,6 +215,22 @@ prepare_subbasin_data <- function(result, subbasin_id, date_range = NULL) {
     }
   }
 
+  # Extract temperature from runoff_components (COSERO.plus — always available)
+  temperature <- NULL
+  if (!is.null(result$runoff_components)) {
+    tgeb_col <- grep(paste0("^TGEB_", sb_id, "$"), colnames(result$runoff_components), value = TRUE)[1]
+    if (!is.na(tgeb_col)) {
+      time_cols <- c("yyyy", "mm", "dd", "hh", "DateTime", "Date")
+      keep_cols <- c(time_cols[time_cols %in% colnames(result$runoff_components)], tgeb_col)
+      temperature <- result$runoff_components[, keep_cols, drop = FALSE]
+      names(temperature)[names(temperature) == tgeb_col] <- "Temperature"
+
+      if (!is.null(date_range) && "Date" %in% colnames(temperature)) {
+        temperature <- temperature[temperature$Date >= date_range[1] & temperature$Date <= date_range[2], ]
+      }
+    }
+  }
+
   # Extract glacier data for selected subbasin
   glacier <- result$glacier
   if (!is.null(glacier)) {
@@ -249,6 +265,7 @@ prepare_subbasin_data <- function(result, subbasin_id, date_range = NULL) {
     precipitation = precipitation,
     runoff_components = runoff_comp,
     water_balance = water_balance,
+    temperature = temperature,
     glacier = glacier,
     statistics = stats,
     subbasin_id = sb_id

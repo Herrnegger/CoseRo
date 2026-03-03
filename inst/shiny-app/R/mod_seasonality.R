@@ -153,11 +153,7 @@ seasonality_server <- function(id, shared) {
     # ── Prepare subbasin + seasonality data ───────────────────────────────
     subbasin_data <- reactive({
       req(shared$cosero_data, input$selected_subbasin)
-      sb <- CoseRo::prepare_subbasin_data(shared$cosero_data, input$selected_subbasin)
-      sb$meteorology <- extract_met_subbasin(
-        shared$cosero_data$meteorology, input$selected_subbasin
-      )
-      sb
+      CoseRo::prepare_subbasin_data(shared$cosero_data, input$selected_subbasin)
     })
 
     seasonality <- reactive({
@@ -290,12 +286,12 @@ seasonality_server <- function(id, shared) {
     # ── Drivers: Temperature + ET ─────────────────────────────────────────
     output$season_drivers_plot <- renderPlotly({
       sb <- subbasin_data()
-      met <- sb$meteorology
+      temp_data <- sb$temperature
 
-      # Monthly temperature
-      if (!is.null(met) && "Temperature" %in% colnames(met) && "Date" %in% colnames(met)) {
-        met$month <- as.integer(format(met$Date, "%m"))
-        temp_monthly <- stats::aggregate(Temperature ~ month, data = met, FUN = mean, na.rm = TRUE)
+      # Monthly temperature (from COSERO.plus — always available)
+      if (!is.null(temp_data) && "Temperature" %in% colnames(temp_data) && "Date" %in% colnames(temp_data)) {
+        temp_data$month <- as.integer(format(temp_data$Date, "%m"))
+        temp_monthly <- stats::aggregate(Temperature ~ month, data = temp_data, FUN = mean, na.rm = TRUE)
       } else {
         temp_monthly <- NULL
       }
@@ -312,7 +308,7 @@ seasonality_server <- function(id, shared) {
       }
 
       if (is.null(temp_monthly) && is.null(et_monthly)) {
-        return(CoseRo::plotly_empty("No temperature/ET data (requires OUTPUTTYPE \u2265 2)"))
+        return(CoseRo::plotly_empty("No temperature/ET data available"))
       }
 
       # Apply cumulative sums to ET if toggled
