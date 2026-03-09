@@ -390,6 +390,7 @@ load_parameter_bounds <- function(bounds_file = NULL,
 #'
 #' @param par_bounds Tibble from load_parameter_bounds()
 #' @return Named tibble with min/max rows for sobol_matrices()
+#' @export
 create_sobol_bounds <- function(par_bounds) {
   # Use sample_min/sample_max for Sobol sampling (not physical min/max)
   bounds_matrix <- data.frame(
