@@ -18,6 +18,8 @@ run_ui <- function(id) {
     .run-compact .form-group { margin-bottom: 0.35rem; }
     .run-compact .form-label, .run-compact label { font-size: 0.82rem; margin-bottom: 0.1rem; }
     .run-compact .form-control, .run-compact .form-select { padding: 0.2rem 0.4rem; font-size: 0.82rem; min-height: unset; }
+    .run-compact .selectize-input { font-size: 0.82rem !important; padding: 0.2rem 0.4rem !important; min-height: unset !important; }
+    .run-compact .selectize-dropdown, .run-compact .selectize-dropdown-content { font-size: 0.82rem !important; }
     .run-compact .bslib-value-box { min-height: unset; padding: 0.2rem 0; }
     .run-compact .value-box-title { font-size: 0.75rem; }
     .run-compact .value-box-value { font-size: 1.15rem; line-height: 1.2; }

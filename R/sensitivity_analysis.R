@@ -1151,7 +1151,7 @@ run_cosero_ensemble_parallel <- function(project_path,
 
   # Process in batches for scalability
   # KEY FIX: Ensure each run in a batch uses a UNIQUE worker (no conflicts)
-  if (!quiet) cat(sprintf("Starting %d runs in %d batches...\n\n", n_runs, n_batches))
+  if (!quiet) cat(sprintf("Starting %d runs (%d batches of ~%d)...\n", n_runs, n_batches, batch_size))
 
   all_results <- vector("list", n_runs)
   completed_count <- 0
@@ -1228,8 +1228,12 @@ run_cosero_ensemble_parallel <- function(project_path,
 
     completed_count <- completed_count + batch_size_actual
     if (!quiet) {
-      cat(sprintf("  Completed %d/%d runs (batch %d/%d)\n",
-                  completed_count, n_runs, batch_idx, n_batches))
+      display_progress(
+        current    = completed_count,
+        total      = n_runs,
+        start_time = parallel_start,
+        run_type   = "Parallel"
+      )
     }
   }
 
