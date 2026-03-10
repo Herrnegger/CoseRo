@@ -456,10 +456,11 @@ generate_sobol_samples <- function(par_bounds, n = 50, order = "first") {
   cat("Generated", nrow(par_scaled), "parameter sets for", length(par_names), "parameters\n")
 
   return(list(
-    sobol_matrix = sobol_mat,
+    sobol_matrix   = sobol_mat,
     parameter_sets = par_scaled,
-    n = n,
-    par_names = par_names
+    n              = n,
+    par_names      = par_names,
+    order          = order
   ))
 }
 
@@ -1346,6 +1347,7 @@ run_cosero_ensemble_parallel <- function(project_path,
 #' @param variable Output variable to extract ("runoff", "et", etc.)
 #' @param aggregation Temporal aggregation ("daily", "monthly", "annual")
 #' @return Matrix with rows=time, cols=runs
+#' @export
 extract_ensemble_output <- function(ensemble_results,
                                      variable = "runoff",
                                      aggregation = "monthly") {
@@ -1602,50 +1604,161 @@ aggregate_to_annual <- function(data) {
 
 #' Calculate Sobol Sensitivity Indices
 #'
-#' Calculates first-order and total-order Sobol sensitivity indices from
-#' model outputs and parameter samples. Uses bootstrap for uncertainty estimation.
+#' Calculates first-order (Si) and total-order (Ti) Sobol sensitivity indices
+#' from COSERO ensemble outputs using the Jansen estimator. Bootstrap confidence
+#' intervals are supported.
 #'
-#' @param Y Numeric vector of model outputs (length = nrow(parameter_sets))
-#' @param sobol_samples List from generate_sobol_samples() containing parameter sets
-#' @param boot Logical. If TRUE, performs bootstrap for confidence intervals.
-#' @param R Integer. Number of bootstrap resamples (default: 100)
+#' @section What the indices mean:
+#' \itemize{
+#'   \item \strong{Si (first-order)}: Fraction of output variance explained by
+#'     each parameter acting alone. A high Si means that parameter is an
+#'     important individual driver.
+#'   \item \strong{Ti (total-order)}: Si plus all higher-order interaction effects
+#'     involving that parameter. If Ti >> Si, the parameter is involved in
+#'     significant interactions with others.
+#'   \item \strong{Sum of Si}: Values well below 1 indicate that parameter
+#'     interactions explain a large share of variance.
+#' }
 #'
-#' @return Sobol indices object from sensobol package containing:
-#'   \item{results}{Data frame with sensitivity indices (Si, Ti) and confidence intervals}
-#'   \item{...}{Other sensobol output fields}
+#' @section The \code{order} argument (set via \code{generate_sobol_samples}):
+#' The \code{order} is inherited from the \code{sobol_samples} object — it is
+#' not set here directly. It controls which indices are computed and how many
+#' model runs are required:
+#' \itemize{
+#'   \item \strong{\code{"first"} (default, recommended)}: Computes Si and Ti.
+#'     Requires \code{N * (k + 2)} model runs (e.g. N=500, k=6 → 4000 runs).
+#'   \item \strong{\code{"second"}}: Additionally computes Sij (pairwise
+#'     parameter interactions). Requires \code{N * (k + 2 + k*(k-1)/2)} runs —
+#'     substantially more expensive and rarely needed for hydrological applications.
+#' }
+#' For most COSERO sensitivity analyses \code{order = "first"} is sufficient.
+#'
+#' @section NA handling:
+#' Failed model runs (NA in Y) are handled structurally. The Sobol sequence is
+#' organised as \code{n_blocks} groups of N rows each (A, B, AB_1 ... AB_k).
+#' Any sample index that is NA in \emph{any} block is dropped from \emph{all}
+#' blocks simultaneously, preserving the mathematical structure of the Jansen
+#' estimator. The effective sample size \code{N_eff} is reported. A warning is
+#' issued if more than 20\% of sample points are dropped.
+#'
+#' @param Y Numeric vector of model outputs. Length must equal
+#'   \code{nrow(sobol_samples$parameter_sets)}, i.e. \code{N * (k + 2)} for
+#'   \code{order = "first"}. NAs are allowed (see NA handling section).
+#' @param sobol_samples List returned by \code{\link{generate_sobol_samples}},
+#'   containing \code{n}, \code{par_names}, and \code{order}.
+#' @param boot Logical. If \code{TRUE}, bootstrap confidence intervals are
+#'   computed. Recommended. Default: \code{TRUE}.
+#' @param R Integer. Number of bootstrap resamples. Higher values give tighter
+#'   CI estimates but take longer. Default: \code{100}. Use \code{500} or more
+#'   for publication-quality results.
+#'
+#' @return A \code{sensobol} object (list) with:
+#'   \item{results}{Data table with columns \code{parameters}, \code{sensitivity}
+#'     (\code{"Si"} or \code{"Ti"}), \code{original} (index value),
+#'     \code{std.error}, \code{low.ci}, \code{high.ci}}
+#'   \item{N_eff}{Effective sample size after structural NA removal}
+#'   \item{n_dropped}{Number of sample points dropped due to NA}
+#'
+#' @seealso \code{\link{generate_sobol_samples}} to create the sample design,
+#'   \code{\link{plot_sobol}} to visualise results,
+#'   \code{\link{plot_dotty}} for parameter-output scatter plots,
+#'   \code{\link{extract_ensemble_metrics}} to compute Y from ensemble results.
 #'
 #' @export
 #' @examples
 #' \dontrun{
-#' # After running ensemble and extracting metrics
-#' nse <- extract_ensemble_metrics(results, subbasin_id = "0001", metric = "NSE")
+#' # 1. Define parameters and generate Sobol sample design
+#' par_bounds <- load_parameter_bounds(parameters = c("BETA", "CTMAX", "M", "TCOR"))
+#' sobol_bounds <- create_sobol_bounds(par_bounds)
+#' samples <- generate_sobol_samples(sobol_bounds, n = 500, order = "first")
+#' # → generates 500 * (4 + 2) = 3000 parameter sets
 #'
-#' # Calculate sensitivity indices
-#' sobol_ind <- calculate_sobol_indices(
-#'   Y = nse,
-#'   sobol_samples = samples,
-#'   boot = TRUE,
-#'   R = 100
+#' # 2. Run COSERO ensemble (parallel recommended)
+#' ensemble <- run_cosero_ensemble_parallel(
+#'   project_path = "D:\\Projects\\COSERO",
+#'   parameter_sets = samples$parameter_sets,
+#'   par_bounds = par_bounds,
+#'   base_settings = list(SPINUP = 365, OUTPUTTYPE = 1),
+#'   n_cores = 4
 #' )
 #'
-#' # Plot results
-#' plot_sobol(sobol_ind)
+#' # 3. Extract metric vector Y (NAs from failed runs are fine)
+#' nse <- extract_ensemble_metrics(ensemble, subbasin_id = "0001", metric = "NSE")
+#'
+#' # 4. Compute sensitivity indices
+#' sobol_nse <- calculate_sobol_indices(Y = nse, sobol_samples = samples,
+#'                                      boot = TRUE, R = 500)
+#' cat("N_eff:", sobol_nse$N_eff, "  Dropped:", sobol_nse$n_dropped, "\n")
+#'
+#' # 5. Visualise
+#' plot_sobol(sobol_nse, title = "Parameter Sensitivity (NSE)")
 #' }
 calculate_sobol_indices <- function(Y, sobol_samples, boot = TRUE, R = 100) {
 
-  # Remove NA values
-  valid_idx <- !is.na(Y)
-  Y_clean <- Y[valid_idx]
+  N      <- sobol_samples$n
+  k      <- length(sobol_samples$par_names)
+  order  <- if (!is.null(sobol_samples$order)) sobol_samples$order else "first"
+
+  # Number of matrix blocks depends on order
+  n_blocks <- switch(order,
+    "first"  = k + 2L,
+    "second" = k + 2L + k * (k - 1L) / 2L,
+    stop("Unsupported order: ", order, call. = FALSE)
+  )
+
+  expected_len <- N * n_blocks
+  if (length(Y) != expected_len) {
+    stop(sprintf(
+      "Y has %d elements but expected %d (N=%d x %d blocks for %d params, order='%s').\n",
+      length(Y), expected_len, N, n_blocks, k, order
+    ), call. = FALSE)
+  }
+
+  # Reshape Y into [N x n_blocks] — each column is one matrix block (A, B, AB_i)
+  # NA removal must be done row-wise: drop a sample point from ALL blocks together
+  Y_mat <- matrix(Y, nrow = N, ncol = n_blocks)
+
+  # A sample point is invalid if it is NA in ANY block
+  invalid_rows <- apply(Y_mat, 1, anyNA)
+  n_dropped    <- sum(invalid_rows)
+
+  if (n_dropped > 0) {
+    pct <- round(100 * n_dropped / N, 1)
+    msg <- sprintf(
+      "%d of %d sample points dropped due to NA (%.1f%% of N). N_eff = %d.",
+      n_dropped, N, pct, N - n_dropped
+    )
+    if (pct > 20) {
+      warning(msg, " Results may be unreliable with >20%% missing runs.", call. = FALSE)
+    } else {
+      message(msg)
+    }
+  }
+
+  Y_clean <- as.vector(Y_mat[!invalid_rows, ])
+  N_eff   <- N - n_dropped
+
+  if (N_eff < 10L) {
+    stop(sprintf(
+      "Only %d valid sample points remain after NA removal. Cannot compute reliable Sobol indices.",
+      N_eff
+    ), call. = FALSE)
+  }
 
   sobol_result <- sobol_indices(
-    Y = Y_clean,
-    N = sobol_samples$n,
+    Y      = Y_clean,
+    N      = N_eff,
     params = sobol_samples$par_names,
-    first = "jansen",
-    total = "jansen",
-    boot = boot,
-    R = R
+    first  = "jansen",
+    total  = "jansen",
+    order  = order,
+    boot   = boot,
+    R      = R
   )
+
+  # Attach diagnostics so the user can inspect them
+  sobol_result$N_eff    <- N_eff
+  sobol_result$n_dropped <- n_dropped
 
   return(sobol_result)
 }
@@ -2084,6 +2197,7 @@ plot_metric_distribution <- function(metric_values, metric_name = "Metric",
 #' @param parameter_sets Parameter sets
 #' @param metrics Performance metrics
 #' @param prefix File prefix
+#' @export
 export_sensitivity_results <- function(output_dir,
                                        sobol_indices,
                                        parameter_sets,
