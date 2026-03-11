@@ -11,7 +11,8 @@ plot_dotty(
   n_col = 3,
   reference_line = NULL,
   y_min = NULL,
-  show_smooth = TRUE
+  show_envelope = TRUE,
+  envelope_quantile = 0.95
 )
 }
 \arguments{
@@ -30,7 +31,11 @@ dashed line (e.g., acceptable performance threshold).}
 \item{y_min}{Optional minimum Y-axis value (e.g., 0 to start from zero).
 If NULL, ggplot2 auto-scales.}
 
-\item{show_smooth}{Logical. If TRUE (default), adds a LOESS smoothing curve to highlight trends.}
+\item{show_envelope}{Logical. If TRUE (default), adds a smoothing curve tracking
+the upper performance envelope of the parameter space.}
+
+\item{envelope_quantile}{Numeric. The quantile used to calculate the upper envelope
+(default is 0.95). Only applies if \code{show_envelope = TRUE}.}
 }
 \value{
 ggplot object with faceted scatter plots
@@ -42,31 +47,28 @@ on the x-axis versus the output metric on the y-axis. Useful for identifying
 parameter sensitivity and equifinality.
 }
 \details{
-Points are colored dark blue with transparency (alpha = 0.3). Each facet has
+Points are colored dark blue with transparency (alpha = 0.5). Each facet has
 independent x-axis scaling (\code{scales = "free_x"}) since parameters have
 different ranges. A clear vertical spread of points for a parameter indicates
 low sensitivity; a structured pattern (e.g., funnel, trend) suggests the
 parameter has a strong influence on the output.
+
+When \code{show_envelope = TRUE}, the parameter space is binned, and a LOESS
+curve is fitted to the upper quantiles of each bin. This isolates the parameter's
+maximum behavioral potential from the noise of poorly performing parameter combinations.
 }
 \examples{
 \dontrun{
 # After running ensemble and extracting metrics
 nse <- extract_ensemble_metrics(results, subbasin_id = "001", metric = "NSE")
 
-# Basic dotty plot with smoothing curves
+# Basic dotty plot with 95\% upper envelope curve
 p <- plot_dotty(sobol_samples$parameter_sets, Y = nse, y_label = "NSE")
 print(p)
 
-# With reference line at NSE = 0.7 (behavioral threshold)
-p <- plot_dotty(sobol_samples$parameter_sets, Y = nse,
-                y_label = "NSE", reference_line = 0.7)
-
-# Force y-axis to start at 0, use 4 columns, and turn off the smoothing curve
-p <- plot_dotty(sobol_samples$parameter_sets, Y = nse,
-                y_label = "NSE", y_min = 0, n_col = 4, show_smooth = FALSE)
-
-# Save to file
-ggplot2::ggsave("dotty_plots.png", p, width = 12, height = 10, dpi = 300)
+# With reference line at NSE = 0.7, tracking the absolute max (99th percentile)
+p <- plot_dotty(sobol_samples$parameter_sets, Y = nse, y_label = "NSE", 
+                reference_line = 0.7, envelope_quantile = 0.99)
 }
 }
 \references{

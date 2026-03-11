@@ -1318,19 +1318,18 @@ run_cosero_ensemble_parallel <- function(project_path,
   gc(full = TRUE)
 
   runtime <- difftime(Sys.time(), start_time, units = "mins")
+
   if (!quiet) {
     cat(sprintf("\nDone: Ensemble completed in %s\n", format_time_duration(as.numeric(runtime) * 60)))
-    cat(sprintf("  Average per run: %s\n", format_time_duration(runtime * 60 / n_runs)))
-
-    # Calculate efficiency
-    avg_run_time <- runtime * 60 / n_runs
-    est_sequential_time <- avg_run_time * n_runs
-    actual_speedup <- est_sequential_time / parallel_time
-    efficiency <- (actual_speedup / n_cores) * 100
-
-    cat(sprintf("  Parallel efficiency: %.0f%% (speedup: %.2fx / ideal: %dx)\n",
-                efficiency, actual_speedup, n_cores))
+    
+    # Calculate effective throughput
+    effective_run_time <- as.numeric(runtime) * 60 / n_runs
+    
+    cat(sprintf("  Effective throughput: %.2f seconds per run (across %d cores)\n", 
+                effective_run_time, n_cores))
   }
+
+  if (!quiet) cat("Done: Memory cleanup complete\n\n")
 
   if (!quiet) cat("Done: Memory cleanup complete\n\n")
 
@@ -1837,16 +1836,23 @@ plot_sobol <- function(sobol_indices, title = "Sobol Sensitivity Indices") {
 #'   dashed line (e.g., acceptable performance threshold).
 #' @param y_min Optional minimum Y-axis value (e.g., 0 to start from zero).
 #'   If NULL, ggplot2 auto-scales.
-#' @param show_smooth Logical. If TRUE (default), adds a LOESS smoothing curve to highlight trends.
+#' @param show_envelope Logical. If TRUE (default), adds a smoothing curve tracking 
+#'   the upper performance envelope of the parameter space.
+#' @param envelope_quantile Numeric. The quantile used to calculate the upper envelope 
+#'   (default is 0.95). Only applies if \code{show_envelope = TRUE}.
 #'
 #' @return ggplot object with faceted scatter plots
 #'
 #' @details
-#' Points are colored dark blue with transparency (alpha = 0.3). Each facet has 
+#' Points are colored dark blue with transparency (alpha = 0.5). Each facet has 
 #' independent x-axis scaling (\code{scales = "free_x"}) since parameters have 
 #' different ranges. A clear vertical spread of points for a parameter indicates 
 #' low sensitivity; a structured pattern (e.g., funnel, trend) suggests the 
-#' parameter has a strong influence on the output.
+#' parameter has a strong influence on the output. 
+#' 
+#' When \code{show_envelope = TRUE}, the parameter space is binned, and a LOESS 
+#' curve is fitted to the upper quantiles of each bin. This isolates the parameter's 
+#' maximum behavioral potential from the noise of poorly performing parameter combinations.
 #'
 #' @references
 #' Beven, K., & Binley, A. (1992). The future of distributed models: Model calibration 
@@ -1859,7 +1865,7 @@ plot_sobol <- function(sobol_indices, title = "Sobol Sensitivity Indices") {
 #' 
 #' @import ggplot2
 #' @importFrom tidyr pivot_longer
-#' @importFrom dplyr mutate %>%
+#' @importFrom dplyr mutate filter group_by summarize %>%
 #' @export
 #' 
 #' @examples
@@ -1867,24 +1873,20 @@ plot_sobol <- function(sobol_indices, title = "Sobol Sensitivity Indices") {
 #' # After running ensemble and extracting metrics
 #' nse <- extract_ensemble_metrics(results, subbasin_id = "001", metric = "NSE")
 #'
-#' # Basic dotty plot with smoothing curves
+#' # Basic dotty plot with 95% upper envelope curve
 #' p <- plot_dotty(sobol_samples$parameter_sets, Y = nse, y_label = "NSE")
 #' print(p)
 #'
-#' # With reference line at NSE = 0.7 (behavioral threshold)
-#' p <- plot_dotty(sobol_samples$parameter_sets, Y = nse,
-#'                 y_label = "NSE", reference_line = 0.7)
-#'
-#' # Force y-axis to start at 0, use 4 columns, and turn off the smoothing curve
-#' p <- plot_dotty(sobol_samples$parameter_sets, Y = nse,
-#'                 y_label = "NSE", y_min = 0, n_col = 4, show_smooth = FALSE)
-#'
-#' # Save to file
-#' ggplot2::ggsave("dotty_plots.png", p, width = 12, height = 10, dpi = 300)
+#' # With reference line at NSE = 0.7, tracking the absolute max (99th percentile)
+#' p <- plot_dotty(sobol_samples$parameter_sets, Y = nse, y_label = "NSE", 
+#'                 reference_line = 0.7, envelope_quantile = 0.99)
 #' }
 plot_dotty <- function(parameter_sets, Y, y_label = "Output",
                        n_col = 3, reference_line = NULL, y_min = NULL,
-                       show_smooth = TRUE) {
+                       show_envelope = TRUE, envelope_quantile = 0.95) {
+
+  # Fix for R CMD check: "no visible binding for global variable"
+  parameter <- output <- value <- x_bin <- NULL
 
   # 1. Input Validation
   if (nrow(parameter_sets) != length(Y)) {
@@ -1895,14 +1897,14 @@ plot_dotty <- function(parameter_sets, Y, y_label = "Output",
   # 2. Ensure data structure is a data frame
   parameter_sets <- as.data.frame(parameter_sets)
 
-  # 3. Wrangle the data
+  # 3. Wrangle the raw data
   dotty_data <- parameter_sets %>%
     mutate(output = Y) %>%
     pivot_longer(cols = -output, names_to = "parameter", values_to = "value")
 
-  # 4. Generate the base plot
+  # 4. Generate the base plot (Dots are slightly larger and less transparent now)
   p <- ggplot(dotty_data, aes(x = value, y = output)) +
-    geom_point(alpha = 0.3, size = 0.8, color = "#1f3b73", stroke = 0) +
+    geom_point(alpha = 0.5, size = 1.0, color = "#1f3b73", stroke = 0) +
     facet_wrap(~ parameter, scales = "free_x", ncol = n_col) +
     theme_bw() +
     labs(x = "Parameter Value", y = y_label) +
@@ -1913,11 +1915,27 @@ plot_dotty <- function(parameter_sets, Y, y_label = "Output",
       panel.border = element_rect(color = "grey70", fill = NA)
     )
 
-  # 5. Add Smoothing Curve
-  if (show_smooth) {
-    p <- p + geom_smooth(method = "loess", formula = y ~ x, 
-                         color = "darkorange", linewidth = 0.8, 
-                         se = FALSE, alpha = 0.8)
+  # 5. Calculate and Add Upper Envelope Curve
+  if (show_envelope) {
+    # Isolate the highest performers by binning the x-axis
+    envelope_data <- dotty_data %>%
+      group_by(parameter) %>%
+      mutate(x_bin = cut(value, breaks = 30)) %>%
+      group_by(parameter, x_bin) %>%
+      summarize(
+        value = mean(value, na.rm = TRUE),
+        output = quantile(output, probs = envelope_quantile, na.rm = TRUE),
+        .groups = "drop"
+      ) %>%
+      filter(!is.na(value) & !is.na(output))
+
+    # Add the smoothed curve and dynamically add the subtitle
+    p <- p + 
+      geom_smooth(data = envelope_data, method = "loess", formula = y ~ x, 
+                  color = "darkorange", linewidth = 0.6, 
+                  se = FALSE, alpha = 0.9) +
+      labs(subtitle = paste0("Orange line: LOESS fit of the ", 
+                             envelope_quantile * 100, "% upper envelope"))
   }
 
   # 6. Add Y-axis minimum if specified
@@ -1959,6 +1977,9 @@ plot_dotty <- function(parameter_sets, Y, y_label = "Output",
 #' @param show_observed Logical. If TRUE (default), show the observed data as a black line.
 #' @param date_range Optional vector of two dates or character strings (e.g., 
 #'   \code{c("2010-01-01", "2010-12-31")}) to zoom in on a specific time period.
+#' @param q_max Numeric or Logical. If TRUE (default), the y-axis automatically 
+#'   scales to the maximum of the simulated and observed data. If a numeric value 
+#'   is provided (e.g., 500), it forces the upper limit of the y-axis to that value.
 #'
 #' @return ggplot object showing the median (red line), user-defined confidence interval
 #'   (orange ribbon), and observed data (black line, if available).
@@ -1973,7 +1994,7 @@ plot_dotty <- function(parameter_sets, Y, y_label = "Output",
 #' # After running ensemble
 #' results <- run_cosero_ensemble_parallel(...)
 #'
-#' # Plot uncertainty with auto-extracted QOBS
+#' # Plot uncertainty with auto-extracted QOBS (auto-scales y-axis)
 #' p <- plot_ensemble_uncertainty(results, subbasin_id = "0001")
 #' print(p)
 #'
@@ -1984,20 +2005,22 @@ plot_dotty <- function(parameter_sets, Y, y_label = "Output",
 #' obs <- data.frame(date = dates, value = observed_discharge)
 #' p <- plot_ensemble_uncertainty(results, observed = obs, subbasin_id = "0001")
 #' 
-#' # Zooming in on a specific date range and overriding the default title
+#' # Zooming in on a specific date range, and forcing the y-axis maximum to 150
 #' p_zoom <- plot_ensemble_uncertainty(results, subbasin_id = "3", 
-#'                                     date_range = c("2012-01-01", "2012-12-31")) +
+#'                                     date_range = c("2012-01-01", "2012-12-31"),
+#'                                     q_max = 150) +
 #'   labs(title = "Ensemble Discharge Uncertainty — Subbasin 3 (2012)")
 #' print(p_zoom)
 #' }
 plot_ensemble_uncertainty <- function(ensemble_output, observed = NULL,
                                       subbasin_id = "0001", output_variable = "QSIM",
                                       lower_quantile = 0.10, upper_quantile = 0.90,
-                                      show_observed = TRUE, date_range = NULL) {
+                                      show_observed = TRUE, date_range = NULL,
+                                      q_max = TRUE) {
 
   # Fix for R CMD check: "no visible binding for global variable"
   date <- q_low <- q_high <- median <- value <- NULL
-  
+
   # Check if ensemble_output is the standard list output
   if (!is.null(ensemble_output$results)) {
     results_list <- ensemble_output$results
@@ -2140,6 +2163,11 @@ plot_ensemble_uncertainty <- function(ensemble_output, observed = NULL,
   if (!is.null(obs_plot_data)) {
     p <- p + geom_line(data = obs_plot_data, aes(x = date, y = value, color = "Observed"), 
                        linewidth = 0.4, alpha = 0.8)
+  }
+
+  # Limit Y-axis if q_max is specified as a numeric value
+  if (is.numeric(q_max)) {
+    p <- p + coord_cartesian(ylim = c(NA, q_max))
   }
 
   return(p)

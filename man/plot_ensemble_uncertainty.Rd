@@ -12,7 +12,8 @@ plot_ensemble_uncertainty(
   lower_quantile = 0.1,
   upper_quantile = 0.9,
   show_observed = TRUE,
-  date_range = NULL
+  date_range = NULL,
+  q_max = TRUE
 )
 }
 \arguments{
@@ -37,6 +38,10 @@ The function automatically pads this to 4 digits for matching COSERO outputs. De
 
 \item{date_range}{Optional vector of two dates or character strings (e.g.,
 \code{c("2010-01-01", "2010-12-31")}) to zoom in on a specific time period.}
+
+\item{q_max}{Numeric or Logical. If TRUE (default), the y-axis automatically
+scales to the maximum of the simulated and observed data. If a numeric value
+is provided (e.g., 500), it forces the upper limit of the y-axis to that value.}
 }
 \value{
 ggplot object showing the median (red line), user-defined confidence interval
@@ -58,7 +63,7 @@ You do not need to provide observed data manually unless you want to use a custo
 # After running ensemble
 results <- run_cosero_ensemble_parallel(...)
 
-# Plot uncertainty with auto-extracted QOBS
+# Plot uncertainty with auto-extracted QOBS (auto-scales y-axis)
 p <- plot_ensemble_uncertainty(results, subbasin_id = "0001")
 print(p)
 
@@ -69,9 +74,10 @@ p <- plot_ensemble_uncertainty(results, subbasin_id = "0001", show_observed = FA
 obs <- data.frame(date = dates, value = observed_discharge)
 p <- plot_ensemble_uncertainty(results, observed = obs, subbasin_id = "0001")
 
-# Zooming in on a specific date range and overriding the default title
+# Zooming in on a specific date range, and forcing the y-axis maximum to 150
 p_zoom <- plot_ensemble_uncertainty(results, subbasin_id = "3", 
-                                    date_range = c("2012-01-01", "2012-12-31")) +
+                                    date_range = c("2012-01-01", "2012-12-31"),
+                                    q_max = 150) +
   labs(title = "Ensemble Discharge Uncertainty — Subbasin 3 (2012)")
 print(p_zoom)
 }
