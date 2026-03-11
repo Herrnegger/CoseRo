@@ -8,41 +8,50 @@ plot_ensemble_uncertainty(
   ensemble_output,
   observed = NULL,
   subbasin_id = "0001",
-  variable = "QSIM",
-  show_observed = TRUE
+  output_variable = "QSIM",
+  lower_quantile = 0.1,
+  upper_quantile = 0.9,
+  show_observed = TRUE,
+  date_range = NULL
 )
 }
 \arguments{
 \item{ensemble_output}{Output from run_cosero_ensemble_parallel() or
-run_cosero_ensemble(), or a list of individual run results}
+run_cosero_ensemble(), or a list of individual run results.}
 
-\item{observed}{Optional data frame with observed data containing 'date'
-and 'value' columns. If NULL and \code{show_observed = TRUE}, QOBS is
-automatically extracted from the ensemble results (when available).}
+\item{observed}{Optional data frame with your own observed data (must have
+'date' and 'value' columns). Leave this as NULL to let the function
+automatically extract QOBS from the COSERO results.}
 
-\item{subbasin_id}{Subbasin identifier (e.g., "0001"). Default is "0001"}
+\item{subbasin_id}{Character or Numeric. Subbasin identifier (e.g., "0001", "1", or 1).
+The function automatically pads this to 4 digits for matching COSERO outputs. Default is "0001".}
 
-\item{variable}{Variable to plot (e.g., "QSIM", "QOBS"). Default is "QSIM"}
+\item{output_variable}{Character. The prefix of the model output to plot
+(e.g., "QSIM" for simulated discharge, "SWE" for snow water equivalent). Default is "QSIM".}
 
-\item{show_observed}{Logical. If TRUE (default), show observed discharge.
-When \code{observed = NULL} and \code{variable = "QSIM"}, QOBS is
-automatically extracted from ensemble results.}
+\item{lower_quantile}{Numeric. Lower bound for the confidence interval (default: 0.10).}
+
+\item{upper_quantile}{Numeric. Upper bound for the confidence interval (default: 0.90).}
+
+\item{show_observed}{Logical. If TRUE (default), show the observed data as a black line.}
+
+\item{date_range}{Optional vector of two dates or character strings (e.g.,
+\code{c("2010-01-01", "2010-12-31")}) to zoom in on a specific time period.}
 }
 \value{
-ggplot object showing median (blue line), 50\% confidence interval
-(dark gray ribbon), 90\% confidence interval (light gray ribbon),
-and observed discharge (black line, if available)
+ggplot object showing the median (red line), user-defined confidence interval
+(orange ribbon), and observed data (black line, if available).
 }
 \description{
-Visualizes ensemble uncertainty by plotting median and quantile ranges
+Visualizes ensemble uncertainty by plotting median and user-defined quantile ranges
 across multiple model runs. Works directly with output from
 run_cosero_ensemble() or run_cosero_ensemble_parallel().
 }
 \details{
-When \code{variable = "QSIM"} and \code{show_observed = TRUE} (default),
-the observed discharge (QOBS) is automatically extracted from the ensemble
-results and plotted as a black line. This can be overridden by providing
-a custom \code{observed} data frame.
+By default, if you are plotting simulated discharge (\code{output_variable = "QSIM"})
+and \code{show_observed = TRUE}, the function will automatically find and plot
+the observed discharge (\code{QOBS}) from the COSERO results as a black line.
+You do not need to provide observed data manually unless you want to use a custom dataset.
 }
 \examples{
 \dontrun{
@@ -59,6 +68,12 @@ p <- plot_ensemble_uncertainty(results, subbasin_id = "0001", show_observed = FA
 # With custom observed data
 obs <- data.frame(date = dates, value = observed_discharge)
 p <- plot_ensemble_uncertainty(results, observed = obs, subbasin_id = "0001")
+
+# Zooming in on a specific date range and overriding the default title
+p_zoom <- plot_ensemble_uncertainty(results, subbasin_id = "3", 
+                                    date_range = c("2012-01-01", "2012-12-31")) +
+  labs(title = "Ensemble Discharge Uncertainty — Subbasin 3 (2012)")
+print(p_zoom)
 }
 }
 \seealso{

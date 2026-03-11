@@ -145,7 +145,7 @@ for (p in params_of_interest) {
 cat("\n--- Running with modified parameters ---\n")
 result_mod <- run_cosero(
   project_path      = project_path,
-  defaults_settings = c(base_settings, list(PARAFILE = "para_mod.txt")),
+  defaults_settings = modifyList(base_settings, list(PARAFILE = "para_mod.txt")),
   statevar_source   = 1,
   quiet             = FALSE
 )
@@ -190,7 +190,7 @@ for (name in names(scenarios)) {
     tmp_file <- file.path(project_path, "input", paste0("para_", name, ".txt"))
     file.copy(par_file, tmp_file, overwrite = TRUE)
     modify_parameter_table(tmp_file, scenarios[[name]], par_bounds_all, orig_vals)
-    run_settings <- c(base_settings, list(PARAFILE = paste0("para_", name, ".txt")))
+    run_settings <- modifyList(base_settings, list(PARAFILE = paste0("para_", name, ".txt")))
   }
 
   res <- run_cosero(

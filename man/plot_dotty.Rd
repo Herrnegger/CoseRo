@@ -10,25 +10,27 @@ plot_dotty(
   y_label = "Output",
   n_col = 3,
   reference_line = NULL,
-  y_min = NULL
+  y_min = NULL,
+  show_smooth = TRUE
 )
 }
 \arguments{
-\item{parameter_sets}{Parameter sets tibble or data frame (one column per
-parameter, one row per ensemble run). Typically from
-\code{sobol_samples$parameter_sets}}
+\item{parameter_sets}{Parameter sets tibble, data frame, or matrix (one column per
+parameter, one row per ensemble run).}
 
-\item{Y}{Numeric vector of model outputs (same length as rows in parameter_sets)}
+\item{Y}{Numeric vector of model outputs (must be the same length as rows in parameter_sets).}
 
-\item{y_label}{Y-axis label. Default is "Output"}
+\item{y_label}{Character. Y-axis label. Default is "Output".}
 
-\item{n_col}{Number of columns in facet grid. Default is 3}
+\item{n_col}{Numeric. Number of columns in facet grid. Default is 3.}
 
 \item{reference_line}{Optional numeric value to show as a horizontal red
-dashed line (e.g., acceptable performance threshold)}
+dashed line (e.g., acceptable performance threshold).}
 
 \item{y_min}{Optional minimum Y-axis value (e.g., 0 to start from zero).
-If NULL, ggplot2 auto-scales}
+If NULL, ggplot2 auto-scales.}
+
+\item{show_smooth}{Logical. If TRUE (default), adds a LOESS smoothing curve to highlight trends.}
 }
 \value{
 ggplot object with faceted scatter plots
@@ -40,32 +42,36 @@ on the x-axis versus the output metric on the y-axis. Useful for identifying
 parameter sensitivity and equifinality.
 }
 \details{
-Points are colored dark blue with transparency (alpha = 0.6). Each facet
-has independent x-axis scaling (\code{scales = "free_x"}) since parameters
-have different ranges. A clear vertical spread of points for a parameter
-indicates low sensitivity; a structured pattern (e.g., funnel, trend)
-suggests the parameter has a strong influence on the output.
+Points are colored dark blue with transparency (alpha = 0.3). Each facet has
+independent x-axis scaling (\code{scales = "free_x"}) since parameters have
+different ranges. A clear vertical spread of points for a parameter indicates
+low sensitivity; a structured pattern (e.g., funnel, trend) suggests the
+parameter has a strong influence on the output.
 }
 \examples{
 \dontrun{
 # After running ensemble and extracting metrics
 nse <- extract_ensemble_metrics(results, subbasin_id = "001", metric = "NSE")
 
-# Basic dotty plot
+# Basic dotty plot with smoothing curves
 p <- plot_dotty(sobol_samples$parameter_sets, Y = nse, y_label = "NSE")
 print(p)
 
 # With reference line at NSE = 0.7 (behavioral threshold)
 p <- plot_dotty(sobol_samples$parameter_sets, Y = nse,
-                 y_label = "NSE", reference_line = 0.7)
+                y_label = "NSE", reference_line = 0.7)
 
-# Force y-axis to start at 0, use 4 columns
+# Force y-axis to start at 0, use 4 columns, and turn off the smoothing curve
 p <- plot_dotty(sobol_samples$parameter_sets, Y = nse,
-                 y_label = "NSE", y_min = 0, n_col = 4)
+                y_label = "NSE", y_min = 0, n_col = 4, show_smooth = FALSE)
 
 # Save to file
 ggplot2::ggsave("dotty_plots.png", p, width = 12, height = 10, dpi = 300)
 }
+}
+\references{
+Beven, K., & Binley, A. (1992). The future of distributed models: Model calibration
+and uncertainty prediction. \emph{Hydrological Processes}, 6(3), 279-298.
 }
 \seealso{
 \code{\link{plot_sobol}} for Sobol sensitivity bar plots,

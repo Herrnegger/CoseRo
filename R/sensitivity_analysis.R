@@ -1150,7 +1150,7 @@ run_cosero_ensemble_parallel <- function(project_path,
   clusterExport(cl, c("thread_dirs", "statevar_source"), envir = environment())
 
   # Process in batches for scalability
-  # KEY FIX: Ensure each run in a batch uses a UNIQUE worker (no conflicts)
+  # Ensure each run in a batch uses a UNIQUE worker (no conflicts)
   if (!quiet) cat(sprintf("Starting %d runs (%d batches of ~%d)...\n", n_runs, n_batches, batch_size))
 
   all_results <- vector("list", n_runs)
@@ -1828,76 +1828,107 @@ plot_sobol <- function(sobol_indices, title = "Sobol Sensitivity Indices") {
 #' on the x-axis versus the output metric on the y-axis. Useful for identifying
 #' parameter sensitivity and equifinality.
 #'
-#' @param parameter_sets Parameter sets tibble or data frame (one column per
-#'   parameter, one row per ensemble run). Typically from
-#'   \code{sobol_samples$parameter_sets}
-#' @param Y Numeric vector of model outputs (same length as rows in parameter_sets)
-#' @param y_label Y-axis label. Default is "Output"
-#' @param n_col Number of columns in facet grid. Default is 3
+#' @param parameter_sets Parameter sets tibble, data frame, or matrix (one column per
+#'   parameter, one row per ensemble run).
+#' @param Y Numeric vector of model outputs (must be the same length as rows in parameter_sets).
+#' @param y_label Character. Y-axis label. Default is "Output".
+#' @param n_col Numeric. Number of columns in facet grid. Default is 3.
 #' @param reference_line Optional numeric value to show as a horizontal red
-#'   dashed line (e.g., acceptable performance threshold)
+#'   dashed line (e.g., acceptable performance threshold).
 #' @param y_min Optional minimum Y-axis value (e.g., 0 to start from zero).
-#'   If NULL, ggplot2 auto-scales
+#'   If NULL, ggplot2 auto-scales.
+#' @param show_smooth Logical. If TRUE (default), adds a LOESS smoothing curve to highlight trends.
 #'
 #' @return ggplot object with faceted scatter plots
 #'
 #' @details
-#' Points are colored dark blue with transparency (alpha = 0.6). Each facet
-#' has independent x-axis scaling (\code{scales = "free_x"}) since parameters
-#' have different ranges. A clear vertical spread of points for a parameter
-#' indicates low sensitivity; a structured pattern (e.g., funnel, trend)
-#' suggests the parameter has a strong influence on the output.
+#' Points are colored dark blue with transparency (alpha = 0.3). Each facet has 
+#' independent x-axis scaling (\code{scales = "free_x"}) since parameters have 
+#' different ranges. A clear vertical spread of points for a parameter indicates 
+#' low sensitivity; a structured pattern (e.g., funnel, trend) suggests the 
+#' parameter has a strong influence on the output.
 #'
+#' @references
+#' Beven, K., & Binley, A. (1992). The future of distributed models: Model calibration 
+#' and uncertainty prediction. \emph{Hydrological Processes}, 6(3), 279-298.
+#'
+#' @seealso 
+#' \code{\link{plot_sobol}} for Sobol sensitivity bar plots, 
+#' \code{\link{plot_metric_distribution}} for metric histograms, 
+#' \code{\link{plot_ensemble_uncertainty}} for ensemble discharge visualization
+#' 
+#' @import ggplot2
+#' @importFrom tidyr pivot_longer
+#' @importFrom dplyr mutate %>%
 #' @export
-#' @seealso \code{\link{plot_sobol}} for Sobol sensitivity bar plots,
-#'   \code{\link{plot_metric_distribution}} for metric histograms,
-#'   \code{\link{plot_ensemble_uncertainty}} for ensemble discharge visualization
+#' 
 #' @examples
 #' \dontrun{
 #' # After running ensemble and extracting metrics
 #' nse <- extract_ensemble_metrics(results, subbasin_id = "001", metric = "NSE")
 #'
-#' # Basic dotty plot
+#' # Basic dotty plot with smoothing curves
 #' p <- plot_dotty(sobol_samples$parameter_sets, Y = nse, y_label = "NSE")
 #' print(p)
 #'
 #' # With reference line at NSE = 0.7 (behavioral threshold)
 #' p <- plot_dotty(sobol_samples$parameter_sets, Y = nse,
-#'                  y_label = "NSE", reference_line = 0.7)
+#'                 y_label = "NSE", reference_line = 0.7)
 #'
-#' # Force y-axis to start at 0, use 4 columns
+#' # Force y-axis to start at 0, use 4 columns, and turn off the smoothing curve
 #' p <- plot_dotty(sobol_samples$parameter_sets, Y = nse,
-#'                  y_label = "NSE", y_min = 0, n_col = 4)
+#'                 y_label = "NSE", y_min = 0, n_col = 4, show_smooth = FALSE)
 #'
 #' # Save to file
 #' ggplot2::ggsave("dotty_plots.png", p, width = 12, height = 10, dpi = 300)
 #' }
 plot_dotty <- function(parameter_sets, Y, y_label = "Output",
-                       n_col = 3, reference_line = NULL, y_min = NULL) {
+                       n_col = 3, reference_line = NULL, y_min = NULL,
+                       show_smooth = TRUE) {
 
+  # 1. Input Validation
+  if (nrow(parameter_sets) != length(Y)) {
+    stop(sprintf("Dimension mismatch: 'parameter_sets' has %d rows, but 'Y' has length %d.", 
+                 nrow(parameter_sets), length(Y)), call. = FALSE)
+  }
+
+  # 2. Ensure data structure is a data frame
+  parameter_sets <- as.data.frame(parameter_sets)
+
+  # 3. Wrangle the data
   dotty_data <- parameter_sets %>%
     mutate(output = Y) %>%
     pivot_longer(cols = -output, names_to = "parameter", values_to = "value")
 
+  # 4. Generate the base plot
   p <- ggplot(dotty_data, aes(x = value, y = output)) +
-    geom_point(alpha = 0.6, size = 1.2, color = "darkblue") +
+    geom_point(alpha = 0.3, size = 0.8, color = "#1f3b73", stroke = 0) +
     facet_wrap(~ parameter, scales = "free_x", ncol = n_col) +
     theme_bw() +
     labs(x = "Parameter Value", y = y_label) +
     theme(
-      strip.text = element_text(size = 10, face = "bold"),
-      strip.background = element_rect(fill = "lightgray")
+      strip.background = element_blank(),
+      strip.text = element_text(size = 11, face = "bold", color = "black"),
+      panel.grid.minor = element_blank(),
+      panel.border = element_rect(color = "grey70", fill = NA)
     )
 
-  # Set Y-axis minimum if specified
-  if (!is.null(y_min)) {
-    y_max <- max(Y, na.rm = TRUE)
-    p <- p + coord_cartesian(ylim = c(y_min, y_max))
+  # 5. Add Smoothing Curve
+  if (show_smooth) {
+    p <- p + geom_smooth(method = "loess", formula = y ~ x, 
+                         color = "darkorange", linewidth = 0.8, 
+                         se = FALSE, alpha = 0.8)
   }
 
+  # 6. Add Y-axis minimum if specified
+  if (!is.null(y_min)) {
+    p <- p + coord_cartesian(ylim = c(y_min, NA))
+  }
+
+  # 7. Add Reference Line
   if (!is.null(reference_line)) {
     p <- p + geom_hline(yintercept = reference_line,
-                       linetype = "dashed", color = "red", linewidth = 1)
+                        linetype = "dashed", color = "#d90429", linewidth = 0.8, alpha = 0.8)
   }
 
   return(p)
@@ -1905,32 +1936,38 @@ plot_dotty <- function(parameter_sets, Y, y_label = "Output",
 
 #' Plot Ensemble Uncertainty
 #'
-#' Visualizes ensemble uncertainty by plotting median and quantile ranges
+#' Visualizes ensemble uncertainty by plotting median and user-defined quantile ranges
 #' across multiple model runs. Works directly with output from
 #' run_cosero_ensemble() or run_cosero_ensemble_parallel().
 #'
-#' When \code{variable = "QSIM"} and \code{show_observed = TRUE} (default),
-#' the observed discharge (QOBS) is automatically extracted from the ensemble
-#' results and plotted as a black line. This can be overridden by providing
-#' a custom \code{observed} data frame.
+#' By default, if you are plotting simulated discharge (\code{output_variable = "QSIM"}) 
+#' and \code{show_observed = TRUE}, the function will automatically find and plot 
+#' the observed discharge (\code{QOBS}) from the COSERO results as a black line. 
+#' You do not need to provide observed data manually unless you want to use a custom dataset.
 #'
 #' @param ensemble_output Output from run_cosero_ensemble_parallel() or
-#'   run_cosero_ensemble(), or a list of individual run results
-#' @param observed Optional data frame with observed data containing 'date'
-#'   and 'value' columns. If NULL and \code{show_observed = TRUE}, QOBS is
-#'   automatically extracted from the ensemble results (when available).
-#' @param subbasin_id Subbasin identifier (e.g., "0001"). Default is "0001"
-#' @param variable Variable to plot (e.g., "QSIM", "QOBS"). Default is "QSIM"
-#' @param show_observed Logical. If TRUE (default), show observed discharge.
-#'   When \code{observed = NULL} and \code{variable = "QSIM"}, QOBS is
-#'   automatically extracted from ensemble results.
+#'   run_cosero_ensemble(), or a list of individual run results.
+#' @param observed Optional data frame with your own observed data (must have 
+#'   'date' and 'value' columns). Leave this as NULL to let the function 
+#'   automatically extract QOBS from the COSERO results.
+#' @param subbasin_id Character or Numeric. Subbasin identifier (e.g., "0001", "1", or 1). 
+#'   The function automatically pads this to 4 digits for matching COSERO outputs. Default is "0001".
+#' @param output_variable Character. The prefix of the model output to plot 
+#'   (e.g., "QSIM" for simulated discharge, "SWE" for snow water equivalent). Default is "QSIM".
+#' @param lower_quantile Numeric. Lower bound for the confidence interval (default: 0.10).
+#' @param upper_quantile Numeric. Upper bound for the confidence interval (default: 0.90).
+#' @param show_observed Logical. If TRUE (default), show the observed data as a black line.
+#' @param date_range Optional vector of two dates or character strings (e.g., 
+#'   \code{c("2010-01-01", "2010-12-31")}) to zoom in on a specific time period.
 #'
-#' @return ggplot object showing median (blue line), 50% confidence interval
-#'   (dark gray ribbon), 90% confidence interval (light gray ribbon),
-#'   and observed discharge (black line, if available)
+#' @return ggplot object showing the median (red line), user-defined confidence interval
+#'   (orange ribbon), and observed data (black line, if available).
 #'
+#' @import ggplot2
+#' @importFrom stats median quantile
 #' @export
 #' @seealso \code{\link{plot_metric_distribution}} for visualizing ensemble metric distributions
+#' 
 #' @examples
 #' \dontrun{
 #' # After running ensemble
@@ -1946,26 +1983,39 @@ plot_dotty <- function(parameter_sets, Y, y_label = "Output",
 #' # With custom observed data
 #' obs <- data.frame(date = dates, value = observed_discharge)
 #' p <- plot_ensemble_uncertainty(results, observed = obs, subbasin_id = "0001")
+#' 
+#' # Zooming in on a specific date range and overriding the default title
+#' p_zoom <- plot_ensemble_uncertainty(results, subbasin_id = "3", 
+#'                                     date_range = c("2012-01-01", "2012-12-31")) +
+#'   labs(title = "Ensemble Discharge Uncertainty — Subbasin 3 (2012)")
+#' print(p_zoom)
 #' }
 plot_ensemble_uncertainty <- function(ensemble_output, observed = NULL,
-                                      subbasin_id = "0001", variable = "QSIM",
-                                      show_observed = TRUE) {
+                                      subbasin_id = "0001", output_variable = "QSIM",
+                                      lower_quantile = 0.10, upper_quantile = 0.90,
+                                      show_observed = TRUE, date_range = NULL) {
 
-  # Check if ensemble_output is the output from run_cosero_ensemble_parallel/run_cosero_ensemble
+  # Fix for R CMD check: "no visible binding for global variable"
+  date <- q_low <- q_high <- median <- value <- NULL
+  
+  # Check if ensemble_output is the standard list output
   if (!is.null(ensemble_output$results)) {
     results_list <- ensemble_output$results
   } else {
-    # Assume it's already a list of results
     results_list <- ensemble_output
   }
 
   n_runs <- length(results_list)
 
+  # Automatically pad the subbasin_id to 4 digits (e.g., "3" -> "0003")
+  subbasin_num <- as.numeric(subbasin_id)
+  subbasin_padded <- sprintf("%04d", subbasin_num)
+
   # Extract timeseries data from each run
   timeseries_list <- vector("list", n_runs)
   dates <- NULL
   n_time <- NULL
-  qobs_data <- NULL  # Will hold observed discharge if auto-extracted
+  qobs_data <- NULL  
 
   for (i in 1:n_runs) {
     result <- results_list[[i]]
@@ -1974,30 +2024,31 @@ plot_ensemble_uncertainty <- function(ensemble_output, observed = NULL,
         !is.null(result$output_data$runoff)) {
 
       runoff <- result$output_data$runoff
-
-      # Construct column name based on variable and subbasin_id
-      col_name <- paste0(variable, "_", subbasin_id)
+      
+      # Use the 4-digit padded ID to find the column in the dataframe
+      col_name <- paste0(output_variable, "_", subbasin_padded)
 
       if (col_name %in% colnames(runoff)) {
         timeseries_list[[i]] <- runoff[[col_name]]
 
-        # Get dates and QOBS from first successful run
+        # Get dates and QOBS from the first successful run
         if (is.null(dates)) {
           if ("date" %in% colnames(runoff)) {
             dates <- runoff$date
           } else {
-            # Construct dates from yyyy, mm, dd columns
             dates <- as.Date(paste(runoff$yyyy, runoff$mm, runoff$dd, sep = "-"))
           }
           n_time <- length(dates)
 
-          # Auto-extract QOBS if showing observed and no custom observed data
-          if (show_observed && is.null(observed) && variable == "QSIM") {
-            qobs_col <- paste0("QOBS_", subbasin_id)
+          # Auto-extract QOBS only if we are looking at simulated discharge
+          if (show_observed && is.null(observed) && output_variable == "QSIM") {
+            qobs_col <- paste0("QOBS_", subbasin_padded)
             if (qobs_col %in% colnames(runoff)) {
               qobs_values <- runoff[[qobs_col]]
-              # Replace -999 with NA (COSERO missing value code)
-              qobs_values[qobs_values == -999] <- NA
+              
+              # Treat all negative values in QOBS as missing data (NA)
+              qobs_values[qobs_values < 0] <- NA
+              
               qobs_data <- data.frame(date = dates, value = qobs_values)
             }
           }
@@ -2011,13 +2062,12 @@ plot_ensemble_uncertainty <- function(ensemble_output, observed = NULL,
     }
   }
 
-  # Check if we got any valid data
+  # Check for valid data
   n_valid <- sum(sapply(timeseries_list, function(x) !all(is.na(x))))
   if (n_valid == 0) {
-    stop("No valid timeseries data found in ensemble output. Check subbasin_id and variable.",
+    stop("No valid timeseries data found in ensemble output. Check subbasin_id and output_variable.",
          call. = FALSE)
   }
-
   if (is.null(dates)) {
     stop("Could not extract dates from ensemble output", call. = FALSE)
   }
@@ -2030,41 +2080,66 @@ plot_ensemble_uncertainty <- function(ensemble_output, observed = NULL,
     }
   }
 
-  # Calculate quantiles
+  # Calculate dynamic quantiles
+  quantiles <- t(apply(output_matrix, 1, quantile, 
+                       probs = c(lower_quantile, 0.5, upper_quantile), 
+                       na.rm = TRUE))
   stats <- data.frame(
     date = dates,
-    median = apply(output_matrix, 1, median, na.rm = TRUE),
-    q25 = apply(output_matrix, 1, quantile, 0.25, na.rm = TRUE),
-    q75 = apply(output_matrix, 1, quantile, 0.75, na.rm = TRUE),
-    q05 = apply(output_matrix, 1, quantile, 0.05, na.rm = TRUE),
-    q95 = apply(output_matrix, 1, quantile, 0.95, na.rm = TRUE)
+    q_low = quantiles[, 1],
+    median = quantiles[, 2],
+    q_high = quantiles[, 3]
   )
 
-  # Create plot
-  p <- ggplot(stats, aes(x = date)) +
-    geom_ribbon(aes(ymin = q05, ymax = q95), fill = "gray80", alpha = 0.5) +
-    geom_ribbon(aes(ymin = q25, ymax = q75), fill = "gray60", alpha = 0.5) +
-    geom_line(aes(y = median), color = "blue", linewidth = 0.8) +
-    theme_bw() +
-    labs(x = "Date",
-         y = paste0(variable, " (Subbasin ", subbasin_id, ")"),
-         title = paste0("Ensemble Uncertainty (", n_valid, "/", n_runs, " runs)"))
-
-  # Add observed data
+  # Prep observed data upfront so we can filter it easily
+  obs_plot_data <- NULL
   if (show_observed) {
     if (!is.null(observed)) {
-      # Use user-provided observed data
       if (is.data.frame(observed) && "date" %in% colnames(observed) && "value" %in% colnames(observed)) {
-        p <- p + geom_line(data = observed, aes(x = date, y = value),
-                          color = "black", linewidth = 0.6, alpha = 0.8)
+        observed$value[observed$value < 0] <- NA
+        obs_plot_data <- observed
       } else {
         warning("Observed data must be a data frame with 'date' and 'value' columns")
       }
     } else if (!is.null(qobs_data)) {
-      # Use auto-extracted QOBS from ensemble results
-      p <- p + geom_line(data = qobs_data, aes(x = date, y = value),
-                        color = "black", linewidth = 0.8, alpha = 0.8)
+      obs_plot_data <- qobs_data
     }
+  }
+
+  # Apply date_range filter if provided
+  if (!is.null(date_range) && length(date_range) == 2) {
+    start_date <- as.Date(date_range[1])
+    end_date <- as.Date(date_range[2])
+    
+    stats <- stats[stats$date >= start_date & stats$date <= end_date, ]
+    
+    if (!is.null(obs_plot_data)) {
+      obs_plot_data <- obs_plot_data[obs_plot_data$date >= start_date & obs_plot_data$date <= end_date, ]
+    }
+  }
+
+  # Generate a dynamic label for the legend based on the user's quantiles
+  interval_percent <- round((upper_quantile - lower_quantile) * 100)
+  ci_label <- paste0(interval_percent, "% Interval")
+
+  # Create plot
+  p <- ggplot(stats, aes(x = date)) +
+    geom_ribbon(aes(ymin = q_low, ymax = q_high, fill = ci_label), alpha = 0.4) +
+    geom_line(aes(y = median, color = "Simulated Median"), linewidth = 0.5) +
+    theme_bw() +
+    labs(x = "Date",
+         y = paste0(output_variable, " (Subbasin ", subbasin_num, ")"),
+         title = paste0("Ensemble Uncertainty - Subbasin ", subbasin_num),
+         fill = "Uncertainty",
+         color = "Timeseries") +
+    scale_fill_manual(values = setNames("orange", ci_label)) +
+    scale_color_manual(values = c("Simulated Median" = "red", "Observed" = "black")) +
+    theme(legend.position = "bottom")
+
+  # Add observed data 
+  if (!is.null(obs_plot_data)) {
+    p <- p + geom_line(data = obs_plot_data, aes(x = date, y = value, color = "Observed"), 
+                       linewidth = 0.4, alpha = 0.8)
   }
 
   return(p)
