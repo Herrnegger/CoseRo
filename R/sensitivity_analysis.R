@@ -2343,7 +2343,9 @@ plot_metric_distribution <- function(metric_values, metric_name = "Metric",
 #' @param nse_thresh Numeric. Minimum acceptable NSE. Default is 0.6.
 #' @param kge_thresh Numeric. Minimum acceptable KGE. Default is 0.6.
 #' @param pbias_thresh Numeric vector of length 2. Acceptable percent bias
-#'   range (e.g., \code{c(-20, 20)}). Default is \code{c(-20, 20)}.
+#'   range in percent (e.g., \code{c(-20, 20)} means ±20\%). Default is
+#'   \code{c(-20, 20)}. Computed internally as \code{(BETA - 1) * 100} where
+#'   BETA is the KGE bias ratio term from COSERO's \code{statistics.txt}.
 #' @param metrics_df Optional data frame of pre-computed metrics with columns
 #'   \code{run_id} (integer, 1-based positional index into
 #'   \code{ensemble_output$results}), \code{NSE}, \code{KGE}, and
@@ -2406,14 +2408,20 @@ plot_metric_distribution <- function(metric_values, metric_name = "Metric",
 #' )
 #'
 #' # Extract behavioral runs — metrics computed automatically for subbasin 3
+#' # pBias is derived internally as (BETA - 1) * 100 from statistics.txt
 #' eval_out <- extract_behavioral_runs(
 #'   ensemble_output  = ensemble,
 #'   subbasin_id      = "003",
 #'   nse_thresh       = 0.65,
 #'   kge_thresh       = 0.60,
-#'   pbias_thresh     = c(-15, 15),
+#'   pbias_thresh     = c(-15, 15),   # percent bias range
 #'   plot_uncertainty = TRUE,
-#'   date_range       = c("2010-01-01", "2012-12-31")
+#'   date_range       = c("2010-01-01", "2012-12-31"),  # zoom hydrograph
+#'   q_max            = 200,                             # cap y-axis at 200 m3/s
+#'   lower_quantile   = 0.10,                            # 80% uncertainty band
+#'   upper_quantile   = 0.90,
+#'   xlim             = c(-0.5, 1),   # zoom KGE axis on scatter plot
+#'   ylim             = c(-1, 1)      # zoom NSE axis on scatter plot
 #' )
 #'
 #' # Inspect plots
@@ -2427,12 +2435,14 @@ plot_metric_distribution <- function(metric_values, metric_name = "Metric",
 #' plot_dotty(eval_out$filtered_ensemble$parameter_sets, Y = behav_nse,
 #'            y_label = "NSE", reference_line = 0.65)
 #'
-#' # Supply pre-computed metrics_df to skip internal metric extraction
+#' # Supply pre-computed metrics_df to skip internal metric extraction.
+#' # pBias must already be in percent: derive from BETA as (BETA - 1) * 100
+#' beta_values  <- extract_ensemble_metrics(ensemble, subbasin_id = "003", metric = "BETA")
 #' my_metrics <- data.frame(
-#'   run_id = 1:length(nse_values),
+#'   run_id = seq_along(nse_values),
 #'   NSE    = nse_values,
 #'   KGE    = kge_values,
-#'   pBias  = pbias_values
+#'   pBias  = (beta_values - 1) * 100
 #' )
 #' eval_out2 <- extract_behavioral_runs(
 #'   ensemble_output = ensemble,
@@ -2472,13 +2482,16 @@ extract_behavioral_runs <- function(ensemble_output,
   if (is.null(metrics_df)) {
     nse_vec   <- extract_ensemble_metrics(ensemble_output, subbasin_id = subbasin_padded, metric = "NSE")
     kge_vec   <- extract_ensemble_metrics(ensemble_output, subbasin_id = subbasin_padded, metric = "KGE")
-    pbias_vec <- extract_ensemble_metrics(ensemble_output, subbasin_id = subbasin_padded, metric = "PBIAS")
+    # BETA = mean(QSIM)/mean(QOBS) from statistics.txt (KGE bias ratio term).
+    # Convert to percent bias: pBias = (BETA - 1) * 100
+    # COSERO's BIAS column is in m³/s (absolute), so it cannot be used here.
+    beta_vec  <- extract_ensemble_metrics(ensemble_output, subbasin_id = subbasin_padded, metric = "BETA")
 
     metrics_df <- data.frame(
       run_id = seq_along(nse_vec),
       NSE    = nse_vec,
       KGE    = kge_vec,
-      pBias  = pbias_vec   # stored as pBias throughout; PBIAS is COSERO's column name
+      pBias  = (beta_vec - 1) * 100
     )
   } else {
     # Validate user-supplied metrics_df

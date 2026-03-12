@@ -31,7 +31,9 @@ Default is \code{"0001"}.}
 \item{kge_thresh}{Numeric. Minimum acceptable KGE. Default is 0.6.}
 
 \item{pbias_thresh}{Numeric vector of length 2. Acceptable percent bias
-range (e.g., \code{c(-20, 20)}). Default is \code{c(-20, 20)}.}
+range in percent (e.g., \code{c(-20, 20)} means ±20\\%). Default is
+\code{c(-20, 20)}. Computed internally as \code{(BETA - 1) * 100} where
+BETA is the KGE bias ratio term from COSERO's \code{statistics.txt}.}
 
 \item{metrics_df}{Optional data frame of pre-computed metrics with columns
 \code{run_id} (integer, 1-based positional index into
@@ -105,14 +107,20 @@ ensemble <- run_cosero_ensemble_parallel(
 )
 
 # Extract behavioral runs — metrics computed automatically for subbasin 3
+# pBias is derived internally as (BETA - 1) * 100 from statistics.txt
 eval_out <- extract_behavioral_runs(
   ensemble_output  = ensemble,
   subbasin_id      = "003",
   nse_thresh       = 0.65,
   kge_thresh       = 0.60,
-  pbias_thresh     = c(-15, 15),
+  pbias_thresh     = c(-15, 15),   # percent bias range
   plot_uncertainty = TRUE,
-  date_range       = c("2010-01-01", "2012-12-31")
+  date_range       = c("2010-01-01", "2012-12-31"),  # zoom hydrograph
+  q_max            = 200,                             # cap y-axis at 200 m3/s
+  lower_quantile   = 0.10,                            # 80\% uncertainty band
+  upper_quantile   = 0.90,
+  xlim             = c(-0.5, 1),   # zoom KGE axis on scatter plot
+  ylim             = c(-1, 1)      # zoom NSE axis on scatter plot
 )
 
 # Inspect plots
@@ -126,12 +134,14 @@ behav_nse <- eval_out$metrics_df$NSE[
 plot_dotty(eval_out$filtered_ensemble$parameter_sets, Y = behav_nse,
            y_label = "NSE", reference_line = 0.65)
 
-# Supply pre-computed metrics_df to skip internal metric extraction
+# Supply pre-computed metrics_df to skip internal metric extraction.
+# pBias must already be in percent: derive from BETA as (BETA - 1) * 100
+beta_values  <- extract_ensemble_metrics(ensemble, subbasin_id = "003", metric = "BETA")
 my_metrics <- data.frame(
-  run_id = 1:length(nse_values),
+  run_id = seq_along(nse_values),
   NSE    = nse_values,
   KGE    = kge_values,
-  pBias  = pbias_values
+  pBias  = (beta_values - 1) * 100
 )
 eval_out2 <- extract_behavioral_runs(
   ensemble_output = ensemble,
