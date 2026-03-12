@@ -13,7 +13,8 @@ plot_ensemble_uncertainty(
   upper_quantile = 0.9,
   show_observed = TRUE,
   date_range = NULL,
-  q_max = TRUE
+  q_max = TRUE,
+  y_label = NULL
 )
 }
 \arguments{
@@ -42,6 +43,12 @@ The function automatically pads this to 4 digits for matching COSERO outputs. De
 \item{q_max}{Numeric or Logical. If TRUE (default), the y-axis automatically
 scales to the maximum of the simulated and observed data. If a numeric value
 is provided (e.g., 500), it forces the upper limit of the y-axis to that value.}
+
+\item{y_label}{Character. Y-axis label. If \code{NULL} (default), a label is
+chosen automatically based on \code{output_variable}: \code{"QSIM"} and
+\code{"QOBS"} produce \code{"Discharge (m\u00b3/s)"}, \code{"SWE"} produces
+\code{"Snow Water Equivalent (mm)"}. For unrecognised variables the raw
+\code{output_variable} string is used as-is.}
 }
 \value{
 ggplot object showing the median (red line), user-defined confidence interval

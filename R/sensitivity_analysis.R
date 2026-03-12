@@ -9,8 +9,8 @@
 #' @importFrom ggplot2 ggplot aes geom_bar geom_point geom_line geom_ribbon geom_hline
 #' @importFrom ggplot2 geom_histogram geom_density geom_vline annotate after_stat
 #' @importFrom ggplot2 coord_flip coord_cartesian facet_wrap
-#' @importFrom ggplot2 theme_minimal theme_bw theme element_text element_rect
-#' @importFrom ggplot2 labs ggtitle
+#' @importFrom ggplot2 theme_minimal theme_bw theme element_text element_rect element_blank element_line
+#' @importFrom ggplot2 labs ggtitle scale_color_manual scale_fill_gradient2 guide_legend
 #' @importFrom sensobol sobol_matrices sobol_indices
 #' @importFrom hydroGOF NSE KGE
 #' @importFrom parallel makeCluster stopCluster clusterExport clusterEvalQ detectCores
@@ -24,7 +24,9 @@ NULL
 utils::globalVariables(c(
   "year_month", "year", "output", "parameter", "value", "date",
   "sensitivity", "original", "parameters", "std.error", "low.ci", "high.ci",
-  "q05", "q25", "q75", "q95", ".", "batch_position", "density"
+  "q05", "q25", "q75", "q95", ".", "batch_position", "density",
+  # extract_behavioral_runs
+  "NSE", "KGE", "pBias", "category", "pass_nse_kge", "pass_pbias"
 ))
 
 # Helper Functions #####
@@ -1331,8 +1333,6 @@ run_cosero_ensemble_parallel <- function(project_path,
 
   if (!quiet) cat("Done: Memory cleanup complete\n\n")
 
-  if (!quiet) cat("Done: Memory cleanup complete\n\n")
-
   return(list(
     results = results,
     parameter_sets = parameter_sets,
@@ -1977,9 +1977,14 @@ plot_dotty <- function(parameter_sets, Y, y_label = "Output",
 #' @param show_observed Logical. If TRUE (default), show the observed data as a black line.
 #' @param date_range Optional vector of two dates or character strings (e.g., 
 #'   \code{c("2010-01-01", "2010-12-31")}) to zoom in on a specific time period.
-#' @param q_max Numeric or Logical. If TRUE (default), the y-axis automatically 
-#'   scales to the maximum of the simulated and observed data. If a numeric value 
+#' @param q_max Numeric or Logical. If TRUE (default), the y-axis automatically
+#'   scales to the maximum of the simulated and observed data. If a numeric value
 #'   is provided (e.g., 500), it forces the upper limit of the y-axis to that value.
+#' @param y_label Character. Y-axis label. If \code{NULL} (default), a label is
+#'   chosen automatically based on \code{output_variable}: \code{"QSIM"} and
+#'   \code{"QOBS"} produce \code{"Discharge (m\u00b3/s)"}, \code{"SWE"} produces
+#'   \code{"Snow Water Equivalent (mm)"}. For unrecognised variables the raw
+#'   \code{output_variable} string is used as-is.
 #'
 #' @return ggplot object showing the median (red line), user-defined confidence interval
 #'   (orange ribbon), and observed data (black line, if available).
@@ -2016,7 +2021,7 @@ plot_ensemble_uncertainty <- function(ensemble_output, observed = NULL,
                                       subbasin_id = "0001", output_variable = "QSIM",
                                       lower_quantile = 0.10, upper_quantile = 0.90,
                                       show_observed = TRUE, date_range = NULL,
-                                      q_max = TRUE) {
+                                      q_max = TRUE, y_label = NULL) {
 
   # Fix for R CMD check: "no visible binding for global variable"
   date <- q_low <- q_high <- median <- value <- NULL
@@ -2031,8 +2036,24 @@ plot_ensemble_uncertainty <- function(ensemble_output, observed = NULL,
   n_runs <- length(results_list)
 
   # Automatically pad the subbasin_id to 4 digits (e.g., "3" -> "0003")
-  subbasin_num <- as.numeric(subbasin_id)
+  subbasin_num    <- as.numeric(subbasin_id)
   subbasin_padded <- sprintf("%04d", subbasin_num)
+
+  # Resolve y-axis label: use supplied value or look up a human-readable default
+  if (is.null(y_label)) {
+    y_label_lookup <- c(
+      QSIM = "Discharge (m\u00b3/s)",
+      QOBS = "Discharge (m\u00b3/s)",
+      SWE  = "Snow Water Equivalent (mm)",
+      PREC = "Precipitation (mm)",
+      ET   = "Evapotranspiration (mm)"
+    )
+    y_label <- if (output_variable %in% names(y_label_lookup)) {
+      y_label_lookup[[output_variable]]
+    } else {
+      output_variable  # fall back to raw variable name
+    }
+  }
 
   # Extract timeseries data from each run
   timeseries_list <- vector("list", n_runs)
@@ -2151,7 +2172,7 @@ plot_ensemble_uncertainty <- function(ensemble_output, observed = NULL,
     geom_line(aes(y = median, color = "Simulated Median"), linewidth = 0.5) +
     theme_bw() +
     labs(x = "Date",
-         y = paste0(output_variable, " (Subbasin ", subbasin_num, ")"),
+         y = y_label,
          title = paste0("Ensemble Uncertainty - Subbasin ", subbasin_num),
          fill = "Uncertainty",
          color = "Timeseries") +
@@ -2295,7 +2316,295 @@ plot_metric_distribution <- function(metric_values, metric_name = "Metric",
   return(p)
 }
 
-# 9 Export Functions #####
+# 9 Behavioral Analysis #####
+
+#' Extract Behavioral Runs from Ensemble Output
+#'
+#' Evaluates an ensemble of COSERO model runs against three performance
+#' criteria simultaneously (NSE, KGE, and percent bias). Generates a
+#' multi-objective scatter plot that shows which runs pass all criteria
+#' ("Behavioral"), pass NSE/KGE but not bias ("Fails pBias Only"), or fail
+#' entirely ("Fails Box"). Optionally generates an ensemble uncertainty
+#' hydrograph showing only the behavioral runs.
+#'
+#' Performance metrics are computed internally via
+#' \code{\link{extract_ensemble_metrics}} unless a pre-computed
+#' \code{metrics_df} is supplied.  When computed internally, \code{run_id}
+#' values are sequential (1 to \code{n_runs}), and failed runs receive
+#' \code{NA} for all metrics — they are excluded from behavioral selection
+#' automatically.
+#'
+#' @param ensemble_output List. Output from
+#'   \code{\link{run_cosero_ensemble_parallel}} or
+#'   \code{\link{run_cosero_ensemble}}.
+#' @param subbasin_id Character or numeric. Subbasin to evaluate and plot
+#'   (e.g., \code{"003"} or \code{3}). Auto-padded to 4 digits internally.
+#'   Default is \code{"0001"}.
+#' @param nse_thresh Numeric. Minimum acceptable NSE. Default is 0.6.
+#' @param kge_thresh Numeric. Minimum acceptable KGE. Default is 0.6.
+#' @param pbias_thresh Numeric vector of length 2. Acceptable percent bias
+#'   range (e.g., \code{c(-20, 20)}). Default is \code{c(-20, 20)}.
+#' @param metrics_df Optional data frame of pre-computed metrics with columns
+#'   \code{run_id} (integer, 1-based positional index into
+#'   \code{ensemble_output$results}), \code{NSE}, \code{KGE}, and
+#'   \code{pBias}. If \code{NULL} (default), metrics are computed internally
+#'   via \code{\link{extract_ensemble_metrics}}.
+#' @param xlim Optional numeric vector of length 2 for KGE x-axis limits.
+#' @param ylim Optional numeric vector of length 2 for NSE y-axis limits.
+#' @param plot_uncertainty Logical. If \code{TRUE}, also generates an ensemble
+#'   uncertainty hydrograph for the behavioral runs. Default is \code{FALSE}.
+#' @param ... Additional arguments passed to
+#'   \code{\link{plot_ensemble_uncertainty}} (e.g., \code{date_range},
+#'   \code{q_max}, \code{lower_quantile}).
+#'
+#' @return A named list with:
+#' \describe{
+#'   \item{\code{scatter_plot}}{ggplot object: multi-objective KGE vs NSE scatter.}
+#'   \item{\code{uncertainty_plot}}{ggplot object or \code{NULL}: behavioral
+#'     ensemble hydrograph (only if \code{plot_uncertainty = TRUE}).}
+#'   \item{\code{filtered_ensemble}}{The input \code{ensemble_output} with
+#'     \code{$results} and \code{$parameter_sets} subsetted to behavioral runs only.}
+#'   \item{\code{behavioral_run_ids}}{Integer vector of run indices that passed
+#'     all criteria (1-based positions into \code{ensemble_output$results}).}
+#'   \item{\code{metrics_df}}{Data frame of all run metrics with \code{category}
+#'     column added. Useful for downstream analysis.}
+#' }
+#'
+#' @details
+#' The scatter plot uses three visual layers drawn bottom-to-top:
+#' \enumerate{
+#'   \item Grey points: fail NSE and/or KGE threshold.
+#'   \item Red points: pass NSE/KGE box but fail percent bias.
+#'   \item Filled circles: behavioral runs, colored by pBias
+#'     (brown = wet bias, green = dry bias, white = unbiased).
+#' }
+#' Threshold boundaries are shown as dashed reference lines.
+#'
+#' The filtered ensemble object can be used directly in
+#' \code{\link{plot_dotty}} or \code{\link{calculate_sobol_indices}} to
+#' restrict downstream analysis to behavioral runs only.
+#'
+#' @seealso
+#' \code{\link{extract_ensemble_metrics}},
+#' \code{\link{plot_ensemble_uncertainty}},
+#' \code{\link{plot_dotty}},
+#' \code{\link{calculate_sobol_indices}}
+#'
+#' @import ggplot2
+#' @importFrom dplyr mutate case_when
+#' @export
+#'
+#' @examples
+#' \dontrun{
+#' # Run sensitivity ensemble first
+#' ensemble <- run_cosero_ensemble_parallel(
+#'   project_path    = "D:\\COSERO_project",
+#'   parameter_sets  = samples$parameter_sets,
+#'   par_bounds      = par_bounds,
+#'   base_settings   = list(SPINUP = 365, OUTPUTTYPE = 1),
+#'   n_cores         = 4
+#' )
+#'
+#' # Extract behavioral runs — metrics computed automatically for subbasin 3
+#' eval_out <- extract_behavioral_runs(
+#'   ensemble_output  = ensemble,
+#'   subbasin_id      = "003",
+#'   nse_thresh       = 0.65,
+#'   kge_thresh       = 0.60,
+#'   pbias_thresh     = c(-15, 15),
+#'   plot_uncertainty = TRUE,
+#'   date_range       = c("2010-01-01", "2012-12-31")
+#' )
+#'
+#' # Inspect plots
+#' print(eval_out$scatter_plot)
+#' print(eval_out$uncertainty_plot)
+#'
+#' # Use filtered ensemble for dotty plots restricted to behavioral runs
+#' behav_nse <- eval_out$metrics_df$NSE[
+#'   eval_out$metrics_df$category == "Behavioral"
+#' ]
+#' plot_dotty(eval_out$filtered_ensemble$parameter_sets, Y = behav_nse,
+#'            y_label = "NSE", reference_line = 0.65)
+#'
+#' # Supply pre-computed metrics_df to skip internal metric extraction
+#' my_metrics <- data.frame(
+#'   run_id = 1:length(nse_values),
+#'   NSE    = nse_values,
+#'   KGE    = kge_values,
+#'   pBias  = pbias_values
+#' )
+#' eval_out2 <- extract_behavioral_runs(
+#'   ensemble_output = ensemble,
+#'   subbasin_id     = "003",
+#'   metrics_df      = my_metrics
+#' )
+#' }
+extract_behavioral_runs <- function(ensemble_output,
+                                    subbasin_id   = "0001",
+                                    nse_thresh    = 0.6,
+                                    kge_thresh    = 0.6,
+                                    pbias_thresh  = c(-20, 20),
+                                    metrics_df    = NULL,
+                                    xlim          = NULL,
+                                    ylim          = NULL,
+                                    plot_uncertainty = FALSE,
+                                    ...) {
+
+  # Fix for R CMD check: "no visible binding for global variable"
+  NSE <- KGE <- pBias <- category <- pass_nse_kge <- pass_pbias <- NULL
+
+  # --- Input validation ---
+  if (!is.list(ensemble_output) || is.null(ensemble_output$results)) {
+    stop("'ensemble_output' must be the list returned by run_cosero_ensemble_parallel() or run_cosero_ensemble().",
+         call. = FALSE)
+  }
+  if (length(pbias_thresh) != 2 || pbias_thresh[1] >= pbias_thresh[2]) {
+    stop("'pbias_thresh' must be a numeric vector of length 2 with pbias_thresh[1] < pbias_thresh[2].",
+         call. = FALSE)
+  }
+
+  # Pad subbasin ID to 4 digits for column matching
+  subbasin_num    <- suppressWarnings(as.numeric(subbasin_id))
+  subbasin_padded <- sprintf("%04d", subbasin_num)
+
+  # --- Build metrics_df internally if not supplied ---
+  if (is.null(metrics_df)) {
+    nse_vec   <- extract_ensemble_metrics(ensemble_output, subbasin_id = subbasin_padded, metric = "NSE")
+    kge_vec   <- extract_ensemble_metrics(ensemble_output, subbasin_id = subbasin_padded, metric = "KGE")
+    pbias_vec <- extract_ensemble_metrics(ensemble_output, subbasin_id = subbasin_padded, metric = "PBIAS")
+
+    metrics_df <- data.frame(
+      run_id = seq_along(nse_vec),
+      NSE    = nse_vec,
+      KGE    = kge_vec,
+      pBias  = pbias_vec   # stored as pBias throughout; PBIAS is COSERO's column name
+    )
+  } else {
+    # Validate user-supplied metrics_df
+    required_cols <- c("run_id", "NSE", "KGE", "pBias")
+    missing_cols  <- setdiff(required_cols, colnames(metrics_df))
+    if (length(missing_cols) > 0) {
+      stop(sprintf(
+        "Supplied 'metrics_df' is missing required columns: %s",
+        paste(missing_cols, collapse = ", ")
+      ), call. = FALSE)
+    }
+  }
+
+  # --- Categorise runs ---
+  # NA metrics (failed runs) evaluate to FALSE in comparisons -> "Outside Box"
+  metrics_df <- metrics_df %>%
+    mutate(
+      pass_nse_kge = (!is.na(NSE) & !is.na(KGE) & NSE >= nse_thresh & KGE >= kge_thresh),
+      pass_pbias   = (!is.na(pBias) & pBias >= pbias_thresh[1] & pBias <= pbias_thresh[2]),
+      category     = case_when(
+        pass_nse_kge & pass_pbias  ~ "Behavioral",
+        pass_nse_kge & !pass_pbias ~ "Fails pBias Only",
+        TRUE                       ~ "Outside Box"
+      )
+    )
+
+  behavioral_ids <- metrics_df$run_id[metrics_df$category == "Behavioral"]
+  n_behavioral   <- length(behavioral_ids)
+  n_total        <- nrow(metrics_df)
+
+  if (n_behavioral == 0) {
+    warning(sprintf(
+      "No runs met all behavioral criteria (NSE >= %s, KGE >= %s, pBias in [%s, %s]). Returning empty filtered ensemble.",
+      nse_thresh, kge_thresh, pbias_thresh[1], pbias_thresh[2]
+    ), call. = FALSE)
+  } else {
+    message(sprintf("%d / %d runs are behavioral (%.1f%%)",
+                    n_behavioral, n_total, 100 * n_behavioral / n_total))
+  }
+
+  # --- Filter ensemble to behavioral runs ---
+  filtered_ensemble          <- ensemble_output
+  filtered_ensemble$results  <- ensemble_output$results[behavioral_ids]
+
+  if (!is.null(filtered_ensemble$parameter_sets) && n_behavioral > 0) {
+    filtered_ensemble$parameter_sets <-
+      filtered_ensemble$parameter_sets[behavioral_ids, , drop = FALSE]
+  }
+
+  # --- Scatter plot ---
+  df_outside    <- metrics_df[metrics_df$category == "Outside Box",    ]
+  df_alarming   <- metrics_df[metrics_df$category == "Fails pBias Only", ]
+  df_behavioral <- metrics_df[metrics_df$category == "Behavioral",     ]
+
+  p_scatter <- ggplot() +
+    # Threshold reference lines (avoids scalar-in-aes() issue)
+    geom_vline(xintercept = kge_thresh,  linetype = "dashed", color = "grey30", linewidth = 0.5) +
+    geom_hline(yintercept = nse_thresh,  linetype = "dashed", color = "grey30", linewidth = 0.5) +
+    # Layer 1: fails NSE/KGE box
+    geom_point(data = df_outside,
+               aes(x = KGE, y = NSE, color = "Fails Box"),
+               size = 1.2, alpha = 0.45) +
+    # Layer 2: passes box but fails pBias
+    geom_point(data = df_alarming,
+               aes(x = KGE, y = NSE, color = "Fails pBias Only"),
+               size = 2.0, alpha = 0.80) +
+    # Layer 3: behavioral (filled circle, colored by pBias value)
+    geom_point(data = df_behavioral,
+               aes(x = KGE, y = NSE, fill = pBias, color = "Behavioral"),
+               shape = 21, size = 3.0, alpha = 0.90, stroke = 0.5) +
+    scale_color_manual(
+      name   = "Category",
+      values = c("Fails Box" = "grey70", "Fails pBias Only" = "indianred", "Behavioral" = "black"),
+      guide  = guide_legend(override.aes = list(size = 2.5, shape = c(16, 16, 21)))
+    ) +
+    scale_fill_gradient2(
+      low      = "#8c510a",
+      mid      = "white",
+      high     = "#01665e",
+      midpoint = 0,
+      name     = "pBias (%)"
+    ) +
+    theme_bw() +
+    labs(
+      title    = paste0("Multi-Objective Evaluation \u2014 Subbasin ", subbasin_num),
+      subtitle = sprintf("NSE \u2265 %s  |  KGE \u2265 %s  |  pBias: [%s, %s%%]  |  %d / %d behavioral",
+                         nse_thresh, kge_thresh, pbias_thresh[1], pbias_thresh[2],
+                         n_behavioral, n_total),
+      x = "KGE", y = "NSE"
+    ) +
+    theme(legend.position = "right")
+
+  if (!is.null(xlim) || !is.null(ylim)) {
+    p_scatter <- p_scatter + coord_cartesian(xlim = xlim, ylim = ylim)
+  }
+
+  # --- Uncertainty plot (optional) ---
+  p_uncert <- NULL
+  if (plot_uncertainty) {
+    if (n_behavioral > 0) {
+      p_uncert <- plot_ensemble_uncertainty(
+        filtered_ensemble,
+        subbasin_id = subbasin_padded,
+        ...
+      ) +
+        labs(
+          title    = paste0("Behavioral Ensemble Uncertainty \u2014 Subbasin ", subbasin_num),
+          subtitle = sprintf("Selected: NSE \u2265 %s | KGE \u2265 %s | pBias: [%s, %s%%]  (%d runs)",
+                             nse_thresh, kge_thresh, pbias_thresh[1], pbias_thresh[2],
+                             n_behavioral)
+        )
+    } else {
+      warning("Skipping uncertainty plot: no behavioral runs to plot.", call. = FALSE)
+    }
+  }
+
+  return(list(
+    scatter_plot      = p_scatter,
+    uncertainty_plot  = p_uncert,
+    filtered_ensemble = filtered_ensemble,
+    behavioral_run_ids = behavioral_ids,
+    metrics_df        = metrics_df
+  ))
+}
+
+# 10 Export Functions #####
 
 #' Export Sensitivity Analysis Results
 #'
