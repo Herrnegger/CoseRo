@@ -16,7 +16,7 @@ cosero_defaults <- data.frame(
     # Input files
     "DATAFILE", "PARAFILE",
     # Model structure
-    "IKL", "NCLASS",
+    "IKL", "NCLASS", "NDC",
     # Simulation period
     "STARTDATE", "ENDDATE", "SPINUP",
     # Output control
@@ -30,14 +30,14 @@ cosero_defaults <- data.frame(
   type = c(
     "character",
     "character", "character",
-    "integer", "integer",
+    "integer", "integer", "integer",
     "date", "date", "integer",
     "integer", "flag", "integer",
     "character", "character", "character",
     "flag", "character", "flag", "character",
     "character"
   ),
-  required = rep(TRUE, 19),
+  required = rep(TRUE, 20),
   stringsAsFactors = FALSE
 )
 
@@ -146,6 +146,13 @@ validate_cosero_defaults <- function(settings) {
           "SPINUP must be >= 1 (COSERO requires at least 1 timestep)"
         )
       }
+      if (param_name == "NDC" && (param_value < 1 || param_value > 10)) {
+        validation_results$valid <- FALSE
+        validation_results$messages <- c(
+          validation_results$messages,
+          "NDC must be between 1 and 10 (1 = disaggregation disabled)"
+        )
+      }
     } else if (param_type == "flag") {
       if (!param_value %in% c(0, 1)) {
         validation_results$valid <- FALSE
@@ -227,6 +234,7 @@ get_default_cosero_values <- function() {
     PARAFILE    = "para_ini.txt",
     IKL         = 5,
     NCLASS      = 10,
+    NDC         = 1,
     OUTPUTTYPE  = 1,
     SC_FLAG     = 1,
     OUTCONTROL  = 0,
@@ -319,6 +327,13 @@ create_default_defaults <- function(defaults_file, quiet = FALSE) {
     "",
     "NCLASS (# of Landuse classes)",
     "10",
+    "",
+    paste0(
+      "NDC (Number of Disaggregation Classes based on elevation bands derived",
+      " from the hypsometric curve. Each band receives lapse-rate-corrected T",
+      " and P. NDC <= 1 disables disaggregation; results are bit-identical to baseline)"
+    ),
+    "1",
     "",
     # --- Simulation period ---
     "STARTDATE (start date of simulation period in format yyyy mm dd hh mm)",

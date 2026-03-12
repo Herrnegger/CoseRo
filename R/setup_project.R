@@ -113,6 +113,104 @@ setup_cosero_project_example <- function(project_path, overwrite = FALSE) {
 }
 
 
+#' Setup Working Example COSERO Project with Hypsometric Disaggregation
+#'
+#' Creates a ready-to-run COSERO project using the aggregated Wildalpen catchment
+#' example, which includes hypsometric elevation band disaggregation (NDC > 1).
+#' Requires a COSERO executable that supports the NDC disaggregation framework.
+#'
+#' @param project_path Path where the example project should be created.
+#' @param overwrite Overwrite existing files? (default: FALSE)
+#'
+#' @return Invisibly returns the project path.
+#'
+#' @details
+#' Extracts a complete working example (Wildalpen catchment, aggregated spatial
+#' setup) that includes:
+#' \itemize{
+#'   \item COSERO.exe (supports NDC disaggregation) and required DLLs
+#'   \item \code{defaults.txt} with NDC=5
+#'   \item \code{para_ini_agg.txt} with disaggregation columns:
+#'     LAPSE_T, LAPSE_P, SOILVAR, HYDROVAR, CTVAR and HYPSO0_..HYPSO100_
+#'   \item Meteorological input data and example output files
+#' }
+#'
+#' For the standard (non-disaggregated) example use
+#' \code{\link{setup_cosero_project_example}}.
+#'
+#' @seealso \code{\link{setup_cosero_project_example}}, \code{\link{run_cosero}}
+#' @export
+#' @examples
+#' \dontrun{
+#' setup_cosero_project_example_aggregated("C:/COSERO_aggregated_example")
+#' run_cosero("C:/COSERO_aggregated_example")
+#' launch_cosero_app("C:/COSERO_aggregated_example")
+#' }
+setup_cosero_project_example_aggregated <- function(project_path, overwrite = FALSE) {
+
+  if (is.null(project_path) || nchar(project_path) == 0) {
+    stop("project_path must be specified", call. = FALSE)
+  }
+
+  zip_path <- system.file("extdata", "COSERO_Wildalpen_agreggated.zip",
+                          package = "CoseRo")
+
+  if (!file.exists(zip_path)) {
+    stop(
+      "Aggregated example zip not found at: ", zip_path, "\n",
+      "The package installation may be incomplete.",
+      call. = FALSE
+    )
+  }
+
+  if (!dir.exists(project_path)) {
+    dir.create(project_path, recursive = TRUE)
+    cat("Created project directory:", project_path, "\n")
+  }
+
+  cat("Extracting Wildalpen aggregated example project...\n")
+  temp_extract <- file.path(tempdir(), "cosero_extract_temp_agg")
+  if (dir.exists(temp_extract)) unlink(temp_extract, recursive = TRUE)
+
+  utils::unzip(zip_path, exdir = temp_extract)
+
+  # Files are at root level in this zip (no subfolder)
+  all_items <- list.files(temp_extract, full.names = TRUE, all.files = FALSE)
+  for (item in all_items) {
+    dest_item <- file.path(project_path, basename(item))
+    if (dir.exists(item)) {
+      if (dir.exists(dest_item) && !overwrite) {
+        cat("Skipping", basename(item), "(already exists)\n")
+      } else {
+        if (dir.exists(dest_item) && overwrite) unlink(dest_item, recursive = TRUE)
+        file.copy(item, project_path, recursive = TRUE, overwrite = overwrite)
+      }
+    } else {
+      if (file.exists(dest_item) && !overwrite) {
+        cat("Skipping", basename(item), "(already exists)\n")
+      } else {
+        file.copy(item, dest_item, overwrite = overwrite)
+      }
+    }
+  }
+
+  unlink(temp_extract, recursive = TRUE)
+
+  cat("\n=== Aggregated Example Project Ready ===\n")
+  cat("Location:", project_path, "\n")
+  cat("Catchment: Wildalpen aggregated (Austria) | NDC=5 elevation bands\n")
+  cat("\nContents:\n")
+  cat("  COSERO.exe (NDC disaggregation support) + DLLs\n")
+  cat("  defaults.txt (NDC=5), para_ini_agg.txt,\n")
+  cat("  P/T data (ASCII & binary), Qobs.txt\n")
+  cat("  Example outputs already included\n")
+  cat("\nTo visualize: launch_cosero_app('", project_path, "')\n", sep = "")
+  cat("To run:       run_cosero('", project_path, "')\n", sep = "")
+
+  invisible(project_path)
+}
+
+
 #' Setup New COSERO Project Directory
 #'
 #' Creates an empty COSERO project structure with binaries and configuration.
