@@ -1,7 +1,7 @@
 Package: CoseRo
 Type: Package
 Title: R Interface and Shiny Application for the COSERO Hydrological Model
-Version: 0.1.0
+Version: 0.9.0
 Authors@R: c(
     person("Mathew", "Herrnegger",
            role = c("aut", "cre"),
@@ -9,11 +9,14 @@ Authors@R: c(
     person("COSERO Development Team",
            role = "ctb")
     )
-Description: Provides an R interface for the COSERO hydrological model,
-    including automated model execution, fast output reading, an interactive
-    Shiny visualization app, and a Sobol-based global sensitivity analysis
-    framework. Users can run COSERO simulations programmatically or through
-    a web GUI.
+Description: A comprehensive R interface for the COSERO hydrological model,
+    covering the full modelling workflow: project setup, simulation execution,
+    output reading, interactive visualisation (Shiny app), Sobol-based global
+    sensitivity analysis, and parameter optimisation (DDS and SCE-UA). Input
+    data preprocessing utilities convert GeoSphere Austria SPARTACUS
+    precipitation and temperature, WINFORE ET0, and eHYD discharge data into
+    COSERO-ready formats. Simulations can be driven programmatically or through
+    the interactive GUI.
 License: GPL (>= 3) | file LICENSE
 Encoding: UTF-8
 Depends:
