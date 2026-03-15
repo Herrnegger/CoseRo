@@ -116,8 +116,8 @@ setup_cosero_project_example <- function(project_path, overwrite = FALSE) {
 #' Setup Working Example COSERO Project with Hypsometric Disaggregation
 #'
 #' Creates a ready-to-run COSERO project using the aggregated Wildalpen catchment
-#' example, which includes hypsometric elevation band disaggregation (NDC > 1).
-#' Requires a COSERO executable that supports the NDC disaggregation framework.
+#' example, which includes hypsometric elevation band disaggregation (\code{NDC > 1}).
+#' Requires a COSERO executable compiled with NDC disaggregation support.
 #'
 #' @param project_path Path where the example project should be created.
 #' @param overwrite Overwrite existing files? (default: FALSE)
@@ -125,26 +125,124 @@ setup_cosero_project_example <- function(project_path, overwrite = FALSE) {
 #' @return Invisibly returns the project path.
 #'
 #' @details
-#' Extracts a complete working example (Wildalpen catchment, aggregated spatial
-#' setup) that includes:
+#' ## Project Contents
+#'
+#' Extracts a complete working example (Wildalpen catchment, Austria, aggregated
+#' spatial setup with 3 subbasins and 6 zones) including:
 #' \itemize{
-#'   \item COSERO.exe (supports NDC disaggregation) and required DLLs
-#'   \item \code{defaults.txt} with NDC=5
-#'   \item \code{para_ini_agg.txt} with disaggregation columns:
-#'     LAPSE_T, LAPSE_P, SOILVAR, HYDROVAR, CTVAR and HYPSO0_..HYPSO100_
-#'   \item Meteorological input data and example output files
+#'   \item \code{COSERO.exe} (NDC-enabled build) and required DLLs
+#'   \item \code{defaults.txt} with \code{NDC = 5} (five elevation bands per zone)
+#'   \item \code{para_ini_agg.txt} — 195-column parameter file containing all standard
+#'     parameters plus 5 disaggregation parameters and 21 hypsometric curve columns
+#'     per zone (see parameter file structure below)
+#'   \item Meteorological input data (precipitation, temperature, ET0) in ASCII and
+#'     binary format
+#'   \item Observed discharge (\code{Qobs.txt}) for all three subbasins
+#'   \item Pre-computed example output files for inspection before running
 #' }
 #'
-#' For the standard (non-disaggregated) example use
+#' ## Hypsometric Disaggregation Framework
+#'
+#' Standard COSERO assigns a single zone-mean temperature and precipitation to each
+#' spatial zone. For zones spanning large elevation ranges this is physically
+#' inadequate: snow lines, melt rates, and orographic precipitation all vary strongly
+#' with elevation.
+#'
+#' The disaggregation framework subdivides each zone into \code{NDC} equal-area
+#' elevation bands, runs the full hydrological process chain independently in each
+#' band, then collapses results back to the zone mean before routing. When
+#' \code{NDC <= 1} the framework is inactive and results are bit-identical to the
+#' standard (non-disaggregated) model.
+#'
+#' Band mean elevations are derived by partitioning the zone hypsometric curve
+#' (stored as 21 quantile points at 0 \%, 5 \%, ..., 100 \% cumulative area) into
+#' \code{NDC} equal-area intervals and interpolating the midpoint elevation of each.
+#'
+#' ## Disaggregation Parameters (para_ini_agg.txt)
+#'
+#' Five zone-level parameters control the disaggregation behaviour. All are
+#' calibratable via \code{\link{optimize_cosero_dds}}, \code{\link{optimize_cosero_sce}},
+#' and the sensitivity analysis framework.
+#'
+#' **Forcing lapse rates** (applied every timestep):
+#' \describe{
+#'   \item{\code{LAPSE_T}}{Temperature lapse rate (°C / 100 m). Typically negative
+#'     (~-0.65 °C/100 m): lower bands are warmer, upper bands are colder.
+#'     Applied as: \eqn{T_{band} = (T_{raw} + TCOR_{month}) + LAPSE\_T \times \Delta z_{hm}}.
+#'     Also lapse-corrects monthly mean temperature (\code{TMMON}) for Thornthwaite PET.}
+#'   \item{\code{LAPSE_P}}{Precipitation lapse rate (fraction / 100 m). A value of 0.05
+#'     increases precipitation by ~5 \% per 100 m of elevation gain (orographic
+#'     enhancement). Applied as: \eqn{P_{band} = P_{raw} \times PCOR_{month} \times
+#'     (1 + LAPSE\_P \times \Delta z_{hm})}.}
+#' }
+#'
+#' **Coefficient-of-variation (CV) parameters** (applied once per \code{run()} call):
+#' These spread process parameters across band slots using a lognormal distribution
+#' that preserves the zone mean exactly. A CV of 0 copies the zone-mean value
+#' identically to all bands (backward-compatible with existing parameter files).
+#' \describe{
+#'   \item{\code{SOILVAR}}{CV for soil storage geometry: maximum soil water storage
+#'     (M), fast subsurface threshold (H1), percolation exponents
+#'     (PEX2, PEX3), and groundwater threshold (H2).}
+#'   \item{\code{HYDROVAR}}{CV for hydraulic dynamics: soil drainage nonlinearity
+#'     (BETA, negated so lower bands receive higher beta), baseflow recession
+#'     (KBF), and subsurface routing times and thresholds (TAB1--3, TVS1--2).}
+#'   \item{\code{CTVAR}}{CV for snow melt factors: minimum and maximum degree-day
+#'     factors (CTMIN, CTMAX).}
+#' }
+#'
+#' ## Hypsometric Curve Columns
+#'
+#' The parameter file also contains 21 read-only columns \code{HYPSO0_} through
+#' \code{HYPSO100_}, storing the elevation (m) at 0 \%, 5 \%, ..., 100 \% cumulative
+#' area quantiles for each zone. These define the zone hypsometric curve and are
+#' zone geometry inputs, not calibration parameters — they are not included in
+#' \code{parameter_bounds.csv}.
+#'
+#' ## Interaction with Existing Snow Class Disaggregation
+#'
+#' The existing \code{TVAR} parameter applies Gaussian temperature quantiles within
+#' each zone for snow class heterogeneity (\code{IKL} snow classes). With hypsometric
+#' bands active, each band still runs the full \code{IKL} snow class loop. The two
+#' mechanisms are orthogonal: \code{TVAR} captures sub-zone temperature variability
+#' not explained by elevation, while \code{NDC} explicitly represents the elevation
+#' gradient.
+#'
+#' For the standard (non-disaggregated) example see
 #' \code{\link{setup_cosero_project_example}}.
 #'
-#' @seealso \code{\link{setup_cosero_project_example}}, \code{\link{run_cosero}}
+#' @seealso
+#' \code{\link{setup_cosero_project_example}} for the non-disaggregated example,
+#' \code{\link{run_cosero}}, \code{\link{load_parameter_bounds}},
+#' \code{\link{optimize_cosero_dds}}
+#'
 #' @export
 #' @examples
 #' \dontrun{
 #' setup_cosero_project_example_aggregated("C:/COSERO_aggregated_example")
+#'
+#' # Run with NDC = 5 (as configured in defaults.txt)
 #' run_cosero("C:/COSERO_aggregated_example")
+#'
+#' # Inspect results interactively
 #' launch_cosero_app("C:/COSERO_aggregated_example")
+#'
+#' # Calibrate disaggregation + standard parameters
+#' par_bounds <- load_parameter_bounds(
+#'   parameters = c("LAPSE_T", "LAPSE_P", "SOILVAR", "HYDROVAR", "CTVAR",
+#'                  "BETA", "CTMAX", "M", "TAB1")
+#' )
+#' result <- optimize_cosero_dds(
+#'   cosero_path       = "C:/COSERO_aggregated_example",
+#'   par_bounds        = par_bounds,
+#'   target_subbasins  = "003",
+#'   metric            = "NSE",
+#'   defaults_settings = list(STARTDATE = c(2000, 10, 1, 0, 0),
+#'                            ENDDATE   = c(2015, 9, 30, 0, 0),
+#'                            SPINUP    = 365, OUTPUTTYPE = 1,
+#'                            PARAFILE  = "para_ini_agg.txt"),
+#'   max_iter          = 1000
+#' )
 #' }
 setup_cosero_project_example_aggregated <- function(project_path, overwrite = FALSE) {
 

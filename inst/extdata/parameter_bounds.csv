@@ -32,6 +32,6 @@ TVS1,Recession constant percolation from surface flow (h),5,200,100,relchg,Runof
 TVS2,Recession constant percolation from inter flow (h),45,500,200,relchg,Runoff
 LAPSE_T,Temperature lapse rate (°C/100m),-1.2,1.0,-0.65,abschg,Disaggregation
 LAPSE_P,Precipitation lapse rate (factor/100m; change in % per 100m),-0.5,0.5,0.05,abschg,Disaggregation
-SOILVAR,CV for within-zone spread of soil storage parameters,0.0,2.5,0.5,abschg,Disaggregation
-HYDROVAR,CV for within-zone spread of hydraulic routing parameters,0.0,2.5,0.5,abschg,Disaggregation
-CTVAR,CV for within-zone spread of snow melt factors,0.0,2.5,0.5,abschg,Disaggregation
+SOILVAR,"CV for within-zone spread of soil storage parameters (M, H1, H2, PEX2, PEX3)",0.0,2.5,0.5,relchg,Disaggregation
+HYDROVAR,"CV for within-zone spread of hydraulic routing parameters (BETA, KBF, TAB1, TVS1, TAB2, TVS2, TAB3)",0.0,2.5,0.5,relchg,Disaggregation
+CTVAR,"CV for within-zone spread of snow melt factors (CTMIN, CTMAX)",0.0,2.5,0.5,relchg,Disaggregation
