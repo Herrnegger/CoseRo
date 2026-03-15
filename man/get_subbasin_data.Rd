@@ -14,9 +14,9 @@ get_subbasin_data(runoff_data, subbasin_id)
 \value{
 Data frame with columns:
 \item{DateTime, Date}{Time information}
-\item{Q_obs}{Observed discharge (m³/s)}
-\item{Q_sim}{Simulated discharge (m³/s)}
-\item{Q_local}{Local discharge (m³/s), if available}
+\item{Q_obs}{Observed discharge (m3/s)}
+\item{Q_sim}{Simulated discharge (m3/s)}
+\item{Q_local}{Local discharge (m3/s), if available}
 The data frame has an attribute "subbasin_id" with the subbasin ID.
 }
 \description{

@@ -18,9 +18,9 @@ Data frame with columns:
 \item{yyyy, mm, dd, hh}{Date and time components}
 \item{DateTime}{POSIXct datetime object}
 \item{Date}{Date object}
-\item{QOBS_XXXX}{Observed discharge for subbasin XXXX (m³/s)}
-\item{QSIM_XXXX}{Simulated discharge for subbasin XXXX (m³/s)}
-\item{Qloc_XXXX}{Local discharge for subbasin XXXX (m³/s)}
+\item{QOBS_XXXX}{Observed discharge for subbasin XXXX (m3/s)}
+\item{QSIM_XXXX}{Simulated discharge for subbasin XXXX (m3/s)}
+\item{Qloc_XXXX}{Local discharge for subbasin XXXX (m3/s)}
 }
 \description{
 Reads discharge data (observed and simulated) from COSERO.runoff file.
