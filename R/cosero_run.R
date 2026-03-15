@@ -41,58 +41,60 @@ execute_cosero <- function(project_path, exe_name,
   old_wd <- getwd()
   setwd(project_path)
 
+  # Stdout is redirected to a file rather than captured via an R pipe (intern = TRUE).
+  # On Windows, intern = TRUE opens a pipe that can deadlock when COSERO produces
+  # large output (OUTPUTTYPE = 3, long periods): the pipe buffer fills and both
+  # processes block. File redirect has no buffer limit and is always safe.
+  out_file <- file.path(project_path, "cosero_stdout.txt")
+
   tryCatch({
+    batch_file <- "run_cosero_temp.bat"
+
     if (file.exists(commands_file)) {
-      batch_file <- "run_cosero_temp.bat"
-      batch_content <- paste0(
-        exe_name, " < ", basename(commands_file)
+      batch_content <- c(
+        "@echo off",
+        paste0(exe_name, " < ", basename(commands_file),
+               " > cosero_stdout.txt 2>&1")
       )
       writeLines(batch_content, batch_file)
 
-      output <- system(
+      result_code <- system(
         paste0('"', batch_file, '"'),
-        intern = TRUE,
-        ignore.stderr = FALSE,
+        intern = FALSE,
         wait = TRUE
       )
-
-      result_code <- attr(output, "status")
       if (is.null(result_code)) result_code <- 0
 
-      has_error <- detect_cosero_errors(output)
-
-      if (show_output) {
-        cat(paste(output, collapse = "\n"), "\n")
-      }
-
-      list(
-        exit_code = result_code,
-        output = output,
-        has_error = has_error
-      )
     } else {
-      output <- system2(
-        exe_name,
-        stdout = TRUE,
-        stderr = TRUE,
+      # No commands file — redirect via shell for consistency
+      batch_content <- c(
+        "@echo off",
+        paste0(exe_name, " > cosero_stdout.txt 2>&1")
+      )
+      writeLines(batch_content, batch_file)
+
+      result_code <- system(
+        paste0('"', batch_file, '"'),
+        intern = FALSE,
         wait = TRUE
       )
-
-      result_code <- attr(output, "status")
       if (is.null(result_code)) result_code <- 0
-
-      has_error <- detect_cosero_errors(output)
-
-      if (show_output) {
-        cat(paste(output, collapse = "\n"), "\n")
-      }
-
-      list(
-        exit_code = result_code,
-        output = output,
-        has_error = has_error
-      )
     }
+
+    output <- if (file.exists(out_file)) readLines(out_file) else character(0)
+
+    has_error <- detect_cosero_errors(output)
+
+    if (show_output) {
+      cat(paste(output, collapse = "\n"), "\n")
+    }
+
+    list(
+      exit_code = result_code,
+      output = output,
+      has_error = has_error
+    )
+
   }, finally = {
     setwd(old_wd)
   })

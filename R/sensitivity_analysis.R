@@ -541,16 +541,24 @@ run_cosero_ensemble <- function(project_path,
   n_runs <- nrow(parameter_sets)
   results <- vector("list", n_runs)
 
-  # Create backup folder for parameter files
-  backup_dir <- file.path(dirname(par_file), "parameterfile_backup")
-  if (!dir.exists(backup_dir)) dir.create(backup_dir, recursive = TRUE)
-  backup_file <- file.path(backup_dir, paste0(basename(par_file), ".backup_", format(Sys.time(), "%Y%m%d_%H%M%S")))
-  file.copy(par_file, backup_file)
+  # Working-copy approach: original file is never modified.
+  # A temporary copy receives all per-run modifications; COSERO is pointed at it
+  # via base_settings$PARAFILE. Deleted on exit (normal or error).
+  par_basename <- basename(par_file)
+  work_filename <- paste0(tools::file_path_sans_ext(par_basename), "_ens_work.",
+                          tools::file_ext(par_basename))
+  work_file <- file.path(dirname(par_file), work_filename)
+  file.copy(par_file, work_file, overwrite = TRUE)
+  on.exit(unlink(work_file), add = TRUE)
 
-  # Read original parameter values once
+  # Point COSERO at the working copy
+  if (is.null(base_settings)) base_settings <- list()
+  base_settings$PARAFILE <- work_filename
+
+  # Read original parameter values once (from the unmodified original)
   original_values <- read_parameter_table(par_file, names(parameter_sets), zone_id = "all", quiet = TRUE)
 
-  # Pre-load parameter structure for fast modification
+  # Pre-load parameter structure for fast in-memory modification
   first_line <- readLines(par_file, n = 1)
   param_data_original <- read.table(
     par_file, header = TRUE, sep = "\t", skip = 1,
@@ -565,27 +573,24 @@ run_cosero_ensemble <- function(project_path,
 
   start_time <- Sys.time()
 
-  # Report initial message
   if (!quiet) {
     cat(sprintf("\nStarting %d COSERO simulations (sequential)\n", n_runs))
-    param_names_str <- paste(names(parameter_sets), collapse = ", ")
-    cat(sprintf("Parameters: %s\n", param_names_str))
-    cat("Using fast parameter modification (in-memory)\n")
-    cat("\n")
+    cat(sprintf("Parameters: %s\n", paste(names(parameter_sets), collapse = ", ")))
+    cat("Using fast parameter modification (in-memory, working copy)\n\n")
   }
 
   for (i in 1:n_runs) {
-    # Modify parameters using pre-loaded structure (fast path)
+    # Modify working copy using pre-loaded in-memory structure (fast path)
     tryCatch({
-      modify_parameter_table_fast(par_file, parameter_sets[i, ], par_bounds,
+      modify_parameter_table_fast(work_file, parameter_sets[i, ], par_bounds,
                                   original_values, param_file_structure, quiet = TRUE)
     }, error = function(e) {
-      # Fallback to standard method
-      file.copy(backup_file, par_file, overwrite = TRUE)
-      modify_parameter_table(par_file, parameter_sets[i, ], par_bounds, original_values, quiet = TRUE)
+      # Fallback: reset working copy from original, then apply standard modification
+      file.copy(par_file, work_file, overwrite = TRUE)
+      modify_parameter_table(work_file, parameter_sets[i, ], par_bounds, original_values, quiet = TRUE)
     })
 
-    # Run COSERO
+    # Run COSERO (reads working copy via base_settings$PARAFILE)
     tryCatch({
       result <- run_cosero(
         project_path = project_path,
@@ -626,9 +631,6 @@ run_cosero_ensemble <- function(project_path,
       }
     }
   }
-
-  # Restore original parameter file
-  file.copy(backup_file, par_file, overwrite = TRUE)
 
   # FINAL MEMORY CLEANUP: Ensure all resources are freed
   tryCatch({
