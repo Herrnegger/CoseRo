@@ -3,7 +3,7 @@
 # DDS and SCE-UA optimization with multi-objective support
 # =============================================================================
 
-#' @importFrom stats rnorm runif setNames
+#' @importFrom stats rnorm runif setNames cor
 #' @importFrom utils head read.table write.csv
 NULL
 
@@ -291,12 +291,21 @@ calculate_single_metric <- function(result, subbasin, metric, spinup_value = 0) 
   
   sim <- runoff[[qsim_col]]
   obs <- runoff[[qobs_col]]
-  
+
   if (spinup_value > 0 && length(sim) > spinup_value) {
     sim <- sim[(spinup_value + 1):length(sim)]
     obs <- obs[(spinup_value + 1):length(obs)]
   }
-  
+
+  # Replace -999 sentinel with NA, then drop incomplete pairs
+  sim[sim <= -999] <- NA
+  obs[obs <= -999] <- NA
+  valid <- !is.na(sim) & !is.na(obs) & obs >= 0
+  sim <- sim[valid]
+  obs <- obs[valid]
+
+  if (length(obs) < 10) return(NA)
+
   val <- tryCatch({
     switch(metric,
       "NSE" = hydroGOF::NSE(sim, obs),
@@ -306,6 +315,8 @@ calculate_single_metric <- function(result, subbasin, metric, spinup_value = 0) 
       "RMSE" = -hydroGOF::rmse(sim, obs),
       "PBIAS" = 1 - abs(hydroGOF::pbias(sim, obs)) / 100,
       "VE" = 1 - abs(sum(sim) - sum(obs)) / sum(obs),
+      "r2" = cor(sim, obs)^2,
+      "r"  = cor(sim, obs),
       stop("Unknown metric: ", metric, call. = FALSE)
     )
   }, error = function(e) NA)
@@ -333,7 +344,7 @@ calculate_single_metric <- function(result, subbasin, metric, spinup_value = 0) 
 #' @param use_minimal_reading Fast reading (statistics + runoff only)
 #'
 #' @return A function that takes a parameter vector and returns the objective value
-#'   (negative metric for minimization). Has attributes "backup_file" and "par_file"
+#'   (negative metric for minimization). Has attributes "par_file" and "original_values"
 #'   for restoring the original parameter file after optimization.
 #' @keywords internal
 create_objective_function <- function(cosero_path,
@@ -414,19 +425,21 @@ create_objective_function <- function(cosero_path,
   par_file <- file.path(cosero_path, "input", par_filename)
   if (!file.exists(par_file)) stop("Parameter file not found: ", par_file, call. = FALSE)
 
-  # Create backup of original parameter file in parameterfile_backup folder
-  backup_dir <- file.path(cosero_path, "input", "parameterfile_backup")
-  if (!dir.exists(backup_dir)) dir.create(backup_dir, recursive = TRUE)
+  # Use a working copy for all modifications — original file is never touched.
+  # COSERO reads the working copy via defaults_settings$PARAFILE override.
+  work_filename <- paste0(tools::file_path_sans_ext(par_filename), "_opt_work.",
+                          tools::file_ext(par_filename))
+  work_file <- file.path(cosero_path, "input", work_filename)
+  file.copy(par_file, work_file, overwrite = TRUE)
+  on.exit(unlink(work_file), add = TRUE)
 
-  timestamp <- format(Sys.time(), "%Y%m%d_%H%M%S")
-  backup_filename <- paste0(par_filename, ".backup_", timestamp)
-  backup_file <- file.path(backup_dir, backup_filename)
-  file.copy(par_file, backup_file, overwrite = TRUE)
-  if (verbose) cat("Backed up parameter file to:", file.path("parameterfile_backup", backup_filename), "\n")
+  # Tell COSERO to use the working copy; redirect par_file so closure writes to it
+  defaults_settings$PARAFILE <- work_filename
+  par_file <- work_file
 
   if (verbose) cat("Loading parameter file:", par_filename, "\n")
 
-  # Load parameter structure
+  # Load parameter structure from original (read-only)
   first_line <- readLines(par_file, n = 1)
   param_data_original <- read.table(
     par_file, header = TRUE, sep = "\t", skip = 1,
@@ -557,11 +570,13 @@ create_objective_function <- function(cosero_path,
     return(obj_value)
   }
 
-  # Store backup path and original values as attributes
-  attr(obj_fun, "backup_file") <- backup_file
+  # Store working file path, original values, and the effective defaults_settings
+  # (with PARAFILE already pointing at the working copy) as attributes.
+  # run_final_optimization() uses these to run COSERO with the correct parameter file.
   attr(obj_fun, "par_file") <- par_file
   attr(obj_fun, "original_values") <- original_values
   attr(obj_fun, "param_structure") <- param_structure
+  attr(obj_fun, "defaults_settings") <- defaults_settings  # PARAFILE = work_filename
 
   return(obj_fun)
 }
@@ -673,22 +688,25 @@ run_final_optimization <- function(cosero_path, par_bounds, zones_to_modify,
 
   params_optimal <- setNames(as.list(par_bounds$optimal_value), par_bounds$parameter)
 
-  par_file <- attr(obj_fun, "par_file")
-  # Use the original values captured at closure creation (before any modifications)
+  par_file        <- attr(obj_fun, "par_file")
   original_values <- attr(obj_fun, "original_values")
   param_structure <- attr(obj_fun, "param_structure")
 
-  # Apply optimal parameters using the correct original baseline
+  # Use the effective defaults_settings from the closure — this has PARAFILE pointing
+  # at the working copy, so COSERO reads the file we are about to write optimal params into.
+  effective_settings <- attr(obj_fun, "defaults_settings")
+
+  # Apply optimal parameters to the working copy
   modify_parameter_table_fast(
     par_file, params_optimal, par_bounds, original_values,
     param_structure, zones_to_modify, quiet = TRUE
   )
 
-  # Run with full outputs
+  # Run with full outputs (working copy is the active PARAFILE)
   final_run <- tryCatch({
     run_cosero(
       project_path = cosero_path,
-      defaults_settings = defaults_settings,
+      defaults_settings = effective_settings,
       read_outputs = TRUE,
       quiet = TRUE,
       create_backup = FALSE
@@ -1105,7 +1123,10 @@ print_optimization_report <- function(algorithm, par_filename,
 #'
 #' @param metric Character vector. Performance metric(s) to optimize.
 #'   Options: \code{"NSE"} (default), \code{"KGE"}, \code{"lnNSE"}, \code{"rNSE"},
-#'   \code{"RMSE"}, \code{"PBIAS"}, \code{"VE"}.
+#'   \code{"RMSE"}, \code{"PBIAS"}, \code{"VE"}, \code{"r2"} (coefficient of
+#'   determination, emphasises timing), \code{"r"} (Pearson correlation).
+#'   Note: \code{"NSE"} and \code{"KGE"} are read from \code{statistics.txt} (fast);
+#'   all others are calculated from the discharge time series.
 #'   For multi-objective, provide vector: \code{c("NSE", "KGE")}.
 #'
 #' @param metric_weights Numeric vector or NULL. Weights for combining multiple
@@ -1369,14 +1390,6 @@ optimize_cosero_dds <- function(cosero_path,
     )
   }
 
-  # Restore original parameter file from backup
-  backup_file <- attr(obj_fun, "backup_file")
-  par_file <- attr(obj_fun, "par_file")
-  if (!is.null(backup_file) && file.exists(backup_file)) {
-    file.copy(backup_file, par_file, overwrite = TRUE)
-    file.remove(backup_file)
-    if (verbose) cat("Restored original parameter file\n")
-  }
 
   # Save optimized parameter file (uses obj_fun's original_values for correct baseline)
   opt_file <- save_optimized_params(
@@ -1684,7 +1697,7 @@ optimize_cosero_sce <- function(cosero_path,
     cat("\nCompleted in", round(runtime, 1), "seconds\n")
     cat("Best objective:", round(-result$value, 4), "\n")
   }
-  
+
   par_bounds$optimal_value <- result$par
 
   # Final run with full outputs (uses obj_fun's original_values for correct baseline)
@@ -1695,14 +1708,6 @@ optimize_cosero_sce <- function(cosero_path,
     )
   }
 
-  # Restore original parameter file from backup
-  backup_file <- attr(obj_fun, "backup_file")
-  par_file <- attr(obj_fun, "par_file")
-  if (!is.null(backup_file) && file.exists(backup_file)) {
-    file.copy(backup_file, par_file, overwrite = TRUE)
-    file.remove(backup_file)
-    if (verbose) cat("Restored original parameter file\n")
-  }
 
   # Save optimized parameter file (uses obj_fun's original_values for correct baseline)
   opt_file <- save_optimized_params(

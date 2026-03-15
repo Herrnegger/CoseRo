@@ -59,6 +59,14 @@ read_cosero_output <- function(output_dir, defaults_file = NULL, quiet = FALSE) 
   outputtype <- detect_outputtype(output_dir)
   if (!quiet) cat("Detected OUTPUTTYPE:", outputtype, "\n")
 
+  report_file_size <- function(filename) {
+    path <- file.path(output_dir, filename)
+    if (!quiet && file.exists(path)) {
+      mb <- file.size(path) / 1024^2
+      if (mb >= 1) cat(sprintf("  [%.1f MB] %s\n", mb, filename))
+    }
+  }
+
   # OUTPUTTYPE 1 - Core files
   output_data$runoff <- read_runoff(output_dir, quiet)
   output_data$precipitation <- read_precipitation(output_dir, quiet)
@@ -75,6 +83,7 @@ read_cosero_output <- function(output_dir, defaults_file = NULL, quiet = FALSE) 
 
   # OUTPUTTYPE 3 - Monitor and long-term files
   if (outputtype >= 3) {
+    report_file_size("monitor.txt")
     output_data$monitor <- read_monitor(output_dir, quiet)
     output_data$monitor_subbasins <- read_monitor_subbasins(output_dir, quiet)
     output_data$rundepth <- read_rundepth(output_dir, quiet)
@@ -164,9 +173,9 @@ detect_subbasins <- function(output_dir) {
 #'   \item{yyyy, mm, dd, hh}{Date and time components}
 #'   \item{DateTime}{POSIXct datetime object}
 #'   \item{Date}{Date object}
-#'   \item{QOBS_XXXX}{Observed discharge for subbasin XXXX (m³/s)}
-#'   \item{QSIM_XXXX}{Simulated discharge for subbasin XXXX (m³/s)}
-#'   \item{Qloc_XXXX}{Local discharge for subbasin XXXX (m³/s)}
+#'   \item{QOBS_XXXX}{Observed discharge for subbasin XXXX (m3/s)}
+#'   \item{QSIM_XXXX}{Simulated discharge for subbasin XXXX (m3/s)}
+#'   \item{Qloc_XXXX}{Local discharge for subbasin XXXX (m3/s)}
 #'
 #' @export
 #' @examples
@@ -184,43 +193,19 @@ read_cosero_runoff <- function(runoff_file, missing_value = -999.00, quiet = FAL
   }
 
   if (!quiet) cat("Reading COSERO runoff file:", runoff_file, "\n")
-  lines <- readLines(runoff_file)
 
-  # Find data section
-  runoff_start <- grep("#### Runoff ####", lines)
-  if (length(runoff_start) == 0) {
-    stop("Could not find '#### Runoff ####' section in file", call. = FALSE)
+  # fread(skip="yyyy") skips preamble lines until the header row starting with "yyyy"
+  runoff_data <- fread(runoff_file, skip = "yyyy", header = TRUE, data.table = FALSE,
+                       na.strings = as.character(missing_value))
+
+  if (nrow(runoff_data) == 0) {
+    stop("Could not find data in runoff file \u2014 header row starting with 'yyyy' not found", call. = FALSE)
   }
 
-  # Find header line
-  header_pattern <- grep("yyyy\\s+mm\\s+dd", lines)
-  if (length(header_pattern) == 0) {
-    stop("Could not find header line with 'yyyy mm dd' pattern", call. = FALSE)
-  }
-
-  header_line_idx <- header_pattern[header_pattern > runoff_start[1]][1]
-  if (is.na(header_line_idx)) {
-    stop("Could not find header line after runoff section", call. = FALSE)
-  }
-
-  # Parse header
-  header <- trimws(lines[header_line_idx])
-  col_names <- unlist(strsplit(header, "\\s+"))
-
-  # Get data lines
-  data_start_idx <- header_line_idx + 1
-  data_lines <- lines[data_start_idx:length(lines)]
-  data_lines <- data_lines[nchar(trimws(data_lines)) > 0]
-
-  if (!quiet) cat("Found", length(col_names), "columns,", length(data_lines), "data lines\n")
-
-  # Parse data
-  runoff_data <- parse_cosero_data_lines(data_lines, col_names)
-  runoff_data <- create_cosero_dataframe(runoff_data, col_names)
+  if (!quiet) cat("Found", ncol(runoff_data), "columns,", nrow(runoff_data), "data rows\n")
 
   # Process data
   runoff_data <- add_datetime_columns(runoff_data)
-  runoff_data <- handle_missing_values(runoff_data, missing_value, quiet)
   runoff_data <- add_subbasin_metadata(runoff_data)
 
   # Report results
@@ -607,35 +592,15 @@ add_parameter_metadata <- function(param_data) {
 
 # 6 Additional Timeseries Readers #####
 read_cosero_timeseries_file <- function(file_path, data_type = "timeseries", quiet = FALSE) {
-  lines <- readLines(file_path)
-
-  header <- trimws(lines[2])
-  data_lines <- lines[3:length(lines)]
-  data_lines <- data_lines[nchar(trimws(data_lines)) > 0]
-
-  col_names <- unlist(strsplit(header, "\\s+"))
-  data_matrix <- parse_cosero_data_lines(data_lines, col_names)
-
-  timeseries_data <- create_cosero_dataframe(data_matrix, col_names)
+  timeseries_data <- fread(file_path, skip = "yyyy", header = TRUE, data.table = FALSE)
   timeseries_data <- add_datetime_columns(timeseries_data)
-
   if (!quiet) cat("Successfully read", nrow(timeseries_data), "rows of", data_type, "\n")
   return(timeseries_data)
 }
 
 read_cosero_precipitation <- function(file_path, quiet = FALSE) {
-  lines <- readLines(file_path)
-
-  header <- trimws(lines[1])
-  data_lines <- lines[2:length(lines)]
-  data_lines <- data_lines[nchar(trimws(data_lines)) > 0]
-
-  col_names <- unlist(strsplit(header, "\\s+"))
-  data_matrix <- parse_cosero_data_lines(data_lines, col_names)
-
-  prec_data <- create_cosero_dataframe(data_matrix, col_names)
+  prec_data <- fread(file_path, skip = "yyyy", header = TRUE, data.table = FALSE)
   prec_data <- add_datetime_columns(prec_data)
-
   if (!quiet) cat("Successfully read", nrow(prec_data), "rows of precipitation data\n")
   return(prec_data)
 }
@@ -654,9 +619,9 @@ read_cosero_precipitation <- function(file_path, quiet = FALSE) {
 #'
 #' @return Data frame with columns:
 #'   \item{DateTime, Date}{Time information}
-#'   \item{Q_obs}{Observed discharge (m³/s)}
-#'   \item{Q_sim}{Simulated discharge (m³/s)}
-#'   \item{Q_local}{Local discharge (m³/s), if available}
+#'   \item{Q_obs}{Observed discharge (m3/s)}
+#'   \item{Q_sim}{Simulated discharge (m3/s)}
+#'   \item{Q_local}{Local discharge (m3/s), if available}
 #' The data frame has an attribute "subbasin_id" with the subbasin ID.
 #'
 #' @export
@@ -978,36 +943,27 @@ read_rundepth <- function(output_dir, quiet = FALSE) {
   if (!file.exists(file)) return(NULL)
   if (!quiet) cat("Reading: rundepth.txt\n")
 
-  lines <- readLines(file)
+  # Read only the header section (first 50 lines is sufficient)
+  lines <- readLines(file, n = 50)
 
-  # Find the line with time columns and first basin (line 3: yyyy mm dd hh mm QOBS_0001 QSIM_0001)
+  # Find the line with time columns (first header line)
   time_header_idx <- grep("^\\s*yyyy\\s+mm\\s+dd\\s+hh\\s+mm", lines)[1]
   if (is.na(time_header_idx)) return(NULL)
 
-  # Find first line with numeric data (starts with year)
-  data_start <- grep("^\\s*20\\d\\d", lines)[1]
+  # Find first data line (starts with a 4-digit year)
+  data_start <- grep("^\\s*(?:19|20)\\d\\d", lines)[1]
   if (is.na(data_start)) return(NULL)
 
-  # Reconstruct single-line header from multi-line header
-  # Line 3 has: yyyy mm dd hh mm QOBS_0001 QSIM_0001
-  # Lines 4+ have: QOBS_XXXX QSIM_XXXX (one pair per line)
-  header_lines <- lines[time_header_idx:(data_start-1)]
-  # Remove empty lines
+  # Reconstruct single column name vector from multi-line header
+  # Line at time_header_idx: yyyy mm dd hh mm QOBS_0001 QSIM_0001
+  # Subsequent non-empty lines before data_start: QOBS_XXXX QSIM_XXXX ...
+  header_lines <- lines[time_header_idx:(data_start - 1)]
   header_lines <- header_lines[nchar(trimws(header_lines)) > 0]
+  col_names <- unlist(strsplit(trimws(header_lines), "\\s+"))
 
-  # Extract all column names by splitting each header line and combining
-  col_names <- c()
-  for (line in header_lines) {
-    parts <- unlist(strsplit(trimws(line), "\\s+"))
-    col_names <- c(col_names, parts)
-  }
-
-  # Parse data
-  data_lines <- lines[data_start:length(lines)]
-  data_lines <- data_lines[nchar(trimws(data_lines)) > 0]
-
-  data_matrix <- parse_cosero_data_lines(data_lines, col_names)
-  df <- create_cosero_dataframe(data_matrix, col_names)
+  # Use fread for the data body (skip header lines, supply col.names)
+  df <- fread(file, skip = data_start - 1, header = FALSE,
+              col.names = col_names, data.table = FALSE)
   df <- add_datetime_columns(df)
 
   return(df)

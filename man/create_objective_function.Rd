@@ -43,7 +43,7 @@ create_objective_function(
 }
 \value{
 A function that takes a parameter vector and returns the objective value
-(negative metric for minimization). Has attributes "backup_file" and "par_file"
+(negative metric for minimization). Has attributes "par_file" and "original_values"
 for restoring the original parameter file after optimization.
 }
 \description{

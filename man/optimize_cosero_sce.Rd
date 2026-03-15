@@ -45,7 +45,10 @@ certain elevation bands or land use types.}
 
 \item{metric}{Character vector. Performance metric(s) to optimize.
 Options: \code{"NSE"} (default), \code{"KGE"}, \code{"lnNSE"}, \code{"rNSE"},
-\code{"RMSE"}, \code{"PBIAS"}, \code{"VE"}.
+\code{"RMSE"}, \code{"PBIAS"}, \code{"VE"}, \code{"r2"} (coefficient of
+determination, emphasises timing), \code{"r"} (Pearson correlation).
+Note: \code{"NSE"} and \code{"KGE"} are read from \code{statistics.txt} (fast);
+all others are calculated from the discharge time series.
 For multi-objective, provide vector: \code{c("NSE", "KGE")}.}
 
 \item{metric_weights}{Numeric vector or NULL. Weights for combining multiple
