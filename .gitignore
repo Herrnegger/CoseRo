@@ -87,3 +87,4 @@ CLAUDE.md
 .gitignore
 .agent-ops/architecture.md
 .agent-ops/Plan_Spatial_disaggregation.md
+.claude/settings.local.json

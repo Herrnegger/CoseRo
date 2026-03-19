@@ -166,7 +166,9 @@ detect_subbasins <- function(output_dir) {
 #' Reads discharge data (observed and simulated) from COSERO.runoff file.
 #'
 #' @param runoff_file Path to COSERO.runoff file
-#' @param missing_value Numeric value representing missing data (default: -999.00)
+#' @param missing_value Numeric value representing missing data (default: -999.00).
+#'   All remaining negative discharge values are also replaced with NA, as negative
+#'   discharge is physically impossible.
 #' @param quiet Logical. If TRUE, suppresses progress messages.
 #'
 #' @return Data frame with columns:
@@ -206,6 +208,14 @@ read_cosero_runoff <- function(runoff_file, missing_value = -999.00, quiet = FAL
 
   # Process data
   runoff_data <- add_datetime_columns(runoff_data)
+
+  # Physical discharge cannot be negative; treat any remaining negatives as NA
+  # (covers fill values other than -999, e.g. -1, -9999 used by some COSERO versions)
+  discharge_cols <- grep("^(QOBS_|QSIM_|Qloc_)", colnames(runoff_data), value = TRUE)
+  for (col in discharge_cols) {
+    runoff_data[[col]][runoff_data[[col]] < 0] <- NA
+  }
+
   runoff_data <- add_subbasin_metadata(runoff_data)
 
   # Report results
