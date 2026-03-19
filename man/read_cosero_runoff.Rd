@@ -9,7 +9,9 @@ read_cosero_runoff(runoff_file, missing_value = -999, quiet = FALSE)
 \arguments{
 \item{runoff_file}{Path to COSERO.runoff file}
 
-\item{missing_value}{Numeric value representing missing data (default: -999.00)}
+\item{missing_value}{Numeric value representing missing data (default: -999.00).
+All remaining negative discharge values are also replaced with NA, as negative
+discharge is physically impossible.}
 
 \item{quiet}{Logical. If TRUE, suppresses progress messages.}
 }
