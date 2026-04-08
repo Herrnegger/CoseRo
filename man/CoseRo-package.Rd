@@ -78,6 +78,7 @@ The CoseRo R package provides an R interface for the COSERO hydrological model, 
 \item \code{\link{write_spartacus_precip}} - Convert precipitation to COSERO format
 \item \code{\link{write_spartacus_temp}} - Convert temperature to COSERO format
 \item \code{\link{write_winfore_et0}} - Convert WINFORE ET0 to COSERO format
+\item \code{\link{convert_txt_to_binary}} - Convert ASCII meteorological input to Fortran binary format
 \item \code{\link{write_ehyd_qobs}} - Convert eHYD discharge CSV files to COSERO QOBS format
 }
 }

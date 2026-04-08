@@ -21,16 +21,25 @@
 #' filled with the \code{na_value} (defaulting to \code{-0.01} as required by COSERO).
 #'
 #' **Date Period:** If \code{start_date} and \code{end_date} are not explicitly 
-#' provided, the function will determine the maximum possible overlapping period by 
-#' taking the absolute earliest start date and absolute latest end date across all 
+#' provided, the function will determine the widest possible date range by
+#' taking the absolute earliest start date and absolute latest end date across all
 #' processed files. Shorter records will be padded with \code{na_value}.
 #'
 #' @param input_dir Directory containing raw eHYD \code{Q-Tagesmittel-*.csv} files.
 #' @param output_file Path to the resulting COSERO QOBS text file.
-#' @param gauge_to_nb A named numeric or integer vector mapping the eHYD Gauge ID 
-#'   (\code{HZB-Nummer}) to the COSERO subbasin ID (\code{NB}). The function automatically extracts
-#'   the \code{HZB-Nummer} from the raw filenames (e.g., \code{Q-Tagesmittel-210864.csv} -> \code{210864}).
+#' @param gauge_to_nb A named numeric or integer vector mapping the eHYD Gauge ID
+#'   (\code{HZB-Nummer}) to the COSERO subbasin ID (\code{NB}). The function automatically
+#'   extracts the \code{HZB-Nummer} from the raw filenames
+#'   (e.g., \code{Q-Tagesmittel-210864.csv} -> \code{210864}).
 #'   Example: \code{c("210864" = 1, "210880" = 2)}.
+#'
+#'   **Ungauged subbasins** can be declared using sentinel keys: \code{"NA"},
+#'   \code{"-999"}, or any negative numeric string (e.g., \code{"-1"}). All
+#'   days for that subbasin will be filled with \code{-999} (permanent no-gauge
+#'   flag, distinct from \code{na_value} which marks temporarily missing data).
+#'   Multiple ungauged subbasins can be declared by repeating the sentinel key,
+#'   since R allows duplicate names in named vectors:
+#'   \code{c("210864" = 1, "NA" = 2, "NA" = 3)}.
 #' @param catchment_name String for the output file's first line (Title). Default is 
 #'   \code{"COSERO"}.
 #' @param start_date Optional start date in \code{YYYY-MM-DD} format or Date object. 
@@ -52,19 +61,34 @@
 #'
 #' # Full period (auto-calculated)
 #' write_ehyd_qobs(
-#'   input_dir = "D:/Data/eHYD/raw",
-#'   output_file = "D:/COSERO_project/input/Qobs.txt",
-#'   gauge_to_nb = gauge_mapping,
+#'   input_dir      = "D:/Data/eHYD/raw",
+#'   output_file    = "D:/COSERO_project/input/Qobs.txt",
+#'   gauge_to_nb    = gauge_mapping,
 #'   catchment_name = "COSERO-Wildalpen"
 #' )
 #'
 #' # Specific time period
 #' write_ehyd_qobs(
-#'   input_dir = "D:/Data/eHYD/raw",
+#'   input_dir   = "D:/Data/eHYD/raw",
 #'   output_file = "D:/COSERO_project/input/Qobs.txt",
 #'   gauge_to_nb = gauge_mapping,
-#'   start_date = "1991-01-01",
-#'   end_date = "2024-12-31"
+#'   start_date  = "1991-01-01",
+#'   end_date    = "2024-12-31"
+#' )
+#'
+#' # With ungauged subbasins (filled with -999 for all days)
+#' gauge_mapping_mixed <- c(
+#'   "210864" = 1,  # gauged
+#'   "210880" = 2,  # gauged
+#'   "NA"     = 3,  # ungauged — using "NA" sentinel
+#'   "NA"     = 4,  # ungauged — duplicate sentinel for second basin
+#'   "-999"   = 5   # ungauged — using "-999" sentinel
+#' )
+#' write_ehyd_qobs(
+#'   input_dir      = "D:/Data/eHYD/raw",
+#'   output_file    = "D:/COSERO_project/input/Qobs.txt",
+#'   gauge_to_nb    = gauge_mapping_mixed,
+#'   catchment_name = "COSERO-Wildalpen"
 #' )
 #' }
 #'
@@ -73,8 +97,11 @@
 #' eHYD - WebGIS Application of the Hydrographic Service in Austria.
 #' \href{https://ehyd.gv.at/}{eHYD Portal}
 #'
-#' @importFrom data.table fread rbindlist setcolorder
-#' @importFrom utils read.table write.table
+#' @seealso \code{\link{write_spartacus_precip}}, \code{\link{write_spartacus_temp}},
+#'   \code{\link{write_winfore_et0}}, \code{\link{download_geosphere_data}}
+#'
+#' @importFrom data.table rbindlist
+#' @importFrom utils write.table
 #' @export
 write_ehyd_qobs <- function(
   input_dir, 
@@ -195,25 +222,35 @@ write_ehyd_qobs <- function(
     qobs[[paste0("QOBS_", nb)]] <- na_value
   }
   
+  # Helper: detect ungauged sentinel keys ("NA", "-999", or any negative number)
+  is_ungauged <- function(key) {
+    if (key == "NA" || key == "-999") return(TRUE)
+    num <- suppressWarnings(as.numeric(key))
+    !is.na(num) && num < 0
+  }
+
   # Populate columns
-  for (gauge_id in names(gauge_to_nb)) {
-    if (gauge_id %in% names(all_data_list)) {
-      nb <- gauge_to_nb[[gauge_id]]
-      col_name <- paste0("QOBS_", nb)
-      
+  for (i in seq_along(gauge_to_nb)) {
+    gauge_id <- names(gauge_to_nb)[i]
+    nb       <- gauge_to_nb[[i]]
+    col_name <- paste0("QOBS_", nb)
+
+    if (is_ungauged(gauge_id)) {
+      # Permanently ungauged: fill entire column with -999
+      qobs[[col_name]] <- -999
+    } else if (gauge_id %in% names(all_data_list)) {
       df <- all_data_list[[gauge_id]]
-      
+
       # Match dates and assign
-      idx <- match(df$date, qobs$date)
-      valid <- !is.na(idx)
-      
-      # For values that are within the skeleton period, apply the values (and NA handling)
+      idx    <- match(df$date, qobs$date)
+      valid  <- !is.na(idx)
+
       target_rows <- idx[valid]
       available_Q <- df$Q[valid]
-      
+
       # Replace explicit eHYD NAs with na_value
       available_Q[is.na(available_Q)] <- na_value
-      
+
       qobs[[col_name]][target_rows] <- round(available_Q, 2)
     }
   }
@@ -241,12 +278,19 @@ write_ehyd_qobs <- function(
   
   cat(sprintf("Success: Written %d subbasins and %d time steps to %s\n", n_nb, nrow(data_df), output_file))
   
+  # Determine which subbasins are ungauged for summary
+  ungauged_nbs <- unique(gauge_to_nb[sapply(names(gauge_to_nb), is_ungauged)])
+
   # Summary output
   for (nb in 1:n_nb) {
     col_name <- paste0("QOBS_", nb)
-    n_valid <- sum(qobs[[col_name]] != na_value)
-    n_missing <- sum(qobs[[col_name]] == na_value)
-    cat(sprintf("  Subbasin NB %d: %d valid, %d missing\n", nb, n_valid, n_missing))
+    if (nb %in% ungauged_nbs) {
+      cat(sprintf("  Subbasin NB %d: ungauged (all days = -999)\n", nb))
+    } else {
+      n_valid   <- sum(qobs[[col_name]] != na_value)
+      n_missing <- sum(qobs[[col_name]] == na_value)
+      cat(sprintf("  Subbasin NB %d: %d valid, %d missing\n", nb, n_valid, n_missing))
+    }
   }
   
   invisible(data_df)

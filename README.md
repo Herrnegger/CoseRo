@@ -335,6 +335,28 @@ write_winfore_et0(
 
 **WINFORE Dataset (GeoSphere Austria):** 1 km daily potential evapotranspiration for Austria, same grid as SPARTACUS.
 
+#### Converting ASCII Output to Binary Format
+
+All three preprocessing functions produce ASCII text files by default. For large modelling domains or long time series (\~10 GB files), COSERO can run significantly faster when reading binary input (`ASCIIorBIN = 1` in `MetDefaults.txt`). Use `convert_txt_to_binary()` to convert any existing ASCII file without re-running the expensive NetCDF extraction:
+
+``` r
+library(CoseRo)
+
+# Convert a precipitation file — output path derived automatically (.txt → .bin)
+convert_txt_to_binary("D:/COSERO_project/input/RR_NZ_1961_2024.txt")
+
+# Convert a temperature file with explicit output path
+convert_txt_to_binary(
+  txt_file = "D:/COSERO_project/input/T_NZ_1961_2024.txt",
+  bin_file = "D:/COSERO_project/input/T_NZ_1961_2024.bin"
+)
+
+# Convert an ET0 file
+convert_txt_to_binary("D:/COSERO_project/input/ET0_NZ_1990_2024.txt")
+```
+
+The function reads the entire file with `data.table::fread()` and writes binary records in vectorized chunks (default 10 000 days per chunk), keeping peak memory bounded. Each record contains 5 × 4-byte integers (Y M D H Min) followed by NZ × 4-byte floats — identical to the binary files produced directly by `write_binary = TRUE`.
+
 #### eHYD Discharge Preprocessing
 
 ``` r
@@ -349,7 +371,7 @@ gauge_mapping <- c(
 
 # Q-Tagesmittel-*.csv files → COSERO QOBS format
 write_ehyd_qobs(
-  input_dir      = "data/eHYD/raw",
+  input_dir      = "D:/Data/eHYD/raw",
   output_file    = "D:/COSERO_project/input/Qobs.txt",
   gauge_to_nb    = gauge_mapping,
   catchment_name = "COSERO-Wildalpen",
@@ -466,6 +488,7 @@ CoseRo/
 | `write_spartacus_precip()` | Convert SPARTACUS precipitation NetCDF to COSERO format |
 | `write_spartacus_temp()` | Convert SPARTACUS Tmin/Tmax NetCDF to COSERO Tmean format |
 | `write_winfore_et0()` | Convert WINFORE ET0 NetCDF to COSERO format |
+| `convert_txt_to_binary()` | Convert ASCII meteorological input file to Fortran binary format |
 | `write_ehyd_qobs()` | Convert eHYD discharge CSV files to COSERO QOBS format |
 
 ## Common Use Cases
