@@ -72,19 +72,8 @@ CLAUDE.md
 
 /.quarto/
 **/*.quarto_ipynb
-.claude/settings.local.json
-.claude/settings.local.json
-.claude/settings.local.json
-.claude/settings.json
-.agent-ops/generate-map.js
-.agent-ops/INSTRUCTIONS.md
-.agent-ops/session-handoff.md
-.gitignore
-.agent-ops/PROJECT_MAP.md
-.agent-ops/INSTRUCTIONS_UI_Redesign.md
-.gitignore
-.agent-ops/TODO_UI_Redesign.md
-.gitignore
-.agent-ops/architecture.md
-.agent-ops/Plan_Spatial_disaggregation.md
+
+# Claude Code / agent tooling
+.claude/
+.agent-ops/
 .claude/settings.local.json
