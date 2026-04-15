@@ -12,7 +12,8 @@ write_spartacus_precip(
   years = NULL,
   n_cores = 1,
   write_binary = FALSE,
-  time_shift = TRUE
+  time_shift = TRUE,
+  na_fill = c("mean", "none")
 )
 }
 \arguments{
@@ -34,6 +35,13 @@ write_spartacus_precip(
 \item{time_shift}{If TRUE (default), applies a temporal correction to align
 SPARTACUS precipitation to the 00:00-00:00 day definition used by HZB/eHYD
 discharge data. See Details.}
+
+\item{na_fill}{How to handle model zones that are not covered by the NetCDF
+domain (e.g. zones outside Austria). One of \code{"mean"} (default) or
+\code{"none"}. With \code{"mean"}, each uncovered zone is filled with the
+spatial mean of all covered zones for that timestep. With \code{"none"},
+uncovered zones are written as \code{-999} (COSERO missing-value sentinel).
+A warning listing the uncovered zone IDs is always emitted.}
 }
 \value{
 Invisibly returns a list with paths to the generated files:
@@ -67,6 +75,11 @@ The first day of the series has no \eqn{t-1} available; it is kept as-is
 these are filled by carrying forward the last valid day's values. A warning
 is issued listing the affected dates. Filling is applied before the temporal
 shift to prevent NA propagation into adjacent days.
+
+\strong{Uncovered Zones (\code{na_fill}):} Zones whose polygon does not intersect
+the NetCDF grid (e.g. zones outside the SPARTACUS domain) produce all-NA
+columns after the sparse matrix multiplication. These are detected once at
+setup from the weight matrix and filled per the \code{na_fill} argument.
 }
 \examples{
 \dontrun{

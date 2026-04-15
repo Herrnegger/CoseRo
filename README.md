@@ -313,6 +313,8 @@ write_spartacus_temp(
 
 **Tmean methods:** `"simple"` (weighted average), `"dall_amico"` (day-length adjusted, recommended for Alps), `"parton_logan"` (full diurnal simulation). The simple arithmetic mean overestimates Tmean by 0.5–2°C.
 
+**Zones outside the NetCDF domain:** If your shapefile extends beyond the SPARTACUS/WINFORE domain (e.g. catchments crossing the Austrian border), affected zones are detected automatically from the weight matrix and a warning is emitted listing their IDs. Use `na_fill = "mean"` (default) to fill them with the spatial mean of covered zones for each timestep, or `na_fill = "none"` to write `-999` (COSERO missing-value sentinel).
+
 **SPARTACUS Dataset (GeoSphere Austria):** 1 km daily gridded data for Austria (1961–present), DOI: <https://doi.org/10.60669/m6w8-s545>.
 
 #### WINFORE ET0 Preprocessing
@@ -545,7 +547,7 @@ If you use CoseRo in your research, please cite:
 ```
 Herrnegger, M., Fiaz, A., and the COSERO Development Team (2025).
 CoseRo: R Interface and Shiny Application for the COSERO Hydrological Model.
-R package version 0.9.1. https://github.com/Herrnegger/CoseRo
+R package version 0.9.2. https://github.com/Herrnegger/CoseRo
 ```
 
 Or in BibTeX format:
@@ -555,7 +557,7 @@ Or in BibTeX format:
   title  = {CoseRo: R Interface and Shiny Application for the COSERO Hydrological Model},
   author = {Herrnegger, Mathew and Fiaz, Ahmed and {COSERO Development Team}},
   year   = {2025},
-  note   = {R package version 0.9.1},
+  note   = {R package version 0.9.2},
   url    = {https://github.com/Herrnegger/CoseRo}
 }
 ```
