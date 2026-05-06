@@ -93,6 +93,17 @@ setup_cosero_project_example("D:/COSERO_example")
 launch_cosero_app("D:/COSERO_example")
 ```
 
+For the **spatially disaggregated** example project (requires NDC support in COSERO.exe):
+
+``` r
+library(CoseRo)
+
+# Create example project with hypsometric disaggregation enabled (NDC = 5)
+setup_cosero_project_example_aggregated("D:/COSERO_example_NDC")
+
+launch_cosero_app("D:/COSERO_example_NDC")
+```
+
 ## Usage
 
 ### 1. Interactive Shiny App
@@ -382,9 +393,54 @@ write_ehyd_qobs(
 )
 ```
 
+**Ungauged subbasins** can be declared using sentinel keys (`"NA"`, `"-999"`, or any negative string) in `gauge_to_nb`. Those subbasins are filled with `-999` for all days. Duplicate sentinel keys are allowed for multiple ungauged subbasins:
+
+``` r
+gauge_mapping <- c(
+  "210864" = 1,   # gauged
+  "210880" = 2,   # gauged
+  "NA"     = 3,   # ungauged subbasin
+  "NA"     = 4    # another ungauged subbasin
+)
+```
+
 **eHYD** is the Austrian Hydrographic Service (BML) discharge portal. Files are named `Q-Tagesmittel-{HZB-Nummer}.csv`. Missing days and gaps (`Luecke`) are filled with `na_value` (default: `-0.01` as required by COSERO). See <https://ehyd.gv.at/>.
 
-### 3. Understanding COSERO Output Types
+### 3. Hypsometric Spatial Disaggregation (NDC)
+
+> **Note:** This feature requires an NDC-enabled COSERO.exe and is available on the `dev/spatial-disaggregation` branch.
+
+COSERO supports within-zone spatial disaggregation via hypsometric elevation classes. The number of disaggregation classes is controlled by the `NDC` parameter in `defaults.txt` (integer 1–10; `NDC = 1` disables disaggregation and gives bit-identical results to baseline).
+
+``` r
+library(CoseRo)
+
+# Run with NDC = 5 disaggregation classes
+result <- run_cosero(
+  project_path      = "D:/COSERO_NDC_project",
+  defaults_settings = list(
+    STARTDATE  = "1991 1 1 0 0",
+    ENDDATE    = "2024 12 31 23 59",
+    SPINUP     = 365,
+    OUTPUTTYPE = 1,
+    NDC        = 5
+  )
+)
+```
+
+**Disaggregation parameters** (set per zone in `para.txt`, calibratable via sensitivity analysis and optimization):
+
+| Parameter | Description | Unit | Default |
+|---|---|---|---|
+| `LAPSE_T` | Temperature lapse rate | °C / 100 m | −0.65 |
+| `LAPSE_P` | Precipitation lapse rate | factor / 100 m | 0.05 |
+| `SOILVAR` | CV for within-zone spread of soil storage parameters | — | 0.5 |
+| `HYDROVAR` | CV for within-zone spread of hydraulic routing parameters | — | 0.5 |
+| `CTVAR` | CV for within-zone spread of snow melt factors | — | 0.5 |
+
+Hypsometric curves (`HYPSO0_` through `HYPSO100_`, elevation at 0–100% area quantiles in 5% steps) are stored as read-only columns in the parameter file and are computed from a DEM — they are not calibration parameters.
+
+### 4. Understanding COSERO Output Types
 
 **OUTPUTTYPE 1 — QSIM only** — `COSERO.runoff`, `COSERO.prec`, `COSERO.plus`, `COSERO.plus1`, `statistics.txt`, `topology.txt`
 
@@ -411,8 +467,9 @@ CoseRo/
 ├── inst/
 │   ├── shiny-app/app.R           # Interactive Shiny application
 │   └── extdata/
-│       ├── COSERO_Wildalpen.zip  # Example project
-│       └── parameter_bounds.csv  # Default parameter bounds (30 parameters)
+│       ├── COSERO_Wildalpen.zip             # Example project
+│       ├── COSERO_Wildalpen_agreggated.zip  # Example project with NDC disaggregation
+│       └── parameter_bounds.csv             # Default parameter bounds (36 parameters)
 └── man/                          # Auto-generated documentation
 ```
 
@@ -423,6 +480,7 @@ CoseRo/
 | Function | Description |
 |---|---|
 | `setup_cosero_project_example()` | Create ready-to-run example project (Wildalpen catchment) |
+| `setup_cosero_project_example_aggregated()` | Create ready-to-run example project with NDC disaggregation enabled |
 | `setup_cosero_project()` | Create empty project structure with binaries |
 | `show_required_files()` | Display checklist of required COSERO input files |
 
