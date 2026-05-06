@@ -61,6 +61,187 @@
 NULL
 
 # ============================================================================
+# convert_txt_to_binary
+# ============================================================================
+
+#' Convert COSERO Meteorological ASCII Text File to Binary Format
+#'
+#' @description
+#' Converts an ASCII text file produced by \code{\link{write_spartacus_precip}},
+#' \code{\link{write_spartacus_temp}}, or \code{\link{write_winfore_et0}} to the
+#' Fortran-compatible binary format expected by COSERO when
+#' \code{ASCIIorBIN = 1} in \code{MetDefaults.txt}.
+#'
+#' @details
+#' The binary format stores one record per day:
+#' \itemize{
+#'   \item 5 × 4-byte signed integers: year, month, day, hour, minute
+#'   \item NZ × 4-byte single-precision floats: one value per model zone
+#' }
+#' where NZ is inferred automatically from the number of columns in the text
+#' file (total columns minus 5 date columns).
+#'
+#' For performance, the entire text file is read into memory with
+#' \code{data.table::fread()} in one pass, then all binary records are written
+#' in vectorized chunks of \code{chunk_size} days rather than one day at a time.
+#' This keeps peak memory bounded while remaining fast for very large files
+#' (~10 GB).
+#'
+#' @param txt_file Path to the input ASCII text file (space-separated, no
+#'   header; produced by \code{write_spartacus_precip},
+#'   \code{write_spartacus_temp}, or \code{write_winfore_et0}).
+#' @param bin_file Path for the output binary file. If \code{NULL} (default),
+#'   the path is derived from \code{txt_file} by replacing the \code{.txt}
+#'   extension with \code{.bin}.
+#' @param chunk_size Number of days to write per chunk (default: \code{10000}).
+#'   Increase for faster writes on machines with ample RAM; decrease to reduce
+#'   peak memory use.
+#' @param overwrite If \code{TRUE} (default), an existing output file is
+#'   silently overwritten.
+#'
+#' @return Invisibly returns the path to the written binary file.
+#'
+#' @section Output format:
+#' The binary file is a flat, headerless sequence of records readable by
+#' Fortran \code{READ(...) rec, FORM='UNFORMATTED', ACCESS='DIRECT'}.
+#' Each record is \code{(5 + NZ) × 4} bytes long.
+#'
+#' @examples
+#' \dontrun{
+#' # After producing the text file with write_spartacus_precip():
+#' write_spartacus_precip(
+#'   nc_dir      = "D:/Data/GeoSphere/SPARTACUS_RR",
+#'   output_dir  = "D:/COSERO_project/input",
+#'   model_zones = zones
+#' )
+#'
+#' # Convert the resulting txt to binary:
+#' convert_txt_to_binary("D:/COSERO_project/input/RR_NZ_1961_2024.txt")
+#'
+#' # Explicit output path:
+#' convert_txt_to_binary(
+#'   txt_file  = "D:/COSERO_project/input/RR_NZ_1961_2024.txt",
+#'   bin_file  = "D:/COSERO_project/input/RR_NZ_1961_2024.bin"
+#' )
+#'
+#' # Convert an ET0 file produced by write_winfore_et0():
+#' convert_txt_to_binary("D:/COSERO_project/input/ET0_NZ_1990_2024.txt")
+#' }
+#'
+#' @seealso \code{\link{write_spartacus_precip}}, \code{\link{write_spartacus_temp}},
+#'   \code{\link{write_winfore_et0}}
+#'
+#' @importFrom data.table fread
+#' @export
+convert_txt_to_binary <- function(txt_file, bin_file = NULL,
+                                  chunk_size = 10000L,
+                                  overwrite = TRUE) {
+
+  if (!file.exists(txt_file)) {
+    stop("txt_file does not exist: ", txt_file, call. = FALSE)
+  }
+
+  # Derive output path from input if not supplied
+  if (is.null(bin_file)) {
+    bin_file <- sub("\\.txt$", ".bin", txt_file, ignore.case = TRUE)
+    if (bin_file == txt_file) {
+      stop("Could not derive .bin path from txt_file. Please supply bin_file explicitly.",
+           call. = FALSE)
+    }
+  }
+
+  if (file.exists(bin_file)) {
+    if (!overwrite) {
+      stop("bin_file already exists and overwrite = FALSE: ", bin_file, call. = FALSE)
+    }
+    file.remove(bin_file)
+  }
+
+  t_start <- Sys.time()
+  message("Reading: ", basename(txt_file))
+
+  # Read entire file at once — fread is memory-mapped and handles ~10 GB well
+  dt <- data.table::fread(txt_file, header = FALSE, sep = " ",
+                          showProgress = TRUE, data.table = FALSE)
+
+  n_rows  <- nrow(dt)
+  n_cols  <- ncol(dt)
+  n_zones <- n_cols - 5L  # First 5 columns: Y M D H Min
+
+  if (n_zones < 1L) {
+    stop("File has ", n_cols, " columns; expected at least 6 (5 date + 1 zone value).",
+         call. = FALSE)
+  }
+
+  message(sprintf("  %d days, %d zone(s) detected", n_rows, n_zones))
+
+  # Pre-convert to typed matrices once — avoids repeated coercion inside the loop
+  date_mat  <- as.matrix(dt[, 1:5, drop = FALSE])   # integer-like
+  value_mat <- as.matrix(dt[, 6:n_cols, drop = FALSE])  # numeric
+
+  storage.mode(date_mat)  <- "integer"
+  storage.mode(value_mat) <- "double"
+
+  rm(dt); gc()
+
+  # Write in chunks to keep memory flat
+  message("Writing binary: ", basename(bin_file))
+  bin_con <- file(bin_file, open = "wb")
+  on.exit(close(bin_con), add = TRUE)
+
+  chunk_size <- as.integer(chunk_size)
+  n_chunks   <- ceiling(n_rows / chunk_size)
+  pb <- txtProgressBar(max = n_chunks, style = 3)
+
+  for (chunk in seq_len(n_chunks)) {
+    row_from <- (chunk - 1L) * chunk_size + 1L
+    row_to   <- min(chunk * chunk_size, n_rows)
+    idx      <- row_from:row_to
+    n_days   <- length(idx)
+
+    # Build an interleaved [record_words × n_days] integer matrix in one shot.
+    # Column order: [Y M D H Min v1 v2 ... vNZ] for each day (row-major records).
+    # We achieve this by cbinding the header and values column-matrices,
+    # then transposing so each column is one record — writeBin then streams them
+    # sequentially, which is exactly the flat record layout COSERO expects.
+
+    # date_mat rows -> integer; value_mat rows -> single-precision float bits
+    # To write mixed int/float in one pass we serialise each column separately
+    # into raw bytes, then interleave the raw vectors.
+
+    header_raw <- writeBin(as.integer(t(date_mat[idx, , drop = FALSE])),
+                           raw(), size = 4L, endian = "little")
+    values_raw <- writeBin(as.double(t(value_mat[idx, , drop = FALSE])),
+                           raw(), size = 4L, endian = "little")
+
+    # Interleave raw bytes without an R-level loop:
+    #   header_raw is a vector of n_days * 5  * 4 bytes (20 bytes / day)
+    #   values_raw is a vector of n_days * NZ * 4 bytes
+    # We reshape both into matrices where each ROW = one day's bytes,
+    # then cbind them and transpose — the resulting raw() vector has
+    # the correct record-sequential layout.
+    h_bytes <- 5L  * 4L    # bytes for date header per day
+    v_bytes <- n_zones * 4L
+
+    header_mat <- matrix(header_raw, nrow = h_bytes, ncol = n_days)  # 20 × n_days
+    values_mat <- matrix(values_raw, nrow = v_bytes, ncol = n_days)  # NZ*4 × n_days
+
+    # rbind: each column = one complete record; as.vector() reads column-major
+    raw_chunk <- as.vector(rbind(header_mat, values_mat))
+
+    writeBin(raw_chunk, bin_con)
+    setTxtProgressBar(pb, chunk)
+  }
+  close(pb)
+
+  elapsed <- as.numeric(difftime(Sys.time(), t_start, units = "secs"))
+  bin_size_mb <- file.info(bin_file)$size / 1024^2
+  message(sprintf("Done. Binary file: %.1f MB  (%.1f sec)", bin_size_mb, elapsed))
+
+  invisible(bin_file)
+}
+
+# ============================================================================
 # Helper: Format elapsed time as seconds or minutes
 # ============================================================================
 format_elapsed <- function(start_time) {

@@ -20,9 +20,18 @@ write_ehyd_qobs(
 \item{output_file}{Path to the resulting COSERO QOBS text file.}
 
 \item{gauge_to_nb}{A named numeric or integer vector mapping the eHYD Gauge ID
-(\code{HZB-Nummer}) to the COSERO subbasin ID (\code{NB}). The function automatically extracts
-the \code{HZB-Nummer} from the raw filenames (e.g., \code{Q-Tagesmittel-210864.csv} -> \code{210864}).
-Example: \code{c("210864" = 1, "210880" = 2)}.}
+(\code{HZB-Nummer}) to the COSERO subbasin ID (\code{NB}). The function automatically
+extracts the \code{HZB-Nummer} from the raw filenames
+(e.g., \code{Q-Tagesmittel-210864.csv} -> \code{210864}).
+Example: \code{c("210864" = 1, "210880" = 2)}.
+
+\strong{Ungauged subbasins} can be declared using sentinel keys: \code{"NA"},
+\code{"-999"}, or any negative numeric string (e.g., \code{"-1"}). All
+days for that subbasin will be filled with \code{-999} (permanent no-gauge
+flag, distinct from \code{na_value} which marks temporarily missing data).
+Multiple ungauged subbasins can be declared by repeating the sentinel key,
+since R allows duplicate names in named vectors:
+\code{c("210864" = 1, "NA" = 2, "NA" = 3)}.}
 
 \item{catchment_name}{String for the output file's first line (Title). Default is
 \code{"COSERO"}.}
@@ -59,7 +68,7 @@ missing days within the combined period across all files, it is automatically
 filled with the \code{na_value} (defaulting to \code{-0.01} as required by COSERO).
 
 \strong{Date Period:} If \code{start_date} and \code{end_date} are not explicitly
-provided, the function will determine the maximum possible overlapping period by
+provided, the function will determine the widest possible date range by
 taking the absolute earliest start date and absolute latest end date across all
 processed files. Shorter records will be padded with \code{na_value}.
 }
@@ -74,19 +83,34 @@ gauge_mapping <- c(
 
 # Full period (auto-calculated)
 write_ehyd_qobs(
-  input_dir = "D:/Data/eHYD/raw",
-  output_file = "D:/COSERO_project/input/Qobs.txt",
-  gauge_to_nb = gauge_mapping,
+  input_dir      = "D:/Data/eHYD/raw",
+  output_file    = "D:/COSERO_project/input/Qobs.txt",
+  gauge_to_nb    = gauge_mapping,
   catchment_name = "COSERO-Wildalpen"
 )
 
 # Specific time period
 write_ehyd_qobs(
-  input_dir = "D:/Data/eHYD/raw",
+  input_dir   = "D:/Data/eHYD/raw",
   output_file = "D:/COSERO_project/input/Qobs.txt",
   gauge_to_nb = gauge_mapping,
-  start_date = "1991-01-01",
-  end_date = "2024-12-31"
+  start_date  = "1991-01-01",
+  end_date    = "2024-12-31"
+)
+
+# With ungauged subbasins (filled with -999 for all days)
+gauge_mapping_mixed <- c(
+  "210864" = 1,  # gauged
+  "210880" = 2,  # gauged
+  "NA"     = 3,  # ungauged — using "NA" sentinel
+  "NA"     = 4,  # ungauged — duplicate sentinel for second basin
+  "-999"   = 5   # ungauged — using "-999" sentinel
+)
+write_ehyd_qobs(
+  input_dir      = "D:/Data/eHYD/raw",
+  output_file    = "D:/COSERO_project/input/Qobs.txt",
+  gauge_to_nb    = gauge_mapping_mixed,
+  catchment_name = "COSERO-Wildalpen"
 )
 }
 
@@ -95,4 +119,8 @@ write_ehyd_qobs(
 BML (Federal Ministry of Agriculture, Forestry, Regions and Water Management)
 eHYD - WebGIS Application of the Hydrographic Service in Austria.
 \href{https://ehyd.gv.at/}{eHYD Portal}
+}
+\seealso{
+\code{\link{write_spartacus_precip}}, \code{\link{write_spartacus_temp}},
+\code{\link{write_winfore_et0}}, \code{\link{download_geosphere_data}}
 }
