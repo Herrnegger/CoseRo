@@ -131,9 +131,10 @@ setup_cosero_project_example <- function(project_path, overwrite = FALSE) {
 #' spatial setup with 3 subbasins and 6 zones) including:
 #' \itemize{
 #'   \item \code{COSERO.exe} (NDC-enabled build) and required DLLs
-#'   \item \code{defaults.txt} with \code{NDC = 5} (five elevation bands per zone)
+#'   \item \code{defaults.txt} with standard settings
 #'   \item \code{para_ini_agg.txt} — 195-column parameter file containing all standard
-#'     parameters plus 5 disaggregation parameters and 21 hypsometric curve columns
+#'     parameters, NDC = 5 (five elevation bands per zone), 5 disaggregation parameters,
+#'     and 21 hypsometric curve columns
 #'     per zone (see parameter file structure below)
 #'   \item Meteorological input data (precipitation, temperature, ET0) in ASCII and
 #'     binary format
@@ -221,7 +222,7 @@ setup_cosero_project_example <- function(project_path, overwrite = FALSE) {
 #' \dontrun{
 #' setup_cosero_project_example_aggregated("C:/COSERO_aggregated_example")
 #'
-#' # Run with NDC = 5 (as configured in defaults.txt)
+#' # Run with NDC = 5 (as configured in para_ini_agg.txt)
 #' run_cosero("C:/COSERO_aggregated_example")
 #'
 #' # Inspect results interactively
@@ -299,7 +300,7 @@ setup_cosero_project_example_aggregated <- function(project_path, overwrite = FA
   cat("Catchment: Wildalpen aggregated (Austria) | NDC=5 elevation bands\n")
   cat("\nContents:\n")
   cat("  COSERO.exe (NDC disaggregation support) + DLLs\n")
-  cat("  defaults.txt (NDC=5), para_ini_agg.txt,\n")
+  cat("  defaults.txt, para_ini_agg.txt (NDC=5),\n")
   cat("  P/T data (ASCII & binary), Qobs.txt\n")
   cat("  Example outputs already included\n")
   cat("\nTo visualize: launch_cosero_app('", project_path, "')\n", sep = "")

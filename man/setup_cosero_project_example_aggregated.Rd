@@ -26,9 +26,10 @@ Extracts a complete working example (Wildalpen catchment, Austria, aggregated
 spatial setup with 3 subbasins and 6 zones) including:
 \itemize{
 \item \code{COSERO.exe} (NDC-enabled build) and required DLLs
-\item \code{defaults.txt} with \code{NDC = 5} (five elevation bands per zone)
+\item \code{defaults.txt} with standard settings
 \item \code{para_ini_agg.txt} — 195-column parameter file containing all standard
-parameters plus 5 disaggregation parameters and 21 hypsometric curve columns
+parameters, NDC = 5 (five elevation bands per zone), 5 disaggregation parameters,
+and 21 hypsometric curve columns
 per zone (see parameter file structure below)
 \item Meteorological input data (precipitation, temperature, ET0) in ASCII and
 binary format
@@ -115,7 +116,7 @@ For the standard (non-disaggregated) example see
 \dontrun{
 setup_cosero_project_example_aggregated("C:/COSERO_aggregated_example")
 
-# Run with NDC = 5 (as configured in defaults.txt)
+# Run with NDC = 5 (as configured in para_ini_agg.txt)
 run_cosero("C:/COSERO_aggregated_example")
 
 # Inspect results interactively

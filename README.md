@@ -415,15 +415,14 @@ COSERO supports within-zone spatial disaggregation via hypsometric elevation cla
 ``` r
 library(CoseRo)
 
-# Run with NDC = 5 disaggregation classes
+# NDC is set in the parameter file (para_ini_agg.txt), not in defaults_settings
 result <- run_cosero(
   project_path      = "D:/COSERO_NDC_project",
   defaults_settings = list(
     STARTDATE  = "1991 1 1 0 0",
     ENDDATE    = "2024 12 31 23 59",
     SPINUP     = 365,
-    OUTPUTTYPE = 1,
-    NDC        = 5
+    OUTPUTTYPE = 1
   )
 )
 ```
