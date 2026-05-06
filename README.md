@@ -545,7 +545,7 @@ If you use CoseRo in your research, please cite:
 ```
 Herrnegger, M., Fiaz, A., and the COSERO Development Team (2025).
 CoseRo: R Interface and Shiny Application for the COSERO Hydrological Model.
-R package version 0.1.0. https://github.com/Herrnegger/CoseRo
+R package version 0.9.1. https://github.com/Herrnegger/CoseRo
 ```
 
 Or in BibTeX format:
@@ -555,7 +555,7 @@ Or in BibTeX format:
   title  = {CoseRo: R Interface and Shiny Application for the COSERO Hydrological Model},
   author = {Herrnegger, Mathew and Fiaz, Ahmed and {COSERO Development Team}},
   year   = {2025},
-  note   = {R package version 0.1.0},
+  note   = {R package version 0.9.1},
   url    = {https://github.com/Herrnegger/CoseRo}
 }
 ```
@@ -567,12 +567,6 @@ You can also get the current citation by running `citation("CoseRo")` in R.
 
 **Bug Reports & Feature Requests:** <https://github.com/Herrnegger/CoseRo/issues>
 
-## Acknowledgments
-
--   COSERO hydrological model developers
--   sensobol package authors for the sensitivity analysis framework
--   hydroGOF package authors for performance metrics
--   Shiny and plotly teams for visualization tools
 
 ------------------------------------------------------------------------
 
