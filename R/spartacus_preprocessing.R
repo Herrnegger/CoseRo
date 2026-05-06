@@ -284,6 +284,12 @@ get_solar_parameters <- function(doy, lat) {
 #' @param time_shift If TRUE (default), applies a temporal correction to align
 #'   SPARTACUS precipitation to the 00:00-00:00 day definition used by HZB/eHYD
 #'   discharge data. See Details.
+#' @param na_fill How to handle model zones that are not covered by the NetCDF
+#'   domain (e.g. zones outside Austria). One of \code{"mean"} (default) or
+#'   \code{"none"}. With \code{"mean"}, each uncovered zone is filled with the
+#'   spatial mean of all covered zones for that timestep. With \code{"none"},
+#'   uncovered zones are written as \code{-999} (COSERO missing-value sentinel).
+#'   A warning listing the uncovered zone IDs is always emitted.
 #'
 #' @details
 #' **Note**: This function only works with SPARTACUS NetCDF files from GeoSphere
@@ -308,6 +314,11 @@ get_solar_parameters <- function(doy, lat) {
 #' these are filled by carrying forward the last valid day's values. A warning
 #' is issued listing the affected dates. Filling is applied before the temporal
 #' shift to prevent NA propagation into adjacent days.
+#'
+#' **Uncovered Zones (\code{na_fill}):** Zones whose polygon does not intersect
+#' the NetCDF grid (e.g. zones outside the SPARTACUS domain) produce all-NA
+#' columns after the sparse matrix multiplication. These are detected once at
+#' setup from the weight matrix and filled per the \code{na_fill} argument.
 #'
 #' @references
 #' Hiebl, J. and Frei, C. (2018). Daily precipitation grids for Austria since 1961 —
@@ -344,7 +355,9 @@ get_solar_parameters <- function(doy, lat) {
 write_spartacus_precip <- function(nc_dir, output_dir, model_zones,
                                    nz_col = "NZ", years = NULL,
                                    n_cores = 1, write_binary = FALSE,
-                                   time_shift = TRUE) {
+                                   time_shift = TRUE,
+                                   na_fill = c("mean", "none")) {
+  na_fill <- match.arg(na_fill, c("mean", "none"))
 
   # Check for required suggested packages
   required_pkgs <- c("terra", "sf", "exactextractr", "Matrix", "future", "furrr")
@@ -435,6 +448,25 @@ write_spartacus_precip <- function(nc_dir, output_dir, model_zones,
   # Normalize rows so weights sum to 1 (area-weighted mean)
   W <- W / Matrix::rowSums(W)
 
+  # Detect uncovered zones: do one test multiplication on the first raster layer.
+  # Zones outside the NetCDF domain have all-NA cells, so their result row is NA
+  # regardless of coverage fraction — rowSums(W) > 0 does NOT catch this case.
+  r_test <- terra::rast(files[1])[[1]]
+  test_vals <- as.matrix(r_test[all_raw_cells])
+  storage.mode(test_vals) <- "double"
+  test_result <- as.numeric(W %*% test_vals)
+  uncovered <- which(is.na(test_result))
+  rm(r_test, test_vals, test_result)
+
+  # Warn once about uncovered zones
+  if (length(uncovered) > 0) {
+    uncov_ids <- model_zones[[nz_col]][uncovered]
+    warning(length(uncovered), " zone(s) have no overlap with the NetCDF domain and will be ",
+            if (na_fill == "mean") "filled with the spatial mean of covered zones: "
+            else "written as -999: ",
+            paste(uncov_ids, collapse = ", "), call. = FALSE)
+  }
+
   # Free memory
   rm(template, row_idx, col_idx, weights, r_raw, r_flipped); gc()
 
@@ -463,6 +495,18 @@ write_spartacus_precip <- function(nc_dir, output_dir, model_zones,
 
     # Zonal means via sparse matrix multiplication [n_zones x n_days]
     result <- as.matrix(weight_matrix %*% cell_vals)
+
+    # Fill uncovered zones (rows that are all-NaN after W normalization)
+    if (length(uncovered) > 0) {
+      if (na_fill == "mean") {
+        # Vectorized: colMeans of covered rows, then broadcast to uncovered rows
+        covered_means <- colMeans(result[-uncovered, , drop = FALSE], na.rm = TRUE)
+        result[uncovered, ] <- matrix(covered_means, nrow = length(uncovered),
+                                      ncol = ncol(result), byrow = TRUE)
+      } else {
+        result[uncovered, ] <- -999
+      }
+    }
 
     # Handle missing days: fill with last valid day (carry forward)
     na_days <- which(colSums(is.na(result)) == nrow(result))
@@ -620,6 +664,9 @@ write_spartacus_precip <- function(nc_dir, output_dir, model_zones,
 #' @param time_shift If TRUE (default), applies a temporal correction to align
 #'   SPARTACUS temperature to the 00:00-00:00 day definition used by HZB/eHYD
 #'   discharge data. See Details.
+#' @param na_fill How to handle model zones not covered by the NetCDF domain.
+#'   One of \code{"mean"} (default) or \code{"none"}. See
+#'   \code{\link{write_spartacus_precip}} for full description.
 #'
 #' @details
 #' **Note**: This function only works with SPARTACUS NetCDF files from GeoSphere
@@ -687,7 +734,9 @@ write_spartacus_temp <- function(tmin_dir, tmax_dir, output_dir, model_zones,
                                  tmin_weight = 0.5,
                                  lat = NULL,
                                  n_cores = 1, write_binary = FALSE,
-                                 time_shift = TRUE) {
+                                 time_shift = TRUE,
+                                 na_fill = c("mean", "none")) {
+  na_fill <- match.arg(na_fill, c("mean", "none"))
 
   # Check for required suggested packages
   required_pkgs <- c("terra", "sf", "exactextractr", "Matrix", "future", "furrr")
@@ -778,7 +827,24 @@ write_spartacus_temp <- function(tmin_dir, tmax_dir, output_dir, model_zones,
   weights <- unlist(lapply(template, `[[`, "coverage_fraction"))
 
   W <- Matrix::sparseMatrix(i = row_idx, j = col_idx, x = weights, dims = c(n_zones, length(all_raw_cells)))
-  W <- W / Matrix::rowSums(W)  # Normalize for area-weighted mean
+  W <- W / Matrix::rowSums(W)
+
+  # Detect uncovered zones via test multiplication on one raster layer.
+  # Zones outside the NetCDF domain have all-NA cells; rowSums(W) > 0 does NOT catch this.
+  test_vals <- as.matrix(r_raw[all_raw_cells])
+  storage.mode(test_vals) <- "double"
+  test_result <- as.numeric(W %*% test_vals)
+  uncovered <- which(is.na(test_result))
+  rm(test_vals, test_result)
+
+  # Warn once about uncovered zones
+  if (length(uncovered) > 0) {
+    uncov_ids <- model_zones[[nz_col]][uncovered]
+    warning(length(uncovered), " zone(s) have no overlap with the NetCDF domain and will be ",
+            if (na_fill == "mean") "filled with the spatial mean of covered zones: "
+            else "written as -999: ",
+            paste(uncov_ids, collapse = ", "), call. = FALSE)
+  }
 
   # Free memory
   rm(template, row_idx, col_idx, weights, r_raw, r_flipped); gc()
@@ -901,6 +967,17 @@ write_spartacus_temp <- function(tmin_dir, tmax_dir, output_dir, model_zones,
 
     # Zonal means via sparse matrix multiplication
     result <- as.matrix(weight_matrix %*% v_mean)
+
+    # Fill uncovered zones (rows that are all-NaN after W normalization)
+    if (length(uncovered) > 0) {
+      if (na_fill == "mean") {
+        covered_means <- colMeans(result[-uncovered, , drop = FALSE], na.rm = TRUE)
+        result[uncovered, ] <- matrix(covered_means, nrow = length(uncovered),
+                                      ncol = ncol(result), byrow = TRUE)
+      } else {
+        result[uncovered, ] <- -999
+      }
+    }
 
     # Handle missing days: fill with last valid day (carry forward)
     na_days <- which(colSums(is.na(result)) == nrow(result))

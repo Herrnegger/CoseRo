@@ -11,7 +11,8 @@ write_winfore_et0(
   nz_col = "NZ",
   years = NULL,
   n_cores = 1,
-  write_binary = FALSE
+  write_binary = FALSE,
+  na_fill = c("mean", "none")
 )
 }
 \arguments{
@@ -32,6 +33,10 @@ Uses \pkg{future} and \pkg{furrr} for parallelization.}
 
 \item{write_binary}{If \code{TRUE}, also writes a Fortran-compatible binary
 file (default: \code{FALSE}).}
+
+\item{na_fill}{How to handle model zones not covered by the NetCDF domain.
+One of \code{"mean"} (default) or \code{"none"}. See
+\code{\link{write_spartacus_precip}} for full description.}
 }
 \value{
 Invisibly returns a list with paths to the generated files:

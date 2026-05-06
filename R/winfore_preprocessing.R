@@ -55,6 +55,9 @@ NULL
 #'   Uses \pkg{future} and \pkg{furrr} for parallelization.
 #' @param write_binary If \code{TRUE}, also writes a Fortran-compatible binary
 #'   file (default: \code{FALSE}).
+#' @param na_fill How to handle model zones not covered by the NetCDF domain.
+#'   One of \code{"mean"} (default) or \code{"none"}. See
+#'   \code{\link{write_spartacus_precip}} for full description.
 #'
 #' @return Invisibly returns a list with paths to the generated files:
 #'   \item{txt}{Path to the text output file}
@@ -100,7 +103,9 @@ NULL
 #' @export
 write_winfore_et0 <- function(nc_dir, output_dir, model_zones,
                                nz_col = "NZ", years = NULL,
-                               n_cores = 1, write_binary = FALSE) {
+                               n_cores = 1, write_binary = FALSE,
+                               na_fill = c("mean", "none")) {
+  na_fill <- match.arg(na_fill, c("mean", "none"))
 
   # Check for required suggested packages
   required_pkgs <- c("terra", "sf", "exactextractr", "Matrix", "future", "furrr")
@@ -183,9 +188,24 @@ write_winfore_et0 <- function(nc_dir, output_dir, model_zones,
 
   W <- Matrix::sparseMatrix(i = row_idx, j = col_idx, x = weights,
                             dims = c(n_zones, length(all_raw_cells)))
-
-  # Normalize rows so weights sum to 1 (area-weighted mean)
   W <- W / Matrix::rowSums(W)
+
+  # Detect uncovered zones via test multiplication on one raster layer.
+  # Zones outside the NetCDF domain have all-NA cells; rowSums(W) > 0 does NOT catch this.
+  test_vals <- as.matrix(r_raw[all_raw_cells])
+  storage.mode(test_vals) <- "double"
+  test_result <- as.numeric(W %*% test_vals)
+  uncovered <- which(is.na(test_result))
+  rm(test_vals, test_result)
+
+  # Warn once about uncovered zones
+  if (length(uncovered) > 0) {
+    uncov_ids <- model_zones[[nz_col]][uncovered]
+    warning(length(uncovered), " zone(s) have no overlap with the NetCDF domain and will be ",
+            if (na_fill == "mean") "filled with the spatial mean of covered zones: "
+            else "written as -999: ",
+            paste(uncov_ids, collapse = ", "), call. = FALSE)
+  }
 
   # Free memory
   rm(template, row_idx, col_idx, weights, r_raw, r_flipped); gc()
@@ -215,6 +235,17 @@ write_winfore_et0 <- function(nc_dir, output_dir, model_zones,
 
     # Zonal means via sparse matrix multiplication [n_zones x n_days]
     result <- as.matrix(weight_matrix %*% cell_vals)
+
+    # Fill uncovered zones (rows that are all-NaN after W normalization)
+    if (length(uncovered) > 0) {
+      if (na_fill == "mean") {
+        covered_means <- colMeans(result[-uncovered, , drop = FALSE], na.rm = TRUE)
+        result[uncovered, ] <- matrix(covered_means, nrow = length(uncovered),
+                                      ncol = ncol(result), byrow = TRUE)
+      } else {
+        result[uncovered, ] <- -999
+      }
+    }
 
     # Handle missing days: fill with last valid day (carry forward)
     na_days <- which(colSums(is.na(result)) == nrow(result))

@@ -9,14 +9,14 @@ library(data.table)
 devtools::load_all()
 
 # ── Paths ──────────────────────────────────────────────────────────────────────
-shp_path   <- "D:/temp/T_NZ_complex/shp/wildalpen_zones_cosero_parameters.shp"
+shp_path   <- "D:/temp/P_T_ETO_NZ/Ammer/shp/cosero_zones.shp" #"D:\temp\P_T_ETO_NZ\Ammer\shp\cosero_zones.shp"
 rr_dir     <- "D:/OneDrive - Universität für Bodenkultur Wien/DROBAUT_WTZ_Brasilien/Analysis/download_geosphere/raw/SPARTACUS_Daily/RR"
 tmin_dir   <- "D:/OneDrive - Universität für Bodenkultur Wien/DROBAUT_WTZ_Brasilien/Analysis/download_geosphere/raw/SPARTACUS_Daily/TN"
 tmax_dir   <- "D:/OneDrive - Universität für Bodenkultur Wien/DROBAUT_WTZ_Brasilien/Analysis/download_geosphere/raw/SPARTACUS_Daily/TX"
 et0_dir    <- "D:/OneDrive - Universität für Bodenkultur Wien/DROBAUT_WTZ_Brasilien/Analysis/download_geosphere/raw/WINFORE_Daily/ET0"
-output_dir <- "D:/temp/P_T_ETO_NZ"
+output_dir <- "D:/temp/P_T_ETO_NZ/Ammer/output"
 
-years   <- 1991:2024
+years   <- 2020:2021
 n_cores <- 6
 nz_col  <- "NZ"
 
@@ -35,7 +35,8 @@ out_p <- write_spartacus_precip(
   years        = years,
   n_cores      = n_cores,
   write_binary = TRUE,
-  time_shift   = TRUE
+  time_shift   = TRUE,
+  na_fill      = "none"
 )
 
 # ── Process temperature (T, Dall'Amico method) ─────────────────────────────────
@@ -50,7 +51,8 @@ out_t <- write_spartacus_temp(
   tmean_method = "dall_amico",
   n_cores      = n_cores,
   write_binary = TRUE,
-  time_shift   = TRUE
+  time_shift   = TRUE,
+  na_fill      = "mean"
 )
 
 # ── Process ET0 (WINFORE, no time shift) ───────────────────────────────────────
@@ -62,7 +64,8 @@ out_et0 <- write_winfore_et0(
   nz_col       = nz_col,
   years        = years,
   n_cores      = n_cores,
-  write_binary = TRUE
+  write_binary = TRUE,
+  na_fill      = "mean"
 )
 
 cat("\nAll files saved to:", output_dir, "\n")

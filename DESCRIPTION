@@ -1,7 +1,7 @@
 Package: CoseRo
 Type: Package
 Title: R Interface and Shiny Application for the COSERO Hydrological Model
-Version: 0.9.1
+Version: 0.9.2
 Authors@R: c(
     person("Mathew", "Herrnegger",
            role = c("aut", "cre"),

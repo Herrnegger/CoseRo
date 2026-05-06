@@ -16,7 +16,8 @@ write_spartacus_temp(
   lat = NULL,
   n_cores = 1,
   write_binary = FALSE,
-  time_shift = TRUE
+  time_shift = TRUE,
+  na_fill = c("mean", "none")
 )
 }
 \arguments{
@@ -61,6 +62,10 @@ and reported to the user. Ignored for \code{tmean_method = "simple"}.}
 \item{time_shift}{If TRUE (default), applies a temporal correction to align
 SPARTACUS temperature to the 00:00-00:00 day definition used by HZB/eHYD
 discharge data. See Details.}
+
+\item{na_fill}{How to handle model zones not covered by the NetCDF domain.
+One of \code{"mean"} (default) or \code{"none"}. See
+\code{\link{write_spartacus_precip}} for full description.}
 }
 \value{
 Invisibly returns a list with paths to the generated files:
