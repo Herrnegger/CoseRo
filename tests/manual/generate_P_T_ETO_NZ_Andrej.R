@@ -10,12 +10,12 @@ devtools::load_all()
 
 
 # ── Paths ──────────────────────────────────────────────────────────────────────
-shp_path   <- "D:/temp/P_T_ETO_NZ/Ammer/shp/cosero_zones_parameters.shp" #"D:\temp\P_T_ETO_NZ\Ammer\shp\cosero_zones.shp"
+shp_path   <- "D:/temp/P_T_ETO_NZ/Pram/cosero_zones_parameters.shp" #"D:\temp\P_T_ETO_NZ\Ammer\shp\cosero_zones.shp"
 rr_dir     <- "D:/OneDrive - Universität für Bodenkultur Wien/DROBAUT_WTZ_Brasilien/Analysis/download_geosphere/raw/SPARTACUS_Daily/RR"
 tmin_dir   <- "D:/OneDrive - Universität für Bodenkultur Wien/DROBAUT_WTZ_Brasilien/Analysis/download_geosphere/raw/SPARTACUS_Daily/TN"
 tmax_dir   <- "D:/OneDrive - Universität für Bodenkultur Wien/DROBAUT_WTZ_Brasilien/Analysis/download_geosphere/raw/SPARTACUS_Daily/TX"
 et0_dir    <- "D:/OneDrive - Universität für Bodenkultur Wien/DROBAUT_WTZ_Brasilien/Analysis/download_geosphere/raw/WINFORE_Daily/ET0"
-output_dir <- "D:/temp/P_T_ETO_NZ/Ammer/output"
+output_dir <- "D:/temp/P_T_ETO_NZ/Pram/output"
 
 years   <- 2020:2021
 n_cores <- 6
