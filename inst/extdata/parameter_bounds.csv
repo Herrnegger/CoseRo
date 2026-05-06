@@ -35,3 +35,4 @@ LAPSE_P,Precipitation lapse rate (factor/100m; change in % per 100m),-0.5,0.5,0.
 SOILVAR,"CV for within-zone spread of soil storage parameters (M, H1, H2, PEX2, PEX3)",0.0,2.5,0.5,relchg,Disaggregation
 HYDROVAR,"CV for within-zone spread of hydraulic routing parameters (BETA, KBF, TAB1, TVS1, TAB2, TVS2, TAB3)",0.0,2.5,0.5,relchg,Disaggregation
 CTVAR,"CV for within-zone spread of snow melt factors (CTMIN, CTMAX)",0.0,2.5,0.5,relchg,Disaggregation
+NDC,Number of disaggregation classes (cannot be calibrated within COSERO),1,10,1,abschg,Disaggregation
