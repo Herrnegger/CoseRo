@@ -385,6 +385,24 @@ read_cosero_statistics <- function(stats_file, quiet = FALSE) {
     stats_data[[col]] <- as.numeric(stats_data[[col]])
   }
 
+  # Sanitize ungauged subbasins. When a subbasin has no valid runoff
+  # observations (Qobs coded as -999 / negative), COSERO writes NSE = NaN but
+  # emits spurious values for the other metrics: KGE = 1.0, KGEadj = 1.0,
+  # several columns = 0.0, and PDIFF = -Infinity. These must never be mistaken
+  # for a real result downstream (extract_run_metrics(), optimization,
+  # sensitivity analysis). NSE = NaN is the unambiguous "no observations"
+  # marker, so for every such row we null ALL numeric columns (the NaN NSE is
+  # itself set to NA for consistency). A genuine evaluation never yields a NaN
+  # NSE, so this cannot mask a poor-but-valid run.
+  if ("NSE" %in% names(stats_data)) {
+    ungauged <- is.nan(stats_data$NSE)
+    if (any(ungauged)) {
+      for (col in numeric_cols) {
+        stats_data[[col]][ungauged] <- NA_real_
+      }
+    }
+  }
+
   # Add spin-up as attribute
   attr(stats_data, "spinup_timestep") <- spinup_timestep
 

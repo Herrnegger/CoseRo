@@ -34,7 +34,9 @@ Required columns: parameter, min, max, default, modification_type.}
 (e.g., \code{"001"}, \code{c("001", "002")}, or \code{"all"}).
 Controls both which zones are modified AND which subbasins are used
 for metric calculation. Zone-subbasin mapping is read from the
-parameter file (NB_ and NZ_ columns).}
+parameter file (NB_ and NZ_ columns). Subbasins without runoff
+observations may also be included -- see section "Ungauged subbasins"
+in Details.}
 
 \item{zones_to_modify}{Integer vector or NULL. Specific zone IDs to modify.
 If NULL (default), zones are automatically determined from \code{target_subbasins}
@@ -110,6 +112,19 @@ Reads the NB_ (subbasin) and NZ_ (zone) columns from the parameter file
 (e.g., para.txt). No prior COSERO run is needed. If the parameter file is
 not found or lacks these columns, all zones will be modified regardless of
 \code{target_subbasins}.
+
+\strong{Ungauged subbasins:}
+Subbasins without runoff observations can be included in
+\code{target_subbasins}. Missing observations are coded as negative
+values in the observed runoff file (typically \code{-999}; COSERO
+treats any value < 0 as missing). Including ungauged subbasins is
+often desirable: their zone parameters are still modified during
+calibration and are thereby constrained indirectly through the
+observations at gauged (e.g. downstream) subbasins. Since no
+performance metrics can be computed for ungauged subbasins, they are
+automatically excluded from the objective function. With
+\code{aggregation = "weighted"}, assign them a weight of 0; with the
+other aggregation methods they are simply skipped.
 
 \strong{Algorithm Details:}
 DDS is a single-solution heuristic that scales the search dimension based on the
