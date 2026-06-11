@@ -545,26 +545,45 @@ create_objective_function <- function(cosero_path,
       }
     }
     
-    if (any(is.na(metric_matrix))) {
-      if (verbose) cat("Run", eval_count, "- metric failed\n")
+    # Per-subbasin validity mask: a subbasin is usable only if ALL of its
+    # metrics are non-NA. Ungauged subbasins (no runoff observations) yield NA
+    # metrics and are excluded from the objective; their zone parameters are
+    # still modified and thereby constrained via gauged/downstream subbasins.
+    # Genuine model failures are caught upstream by the result$success check.
+    valid_sb <- apply(metric_matrix, 1, function(row) !any(is.na(row)))
+
+    if (!any(valid_sb)) {
+      if (verbose) cat("Run", eval_count, "- no valid subbasin metrics\n")
       return(1e6)
     }
-    
-    # Combine metrics
+
+    # For weighted aggregation, a subbasin with weight > 0 but invalid metrics
+    # is a genuine problem (the user expects it to count) - penalize.
+    if (aggregation == "weighted") {
+      if (any(!valid_sb & subbasin_weights > 0)) {
+        if (verbose) cat("Run", eval_count,
+                         "- weighted subbasin with no valid metric\n")
+        return(1e6)
+      }
+    }
+
+    # Combine metrics (over all rows; invalid rows dropped during aggregation)
     if (n_metrics == 1) {
       metric_values <- metric_matrix[, 1]
     } else {
       metric_values <- as.vector(metric_matrix %*% metric_weights)
     }
-    
-    # Aggregate subbasins
+
+    # Aggregate subbasins over valid rows only. For "weighted", invalid rows
+    # are guaranteed to have weight 0 (checked above), so excluding them and
+    # summing the remaining weight*value terms is exact - no renormalization.
     obj_value <- switch(aggregation,
-      "mean" = mean(metric_values),
-      "weighted" = sum(metric_values * subbasin_weights),
-      "min" = min(metric_values),
-      "product" = prod(metric_values)
+      "mean"     = mean(metric_values[valid_sb]),
+      "weighted" = sum(metric_values[valid_sb] * subbasin_weights[valid_sb]),
+      "min"      = min(metric_values[valid_sb]),
+      "product"  = prod(metric_values[valid_sb])
     )
-    
+
     obj_value <- -obj_value
 
     return(obj_value)
@@ -844,6 +863,72 @@ run_initial_baseline <- function(cosero_path, target_subbasins, metric,
 }
 
 
+#' Resolve Ungauged Target Subbasins and Adjust Weights
+#'
+#' Inspects baseline metrics for subbasins whose metrics are all NA (no runoff
+#' observations). Such subbasins are excluded from the objective function but
+#' their zones are still calibrated. A single message lists them. For
+#' \code{aggregation = "weighted"}, any ungauged subbasin carrying a non-zero
+#' weight has its weight set to 0 and the remaining weights are renormalized to
+#' sum to 1, so the user's relative weighting of the gauged subbasins is
+#' preserved. A second message reports the adjusted weights.
+#'
+#' @param initial_metrics Matrix of baseline metrics (subbasins x metrics) from
+#'   \code{run_initial_baseline()}, with subbasin IDs as row names. May be NULL.
+#' @param target_subbasins Character vector of target subbasin IDs.
+#' @param subbasin_weights Numeric weights (same length/order as
+#'   \code{target_subbasins}) or NULL.
+#' @param aggregation Aggregation method (only \code{"weighted"} triggers
+#'   weight adjustment).
+#'
+#' @return A list with \code{ungauged} (character vector of ungauged subbasin
+#'   IDs) and \code{subbasin_weights} (possibly renormalized; unchanged for
+#'   non-weighted aggregation or when no adjustment is needed).
+#' @keywords internal
+resolve_ungauged_subbasins <- function(initial_metrics, target_subbasins,
+                                       subbasin_weights = NULL,
+                                       aggregation = "mean") {
+  if (is.null(initial_metrics)) {
+    return(list(ungauged = character(0), subbasin_weights = subbasin_weights))
+  }
+
+  all_na   <- apply(initial_metrics, 1, function(row) all(is.na(row)))
+  ungauged <- target_subbasins[all_na]
+
+  if (length(ungauged) == 0) {
+    return(list(ungauged = character(0), subbasin_weights = subbasin_weights))
+  }
+
+  message(sprintf(
+    "Subbasins %s: no runoff observations - excluded from objective; their zones are still calibrated.",
+    paste(ungauged, collapse = ", ")
+  ))
+
+  # Renormalize weights when an ungauged subbasin carries non-zero weight
+  if (aggregation == "weighted" && !is.null(subbasin_weights)) {
+    needs_fix <- any(all_na & subbasin_weights > 0)
+    if (needs_fix) {
+      adjusted <- subbasin_weights
+      adjusted[all_na] <- 0
+      total <- sum(adjusted)
+      if (total <= 0) {
+        stop("All gauged subbasins have weight 0 after excluding ungauged ",
+             "subbasins - cannot form a weighted objective. Assign non-zero ",
+             "weight to at least one gauged subbasin.", call. = FALSE)
+      }
+      adjusted <- adjusted / total
+      message(sprintf(
+        "  Weight of ungauged subbasin(s) redistributed. Effective weights: %s",
+        paste(sprintf("%s=%.3f", target_subbasins, adjusted), collapse = ", ")
+      ))
+      subbasin_weights <- adjusted
+    }
+  }
+
+  list(ungauged = ungauged, subbasin_weights = subbasin_weights)
+}
+
+
 #' Get Parameter Value Summary Across Zones
 #'
 #' Computes mean, median, min, max of parameter values across all zones.
@@ -1114,7 +1199,9 @@ print_optimization_report <- function(algorithm, par_filename,
 #'   (e.g., \code{"001"}, \code{c("001", "002")}, or \code{"all"}).
 #'   Controls both which zones are modified AND which subbasins are used
 #'   for metric calculation. Zone-subbasin mapping is read from the
-#'   parameter file (NB_ and NZ_ columns).
+#'   parameter file (NB_ and NZ_ columns). Subbasins without runoff
+#'   observations may also be included -- see section "Ungauged subbasins"
+#'   in Details.
 #'
 #' @param zones_to_modify Integer vector or NULL. Specific zone IDs to modify.
 #'   If NULL (default), zones are automatically determined from \code{target_subbasins}
@@ -1184,6 +1271,19 @@ print_optimization_report <- function(algorithm, par_filename,
 #' (e.g., para.txt). No prior COSERO run is needed. If the parameter file is
 #' not found or lacks these columns, all zones will be modified regardless of
 #' \code{target_subbasins}.
+#'
+#' \strong{Ungauged subbasins:}
+#' Subbasins without runoff observations can be included in
+#' \code{target_subbasins}. Missing observations are coded as negative
+#' values in the observed runoff file (typically \code{-999}; COSERO
+#' treats any value < 0 as missing). Including ungauged subbasins is
+#' often desirable: their zone parameters are still modified during
+#' calibration and are thereby constrained indirectly through the
+#' observations at gauged (e.g. downstream) subbasins. Since no
+#' performance metrics can be computed for ungauged subbasins, they are
+#' automatically excluded from the objective function. With
+#' \code{aggregation = "weighted"}, assign them a weight of 0; with the
+#' other aggregation methods they are simply skipped.
 #'
 #' \strong{Algorithm Details:}
 #' DDS is a single-solution heuristic that scales the search dimension based on the
@@ -1353,12 +1453,19 @@ optimize_cosero_dds <- function(cosero_path,
   )
   initial_metrics <- baseline$initial_metrics
 
+  # Detect ungauged subbasins and, for weighted aggregation, redistribute any
+  # weight assigned to them across the gauged subbasins (renormalized to 1).
+  ungauged_info   <- resolve_ungauged_subbasins(
+    initial_metrics, target_subbasins, subbasin_weights, aggregation
+  )
+  subbasin_weights <- ungauged_info$subbasin_weights
+
   obj_fun <- create_objective_function(
     cosero_path, par_bounds, target_subbasins, zones_to_modify,
     metric, metric_weights, subbasin_weights, aggregation,
     defaults_settings, verbose, use_minimal_reading
   )
-  
+
   # Initial parameter summary
   initial_param_summary <- get_param_summary(
     attr(obj_fun, "original_values"), par_bounds
@@ -1514,6 +1621,19 @@ optimize_cosero_dds <- function(cosero_path,
 #' restored after completion. Optimized parameters are saved to a new file:
 #' \code{output/para_optimized_NB\{subbasins\}_\{metric\}_\{timestamp\}.txt}
 #'
+#' \strong{Ungauged subbasins:}
+#' Subbasins without runoff observations can be included in
+#' \code{target_subbasins}. Missing observations are coded as negative
+#' values in the observed runoff file (typically \code{-999}; COSERO
+#' treats any value < 0 as missing). Including ungauged subbasins is
+#' often desirable: their zone parameters are still modified during
+#' calibration and are thereby constrained indirectly through the
+#' observations at gauged (e.g. downstream) subbasins. Since no
+#' performance metrics can be computed for ungauged subbasins, they are
+#' automatically excluded from the objective function. With
+#' \code{aggregation = "weighted"}, assign them a weight of 0; with the
+#' other aggregation methods they are simply skipped.
+#'
 #' \strong{Algorithm Details:}
 #' SCE-UA is a global optimization strategy that combines the simplex procedure with
 #' the concepts of controlled random search, competitive evolution, and complex shuffling.
@@ -1645,6 +1765,13 @@ optimize_cosero_sce <- function(cosero_path,
     cosero_path, target_subbasins, metric, defaults_settings, verbose
   )
   initial_metrics <- baseline$initial_metrics
+
+  # Detect ungauged subbasins and, for weighted aggregation, redistribute any
+  # weight assigned to them across the gauged subbasins (renormalized to 1).
+  ungauged_info   <- resolve_ungauged_subbasins(
+    initial_metrics, target_subbasins, subbasin_weights, aggregation
+  )
+  subbasin_weights <- ungauged_info$subbasin_weights
 
   obj_fun <- create_objective_function(
     cosero_path, par_bounds, target_subbasins, zones_to_modify,
