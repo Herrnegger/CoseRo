@@ -20,8 +20,8 @@ utils::globalVariables(c("Date", "month", "year", "year_month", "sb"))
 #' Discharge plot colors
 #' @export
 COLORS_DISCHARGE <- list(
-  Q_obs = "#0000FF",    # blue
-  Q_sim = "#FF0000"     # red
+  Q_obs = "#003049",    # deep blue
+  Q_sim = "#ae2012"     # oxidized iron (muted red)
 )
 
 #' Precipitation plot colors (includes ET for seasonality panel)

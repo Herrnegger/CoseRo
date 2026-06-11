@@ -37,3 +37,7 @@ launch_cosero_app()
 launch_cosero_app(port = 3838)
 }
 }
+\seealso{
+\code{\link{launch_cosero_map}} for the station map with linked
+time-series viewer
+}

@@ -17,6 +17,9 @@ NULL
 #'
 #' @return No return value, called for side effects (launches Shiny app)
 #'
+#' @seealso \code{\link{launch_cosero_map}} for the station map with linked
+#'   time-series viewer
+#'
 #' @export
 #'
 #' @examples

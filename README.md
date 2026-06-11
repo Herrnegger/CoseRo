@@ -130,6 +130,63 @@ The Shiny app provides five interactive analysis tabs:
 
 **5. Export Tab** — Download plots as PNG, time series as CSV, statistics tables.
 
+#### Map & Time-Series Viewer
+
+`launch_cosero_map()` shows the gauging stations and/or the
+intermediate-catchment polygons on an interactive map (selectable Light /
+OpenStreetMap / Topographic / Satellite base maps). At least one of the two
+layers is required; whichever you supply is clickable, and the two layers may
+use different subbasin-ID columns. Key features:
+
+- **Colour by metric** — points/legend coloured by NSE, KGE, r or BETA. The
+  skill metrics use a sequential blue (good) → red (worse) scale; BETA uses a
+  diverging scale around 1 (under- vs over-estimation, balanced within ±5 %).
+- **Hover preview** — resting on a feature pops up a long-term monthly regime
+  (mean observed vs simulated discharge with annual-mean reference lines) plus
+  an inverted rain/snow hyetograph (mm/month), titled with NSE/KGE/BETA.
+- **Click → viewer** — opens a near-full-screen window with four linked,
+  zoomable time-series panels (runoff, precipitation, fluxes `COSERO.plus`,
+  states `COSERO.plus1`) and a header strip with NSE, KGE and the KGE
+  components (r, α, β). Variable selectors (with removable chips) drive the
+  flux/state panels; the layout fills the window automatically.
+- **Spin-up aware** — the first `spinup` model timesteps are excluded from all
+  objective functions (the plots still show the full period).
+- **Fast** — on first launch the output files are converted to an `fst` cache
+  in `output/.cache/` (COSERO's binary output twins like `COSERO.runoffB` are
+  used directly when present), so every click and hover responds in
+  milliseconds even for decades of daily data and thousands of stations.
+  `clean_cache = TRUE` forces a rebuild.
+
+``` r
+# Minimal call: station shapefile + project path
+launch_cosero_map(
+  stations_shp = "path/to/gauges.shp",
+  cosero_path  = "path/to/project"
+)
+
+# Stations + catchments using different ID columns, with options
+launch_cosero_map(
+  stations_shp       = "path/to/gauges.shp",     # link via ID_
+  catchments_shp     = "path/to/catchments.shp", # link via NB_
+  cosero_path        = "path/to/project",
+  subbasin_id_field  = "ID",
+  catchment_id_field = "NB",
+  spinup             = 365,
+  clean_cache        = FALSE
+)
+
+# Catchments only (no gauges) — polygons become the clickable layer
+launch_cosero_map(
+  catchments_shp     = "path/to/catchments.shp",
+  cosero_path        = "path/to/project",
+  catchment_id_field = "NB"
+)
+```
+
+Requires the suggested packages `sf`, `leaflet`, `dygraphs`, `xts`, `fst` and
+`base64enc` (plus `rmapshaper` for catchment simplification; `leafgl` is used
+automatically for WebGL rendering of very large station sets).
+
 ### 2. Scripting with R Functions
 
 #### Run COSERO Model
@@ -455,8 +512,10 @@ CoseRo/
 │   ├── setup_project.R           # Project setup
 │   ├── cosero_run.R              # Model execution
 │   ├── cosero_readers.R          # Output file readers
+│   ├── cosero_metrics.R          # Run metrics (extract & calculate)
 │   ├── cosero_optimize.R         # DDS and SCE-UA optimization
 │   ├── sensitivity_analysis.R    # Sobol sensitivity analysis
+│   ├── cosero_map.R              # Map + linked time-series viewer
 │   ├── geosphere_download.R      # GeoSphere Austria data download
 │   ├── spartacus_preprocessing.R # SPARTACUS NetCDF → COSERO input
 │   ├── winfore_preprocessing.R   # WINFORE ET0 NetCDF → COSERO input
@@ -489,6 +548,7 @@ CoseRo/
 |---|---|
 | `run_cosero()` | Execute COSERO with custom settings and warm/cold start |
 | `launch_cosero_app()` | Launch interactive Shiny app |
+| `launch_cosero_map()` | Launch the station/catchment map + linked time-series viewer |
 | `extract_run_metrics()` | Extract performance metrics from a single run result |
 | `calculate_run_metrics()` | Calculate metrics by comparing QSIM vs QOBS for a single run |
 
@@ -604,7 +664,7 @@ If you use CoseRo in your research, please cite:
 ```
 Herrnegger, M., Fiaz, A., and the COSERO Development Team (2025).
 CoseRo: R Interface and Shiny Application for the COSERO Hydrological Model.
-R package version 0.9.5. https://github.com/Herrnegger/CoseRo
+R package version 0.9.6. https://github.com/Herrnegger/CoseRo
 ```
 
 Or in BibTeX format:
@@ -614,7 +674,7 @@ Or in BibTeX format:
   title  = {CoseRo: R Interface and Shiny Application for the COSERO Hydrological Model},
   author = {Herrnegger, Mathew and Fiaz, Ahmed and {COSERO Development Team}},
   year   = {2025},
-  note   = {R package version 0.9.5},
+  note   = {R package version 0.9.6},
   url    = {https://github.com/Herrnegger/CoseRo}
 }
 ```
