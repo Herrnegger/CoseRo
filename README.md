@@ -604,7 +604,7 @@ If you use CoseRo in your research, please cite:
 ```
 Herrnegger, M., Fiaz, A., and the COSERO Development Team (2025).
 CoseRo: R Interface and Shiny Application for the COSERO Hydrological Model.
-R package version 0.9.4. https://github.com/Herrnegger/CoseRo
+R package version 0.9.5. https://github.com/Herrnegger/CoseRo
 ```
 
 Or in BibTeX format:
@@ -614,7 +614,7 @@ Or in BibTeX format:
   title  = {CoseRo: R Interface and Shiny Application for the COSERO Hydrological Model},
   author = {Herrnegger, Mathew and Fiaz, Ahmed and {COSERO Development Team}},
   year   = {2025},
-  note   = {R package version 0.9.4},
+  note   = {R package version 0.9.5},
   url    = {https://github.com/Herrnegger/CoseRo}
 }
 ```
