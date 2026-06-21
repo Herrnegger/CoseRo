@@ -28,19 +28,20 @@ library(tidyr)
 # USER SETTINGS
 # =============================================================================
 
-project_path <- "D:/temp/Wildalpen_Example"
+project_path <- "D:/temp/Wildalpen_Example_0.9.3"
 
 base_settings <- list(
   STARTDATE  = c(2000, 10, 1, 0, 0),
   ENDDATE    = c(2024, 9, 30, 0, 0),
   SPINUP     = 365,
-  OUTPUTTYPE = 1,
-  PARAFILE   = "para_ini_agg.txt"
+  OUTPUTTYPE = 3,
+  PARAFILE   = "para_ini_agg.txt",
+  statevar_source = 2
 )
 
 # Short period for quick scenario tests (avoid long runtimes with NDC = 5)
 short_settings <- modifyList(base_settings, list(
-  STARTDATE = c(2010, 10, 1, 0, 0),
+  STARTDATE = c(2000, 10, 1, 0, 0),
   ENDDATE   = c(2015, 9, 30, 0, 0)
 ))
 
@@ -80,7 +81,7 @@ cat("=== Baseline run (full period 2000–2024) ===\n")
 result_base <- run_cosero(
   project_path      = project_path,
   defaults_settings = base_settings,
-  statevar_source   = 1,
+  statevar_source   = 2,
   quiet             = FALSE,
   read_outputs      = TRUE
 )
@@ -102,7 +103,7 @@ cat("=== Short-period run (2010–2015) ===\n")
 result_short <- run_cosero(
   project_path      = project_path,
   defaults_settings = short_settings,
-  statevar_source   = 1,
+  statevar_source   = 2,
   quiet             = FALSE,
   read_outputs      = TRUE
 )
@@ -172,7 +173,7 @@ for (sc_name in names(scenarios)) {
   result_sc <- run_cosero(
     project_path      = project_path,
     defaults_settings = short_settings,
-    statevar_source   = 1,
+    statevar_source   = 2,
     quiet             = TRUE
   )
 
@@ -303,7 +304,7 @@ for (lt in lapse_vals) {
   result_lt <- run_cosero(
     project_path      = project_path,
     defaults_settings = short_settings,
-    statevar_source   = 1,
+    statevar_source   = 2,
     quiet             = TRUE
   )
 

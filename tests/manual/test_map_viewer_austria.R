@@ -11,6 +11,9 @@
 
 devtools::load_all()
 
+
+#remotes::install_github("Herrnegger/CoseRo", ref = "dev/spatial-disaggregation")
+
 gis_dir <- "D:/temp/COSERO_AT/#COSERO_AT_GIS"
 project <- "D:/temp/COSERO_AT/#COSERO_AT_calibrated"
 
@@ -50,7 +53,9 @@ launch_cosero_map(
 
 # What to verify --------------------------------------------------------------
 #  1. Console on first launch: all four files cached "(binary, ...)".
-#     output/.cache/ holds COSERO.runoff.fst etc. + cache_meta.rds.
+#     output/.cache/ holds COSERO.runoff.fst etc. + cache_meta.rds, plus
+#     station_metrics.csv (subbasin, lon, lat, coord_source, NSE/KGE/r/alpha/
+#     beta, n, spinup) -- coord is the gauge point, else catchment centroid.
 #     "does not match current ... falling back to ASCII" = no valid binary
 #     region found (viewer still works, conversion just slower).
 #  2. Map: basemap "Light" by default, switchable (Light/OSM/Topographic/

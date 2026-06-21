@@ -16,7 +16,9 @@ NULL
 #' Main function to read all COSERO output files from a simulation directory.
 #' Automatically detects the OUTPUTTYPE and reads available files accordingly.
 #'
-#' @param output_dir Path to COSERO output directory
+#' @param output_dir Path to COSERO output directory. As a convenience, a
+#'   project root may also be passed: if it contains no output files but has an
+#'   \code{output/} subfolder that does, that subfolder is used automatically.
 #' @param defaults_file Path to defaults.txt file (optional). If provided, reads parameter file and settings.
 #' @param quiet Logical. If TRUE, suppresses progress messages.
 #'
@@ -30,7 +32,13 @@ NULL
 #'   \item{glacier}{Glacier variables (if OUTPUTTYPE >= 2)}
 #'   \item{meteorology}{Meteorological variables (if OUTPUTTYPE >= 2)}
 #'   \item{monitor}{Monitoring data (if OUTPUTTYPE >= 3)}
-#'   \item{monitor_subbasins}{Per-subbasin monitoring data (if OUTPUTTYPE >= 3)}
+#'   \item{monitor_subbasins}{Per-subbasin monitoring data (if OUTPUTTYPE >= 3).
+#'     A named list (by subbasin id); each element is
+#'     \code{list(mean, all, n_classes)}. \code{mean} holds one column per state/
+#'     flux variable (the NDC class-00 catchment mean) with clean names; \code{all}
+#'     holds every NDC class (\code{<var>_<class>}, class 00 = mean, 01..N = NDC
+#'     classes); \code{n_classes} is the number of NDC classes (0 for non-NDC
+#'     output, where \code{mean} and \code{all} are identical).}
 #'   \item{rundepth}{Runoff depth data (if OUTPUTTYPE >= 3)}
 #'   \item{longterm_annual}{Annual means (if OUTPUTTYPE >= 3)}
 #'   \item{longterm_seasonal}{Seasonal means (if OUTPUTTYPE >= 3)}
@@ -54,6 +62,21 @@ NULL
 #' }
 read_cosero_output <- function(output_dir, defaults_file = NULL, quiet = FALSE) {
   output_data <- list()
+
+  # Convenience fallback: if a project root was passed instead of its output
+  # directory (no COSERO output files here, but an "output" subfolder has them),
+  # redirect into that subfolder.
+  has_output_files <- function(dir) {
+    any(file.exists(file.path(dir, c("COSERO.runoff", "statistics.txt"))))
+  }
+  if (!has_output_files(output_dir)) {
+    nested <- file.path(output_dir, "output")
+    if (dir.exists(nested) && has_output_files(nested)) {
+      if (!quiet) cat("No output files in", output_dir,
+                      "- using subfolder:", nested, "\n")
+      output_dir <- nested
+    }
+  }
 
   # Detect OUTPUTTYPE
   outputtype <- detect_outputtype(output_dir)
@@ -119,14 +142,20 @@ read_cosero_output <- function(output_dir, defaults_file = NULL, quiet = FALSE) 
 # 2.1 OUTPUTTYPE Detection #####
 #' Detect COSERO output type
 #' @param output_dir Path to COSERO output directory
-#' @return Integer: 1, 2, or 3 corresponding to OUTPUTTYPE
+#' @return Integer: 0, 1, 2, or 3 corresponding to OUTPUTTYPE. Type 0
+#'   ("calibration") writes only COSERO.runoff + statistics.txt; it is
+#'   detected when COSERO.runoff exists but COSERO.prec does not.
 #' @export
 detect_outputtype <- function(output_dir) {
   has_monitor <- file.exists(file.path(output_dir, "monitor.txt"))
   has_var_met <- file.exists(file.path(output_dir, "var_MET.txt"))
+  has_prec    <- file.exists(file.path(output_dir, "COSERO.prec"))
+  has_runoff  <- file.exists(file.path(output_dir, "COSERO.runoff"))
 
   if (has_monitor) return(3)
   if (has_var_met) return(2)
+  # Calibration mode: runoff present, but none of the type-1 extras (prec)
+  if (has_runoff && !has_prec) return(0)
   return(1)
 }
 
@@ -912,7 +941,8 @@ read_var_glac <- function(output_dir, quiet = FALSE) {
   if (!file.exists(file)) return(NULL)
   if (!quiet) cat("Reading: var_glac.txt\n")
 
-  df <- fread(file, skip = 0, header = TRUE, data.table = FALSE)
+  df <- fread(file, skip = 0, header = TRUE, data.table = FALSE,
+              blank.lines.skip = TRUE)
   df <- add_datetime_columns(df)
   return(df)
 }
@@ -930,7 +960,8 @@ read_var_met <- function(output_dir, quiet = FALSE) {
   if (!file.exists(file)) return(NULL)
   if (!quiet) cat("Reading: var_MET.txt\n")
 
-  df <- fread(file, skip = 0, header = TRUE, data.table = FALSE)
+  df <- fread(file, skip = 0, header = TRUE, data.table = FALSE,
+              blank.lines.skip = TRUE)
   df <- add_datetime_columns(df)
   return(df)
 }
@@ -941,10 +972,37 @@ read_monitor <- function(output_dir, quiet = FALSE) {
   if (!file.exists(file)) return(NULL)
   if (!quiet) cat("Reading: monitor.txt\n")
 
-  df <- fread(file, header = TRUE, data.table = FALSE)
+  df <- fread(file, header = TRUE, data.table = FALSE, blank.lines.skip = TRUE)
   return(df)
 }
 
+#' Read per-subbasin monitor files (OUTPUTTYPE 3)
+#'
+#' Reads \code{monitor_sb<NNNN>.txt} files. The NDC/Lhotse COSERO build writes
+#' state/flux variables resolved by NDC disaggregation class, with column names
+#' of the form \code{<var>_<subbasin>_<class>} where class \code{00} is the
+#' zone/catchment MEAN and \code{01, 02, ...} are the individual NDC class
+#' values. A few variables (e.g. \code{qobs}, \code{qsim}) carry no class suffix.
+#'
+#' For each subbasin a list is returned with:
+#' \itemize{
+#'   \item \code{mean}: data frame of date columns + the class-\code{00} (mean)
+#'     value of every variable + any no-class variables, with clean variable
+#'     names (subbasin and class suffix stripped). This is the everyday table.
+#'   \item \code{all}: the full raw data frame (all classes), date columns plus
+#'     \code{<var>_<class>} columns (subbasin id stripped). Use this for
+#'     per-class analysis.
+#'   \item \code{n_classes}: number of NDC classes detected (excludes the mean).
+#' }
+#' Old (non-NDC) monitor files, where columns are simply \code{<var>_<subbasin>}
+#' with no class suffix, are handled too: \code{mean} and \code{all} are then the
+#' same table and \code{n_classes} is 0.
+#'
+#' @param output_dir Path to COSERO output directory
+#' @param quiet Suppress messages
+#' @return Named list (by subbasin id) of \code{list(mean, all, n_classes)}, or
+#'   NULL if no monitor_sb files are present.
+#' @keywords internal
 read_monitor_subbasins <- function(output_dir, quiet = FALSE) {
   pattern <- "^monitor_sb\\d+\\.txt$"
   files <- list.files(output_dir, pattern = pattern, full.names = TRUE)
@@ -952,15 +1010,42 @@ read_monitor_subbasins <- function(output_dir, quiet = FALSE) {
   if (length(files) == 0) return(NULL)
   if (!quiet) cat("Reading:", length(files), "monitor_sb files\n")
 
+  date_cols <- c("yyyy", "mm", "dd", "hh", "DateTime", "Date")
+
   result <- list()
   for (f in files) {
     sb_id <- gsub(".*monitor_sb(\\d+)\\.txt", "\\1", basename(f))
-    df <- fread(f, skip = 0, header = TRUE, data.table = FALSE)
+    # blank.lines.skip: the NDC/Lhotse COSERO build writes monitor_sb*.txt with
+    # a blank line after every data row; skip them so fread does not stop early.
+    df <- fread(f, skip = 0, header = TRUE, data.table = FALSE,
+                blank.lines.skip = TRUE)
     df <- add_datetime_columns(df)
 
-    # Remove subbasin suffix from column names
-    colnames(df) <- gsub(paste0("_", sb_id), "", colnames(df))
-    result[[sb_id]] <- df
+    # Strip the subbasin id from every column name: <var>_<sb>_<class> -> <var>_<class>
+    # and the no-class <var>_<sb> -> <var>
+    cn <- colnames(df)
+    cn <- gsub(paste0("_", sb_id), "", cn)
+    colnames(df) <- cn
+
+    # A "class" column now ends in _00.._NN (two digits). Split those out.
+    is_date  <- cn %in% date_cols
+    cls_idx  <- grepl("_\\d{2}$", cn)               # has a _NN class suffix
+    cls_num  <- rep(NA_integer_, length(cn))
+    cls_num[cls_idx] <- as.integer(sub(".*_(\\d{2})$", "\\1", cn[cls_idx]))
+
+    # Mean table: dates + class-00 columns (renamed to bare <var>) + no-class vars
+    mean_cols  <- is_date | (cls_idx & cls_num == 0L) | (!cls_idx & !is_date)
+    mean_df    <- df[, mean_cols, drop = FALSE]
+    # drop the trailing _00 from the kept mean columns
+    colnames(mean_df) <- sub("_00$", "", colnames(mean_df))
+
+    n_classes <- if (any(cls_idx)) max(cls_num, na.rm = TRUE) else 0L
+
+    result[[sb_id]] <- list(
+      mean      = mean_df,
+      all       = df,
+      n_classes = n_classes
+    )
   }
 
   return(result)

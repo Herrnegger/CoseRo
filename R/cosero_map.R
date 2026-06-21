@@ -148,6 +148,14 @@
 #' handling follows the package convention: values <= -999 and negative
 #' observations are treated as NA and dropped pairwise.
 #'
+#' \strong{Metrics CSV.} At each launch the per-subbasin objective functions
+#' (computed with the spin-up excluded) are written to
+#' \code{output/.cache/station_metrics.csv}: columns \code{subbasin, lon, lat,
+#' coord_source, NSE, KGE, r, alpha, beta, n, spinup}. The coordinate is the
+#' gauging-station point when available, otherwise the catchment representative
+#' point (WGS84). Handy as a stand-alone table, e.g. for spatial clustering of
+#' model performance.
+#'
 #' @return A \code{shiny.appobj}; called for its side effect of launching
 #'   the app.
 #'
@@ -275,6 +283,15 @@ launch_cosero_map <- function(stations_shp = NULL,
   # Per-subbasin performance metrics for the station coloring (spinup excluded)
   message("Computing station performance metrics ...")
   station_metrics <- compute_all_station_metrics(cache, spinup = spinup)
+
+  # Persist metrics + one coordinate per subbasin (station, else catchment
+  # centroid) to output/.cache/station_metrics.csv -- e.g. for spatial clustering
+  csv_path <- write_station_metrics_csv(
+    station_metrics, stations, station_id_field,
+    catchments, catchment_id_resolved,
+    cache_dir = file.path(output_dir, ".cache"), spinup = spinup
+  )
+  if (!is.null(csv_path)) message("Wrote station metrics CSV: ", csv_path)
 
   ui <- shiny::fillPage(
     title = "COSERO Map Viewer",
@@ -911,8 +928,8 @@ compute_all_station_metrics <- function(cache, spinup = 0L, chunk_size = 200L) {
   suffixes <- sub("^QOBS_", "", grep("^QOBS_", cols, value = TRUE))
   suffixes <- suffixes[paste0("QSIM_", suffixes) %in% cols]
   out <- data.frame(suffix = suffixes, NSE = NA_real_, KGE = NA_real_,
-                    r = NA_real_, beta = NA_real_,
-                    stringsAsFactors = FALSE)
+                    r = NA_real_, alpha = NA_real_, beta = NA_real_,
+                    n = NA_integer_, stringsAsFactors = FALSE)
   if (length(suffixes) == 0) return(out)
   drop <- if (spinup > 0) seq_len(spinup) else integer(0)
 
@@ -929,7 +946,8 @@ compute_all_station_metrics <- function(cache, spinup = 0L, chunk_size = 200L) {
       o[o <= -999] <- NA
       s[s <= -999] <- NA
       valid <- !is.na(o) & !is.na(s) & o >= 0
-      if (sum(valid) < 10) next
+      nv <- sum(valid)
+      if (nv < 10) next
       o <- o[valid]
       s <- s[valid]
       mo <- mean(o)
@@ -939,13 +957,91 @@ compute_all_station_metrics <- function(cache, spinup = 0L, chunk_size = 200L) {
       beta <- if (mo != 0) mean(s) / mo else NA_real_
       out$NSE[ii[k]] <- if (denom > 0) 1 - sum((s - o)^2) / denom else NA_real_
       out$r[ii[k]] <- r
+      out$alpha[ii[k]] <- alpha
       out$beta[ii[k]] <- beta
+      out$n[ii[k]] <- nv
       out$KGE[ii[k]] <- if (!anyNA(c(r, alpha, beta))) {
         1 - sqrt((r - 1)^2 + (alpha - 1)^2 + (beta - 1)^2)
       } else NA_real_
     }
   }
   out
+}
+
+#' Write per-subbasin metrics + coordinates to a CSV (for spatial clustering)
+#'
+#' Joins the launch-time metrics (\code{compute_all_station_metrics()}) to one
+#' WGS84 coordinate per subbasin: the gauging-station point when available,
+#' otherwise the catchment representative point. Written to
+#' \code{output/.cache/station_metrics.csv} at every launch. Columns:
+#' subbasin, lon, lat, coord_source, NSE, KGE, r, alpha, beta, n, spinup.
+#' @param station_metrics Data frame from \code{compute_all_station_metrics()}
+#'   (keyed by \code{suffix} = the output-column subbasin id).
+#' @param stations,catchments sf layers (WGS84) or NULL.
+#' @param id_field,catchment_id_field ID columns in the respective layers.
+#' @param cache_dir Directory to write into (the fst cache dir).
+#' @param spinup Spin-up timesteps excluded from the metrics (recorded as a col).
+#' @return Invisibly, the path to the written CSV (or NULL if nothing to write).
+#' @keywords internal
+write_station_metrics_csv <- function(station_metrics, stations, id_field,
+                                      catchments, catchment_id_field,
+                                      cache_dir, spinup = 0L) {
+  if (is.null(station_metrics) || nrow(station_metrics) == 0) return(invisible(NULL))
+
+  # Build an id -> (lon, lat) lookup, station first then catchment fallback.
+  # Keys are normalized to the numeric subbasin where possible so they match
+  # the output-column suffixes regardless of 3/4-digit zero-padding.
+  norm_key <- function(x) {
+    num <- suppressWarnings(as.numeric(as.character(x)))
+    ifelse(is.na(num), as.character(x), as.character(as.integer(num)))
+  }
+  coord_lookup <- list()  # key -> c(lon, lat, source)
+  add_coords <- function(layer, field, source) {
+    if (is.null(layer)) return(invisible())
+    xy <- suppressWarnings(tryCatch(
+      sf::st_coordinates(sf::st_point_on_surface(sf::st_geometry(layer))),
+      error = function(e) sf::st_coordinates(sf::st_centroid(sf::st_geometry(layer)))
+    ))[, 1:2, drop = FALSE]
+    keys <- norm_key(layer[[field]])
+    for (i in seq_along(keys)) {
+      k <- keys[i]
+      if (is.null(coord_lookup[[k]])) {
+        coord_lookup[[k]] <<- c(xy[i, 1], xy[i, 2], source)
+      }
+    }
+  }
+  # catchments first, then stations overwrite where both exist (station wins)
+  add_coords(catchments, catchment_id_field, "catchment")
+  coord_lookup_catch <- coord_lookup
+  coord_lookup <- list()
+  add_coords(stations, id_field, "station")
+  # merge: station entries take precedence, catchment fills the rest
+  for (k in names(coord_lookup_catch)) {
+    if (is.null(coord_lookup[[k]])) coord_lookup[[k]] <- coord_lookup_catch[[k]]
+  }
+
+  keys <- norm_key(station_metrics$suffix)
+  lon <- vapply(keys, function(k) {
+    v <- coord_lookup[[k]]; if (is.null(v)) NA_real_ else as.numeric(v[1])
+  }, numeric(1))
+  lat <- vapply(keys, function(k) {
+    v <- coord_lookup[[k]]; if (is.null(v)) NA_real_ else as.numeric(v[2])
+  }, numeric(1))
+  src <- vapply(keys, function(k) {
+    v <- coord_lookup[[k]]; if (is.null(v)) NA_character_ else as.character(v[3])
+  }, character(1))
+
+  out <- data.frame(
+    subbasin = station_metrics$suffix,
+    lon = lon, lat = lat, coord_source = src,
+    NSE = station_metrics$NSE, KGE = station_metrics$KGE,
+    r = station_metrics$r, alpha = station_metrics$alpha,
+    beta = station_metrics$beta, n = station_metrics$n,
+    spinup = spinup, stringsAsFactors = FALSE
+  )
+  csv_path <- file.path(cache_dir, "station_metrics.csv")
+  utils::write.csv(out, csv_path, row.names = FALSE)
+  invisible(csv_path)
 }
 
 #' Performance classes and colors for station coloring
@@ -1645,7 +1741,7 @@ regime_popup_img <- function(regime, prec_regime, subbasin, metrics = NULL) {
   title <- paste0("Subbasin ", subbasin)
   if (!is.null(metrics)) {
     title <- paste0(title,
-                    " – NSE ", sprintf("%.2f", metrics$NSE),
+                    " \u2013 NSE ", sprintf("%.2f", metrics$NSE),
                     ", KGE ", sprintf("%.2f", metrics$KGE),
                     ", BETA ", sprintf("%.2f", metrics$beta))
   }

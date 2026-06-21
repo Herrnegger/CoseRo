@@ -10,7 +10,9 @@ detect_outputtype(output_dir)
 \item{output_dir}{Path to COSERO output directory}
 }
 \value{
-Integer: 1, 2, or 3 corresponding to OUTPUTTYPE
+Integer: 0, 1, 2, or 3 corresponding to OUTPUTTYPE. Type 0
+("calibration") writes only COSERO.runoff + statistics.txt; it is
+detected when COSERO.runoff exists but COSERO.prec does not.
 }
 \description{
 Detect COSERO output type

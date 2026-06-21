@@ -17,6 +17,7 @@
 ^.*backup_.*$
 ^dev$
 ^\.claude$
+^\.agent-ops$
 ^sensitivity_report_files$
 ^sensitivity_report\.qmd$
 ^check_exports\.R$

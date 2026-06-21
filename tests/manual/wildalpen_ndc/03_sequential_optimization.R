@@ -36,14 +36,14 @@ library(patchwork)
 # USER SETTINGS
 # =============================================================================
 
-project_path <- "D:/temp/Wildalpen_Example"
+project_path    <- "D:/temp/Wildalpen_Example_0.9.3"
 
 # Calibration period (used for all steps)
 cal_settings <- list(
   STARTDATE  = c(2000, 10, 1, 0, 0),
   ENDDATE    = c(2015, 9, 30, 0, 0),
   SPINUP     = 365,
-  OUTPUTTYPE = 1,
+  OUTPUTTYPE = 0,
   PARAFILE   = "para_ini_agg.txt"   # updated at each step
 )
 
@@ -55,7 +55,7 @@ val_settings <- modifyList(cal_settings, list(
 
 # DDS iterations per step
 # Use 50–100 for smoke tests; 500–2000 for production calibration
-max_iter_per_step <- 350
+max_iter_per_step <- 75
 
 # Parameters to calibrate — mix of standard + NDC disaggregation params
 # Keep NDC disaggregation params in all steps so each subbasin gets its own
@@ -69,8 +69,10 @@ param_names <- c(
   "M", "BETA", "KBF",
   # Flow recession
   "H1", "H2", "TVS1", "TVS2", "TAB1", "TAB2", "TAB3",
+    # Evapotranspiration (incl. hydraulic lift FHL)
+  "ETSYSCOR", "FKFAK", "FHL"
   # Meteorological corrections
-  "PCOR", "TCOR"
+  #"PCOR", "TCOR"
 )
 
 # =============================================================================
@@ -148,25 +150,28 @@ for (sb in names(initial_metrics)) {
 #   CTMAX, CTMIN,
 #   M, BETA, KBF,
 #   H1, H2, TVS1, TVS2, TAB1, TAB2, TAB3,
-#   PCOR, TCOR
+#   ETSYSCOR, FKFAK, FHL
+# NB: FKFAK / FHL ranges follow parameter_bounds.csv (FKFAK 0.3-0.9 relchg;
+#     FHL 0-0.7 abschg, default 0 = original model). ETSYSCOR widened slightly
+#     beyond the CSV 0.9-1.3 to give the ET correction more room.
 par_bounds <- create_optimization_bounds(
   parameters        = param_names,
   lower             = c(-0.9, -0.2,  0.0, 0.8, 0.1,   # disaggregation
                          5.0,  0.1,                    # snow
                        200,    3.0, 2500,               # soil + runoff
                          4.0,  8.0,  50, 250, 30, 100, 4000,   # flow recession
-                         0.8,  2.0),                   # met corrections
+                         0.8,  0.3,  0.0),             # ET: ETSYSCOR, FKFAK, FHL
   upper             = c(-0.1,  0.4,  0.4, 1.7, 1.0,   # disaggregation
                          7.0,  1.5,                    # snow
                        400,    7.0, 5500,               # soil + runoff
                          8.0, 20.0, 140, 450, 50, 200, 7000,   # flow recession
-                         1.4,  3.5),                   # met corrections
+                         1.4,  0.9,  0.7),             # ET: ETSYSCOR, FKFAK, FHL
   modification_type = c("abschg", "abschg", "relchg", "relchg", "relchg",  # disaggregation
                         "relchg", "relchg",                                 # snow
                         "relchg", "relchg", "relchg",                       # soil + runoff
                         "relchg", "relchg", "relchg", "relchg",             # flow recession
                         "relchg", "relchg", "relchg",                       # flow recession cont.
-                        "relchg", "abschg")                                 # met corrections
+                        "relchg", "relchg", "abschg")                       # ET: ETSYSCOR, FKFAK, FHL
 )
 
 cat("\nParameter bounds:\n")

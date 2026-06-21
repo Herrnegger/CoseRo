@@ -11,7 +11,8 @@ run_cosero_ensemble(
   base_settings = NULL,
   par_file = NULL,
   quiet = FALSE,
-  statevar_source = 1
+  statevar_source = 1,
+  result_reducer = NULL
 )
 }
 \arguments{
@@ -28,6 +29,13 @@ run_cosero_ensemble(
 \item{quiet}{Logical. If TRUE, suppresses progress messages.}
 
 \item{statevar_source}{State variable source: 1 = read from parameter file (default), 2 = read from statevar.dmp file (warm start)}
+
+\item{result_reducer}{Optional function applied to each run's result before
+it is stored, to keep only the data downstream analysis needs and bound the
+memory of the accumulated results list for large ensembles at
+OUTPUTTYPE >= 1. NULL (default) stores the full result unchanged. The reducer
+must preserve \code{$success} and whatever \code{$output_data} slots the
+metric extractors need. See \code{\link{make_var_reducer}}.}
 }
 \value{
 List containing:

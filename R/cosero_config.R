@@ -334,7 +334,8 @@ create_default_defaults <- function(defaults_file, quiet = FALSE) {
     # --- Output control ---
     paste0(
       "OUTPUTTYPE (Sets the output evaluation extent:",
-      " 1 - only QSIM; 2 - ZRVIEW compatible; 3 - full evaluation)"
+      " 0 - calibration (runoff + statistics only); 1 - standard;",
+      " 2 - ZRVIEW compatible; 3 - full evaluation)"
     ),
     "1",
     "",

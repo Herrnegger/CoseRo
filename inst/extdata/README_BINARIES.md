@@ -2,6 +2,19 @@
 
 This directory should contain `cosero_binaries.zip` for distribution with the package.
 
+## Current build (dev/spatial-disaggregation)
+
+`cosero_binaries.zip` and `COSERO_Wildalpen_agreggated.zip` bundle the
+**Lhotse 0.9.2** build (`COSERO_Lhotse_0.9.2_small.exe`, renamed to `COSERO.exe`
+inside the zips) with `libiomp5md.dll`. This build adds:
+
+- **OUTPUTTYPE = 0** — calibration mode (writes only `COSERO.runoff` +
+  `statistics.txt`); used by the optimizers by default.
+- **NDC hypsometric disaggregation** and the `FHL_` hydraulic-lift parameter.
+
+The plain `COSERO_Wildalpen.zip` still ships the previous exe. The `main` branch
+exe does **not** support OUTPUTTYPE = 0, NDC, or `FHL_`.
+
 ## Creating cosero_binaries.zip
 
 ### Required Files

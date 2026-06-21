@@ -12,7 +12,8 @@ run_cosero_ensemble_parallel(
   n_cores = NULL,
   temp_dir = NULL,
   quiet = FALSE,
-  statevar_source = 1
+  statevar_source = 1,
+  result_reducer = NULL
 )
 }
 \arguments{
@@ -31,6 +32,16 @@ run_cosero_ensemble_parallel(
 \item{quiet}{Suppress output}
 
 \item{statevar_source}{State variable source: 1 = read from parameter file (default), 2 = read from statevar.dmp file (warm start)}
+
+\item{result_reducer}{Optional function applied to each run's result inside
+the worker before it is returned. Use it to keep only the data downstream
+analysis needs (e.g. one subbasin's runoff/plus1 columns), which sharply
+reduces the memory footprint of the returned ensemble for large run counts
+at OUTPUTTYPE >= 1. NULL (default) returns the full result unchanged. The
+reducer must preserve \code{$success} and whatever \code{$output_data} slots
+the metric extractors need (\code{statistics} for
+\code{extract_ensemble_metrics}; \code{runoff} for
+\code{calculate_ensemble_metrics}).}
 }
 \value{
 List with results and parameters

@@ -33,13 +33,17 @@ library(tidyr)
 # USER SETTINGS
 # =============================================================================
 
-project_path    <- "D:/temp/Wildalpen_Example"
+project_path    <- "D:/temp/Wildalpen_Example_0.9.3"
 target_subbasin <- "003"    # primary subbasin for sensitivity indices
 
 base_settings <- list(
   STARTDATE  = c(2000, 10, 1, 0, 0),
   ENDDATE    = c(2015, 9, 30, 0, 0),
   SPINUP     = 365,
+  # OUTPUTTYPE must be >= 1 here: the ET section (10) analyses simulated actual
+  # ET (ETAGEB from COSERO.plus1), which OUTPUTTYPE = 0 does NOT write. If you
+  # ever drop section 10 and only use NSE/KGE + QSIM, you may set this to 0
+  # (calibration mode: runoff + statistics only) for a faster ensemble.
   OUTPUTTYPE = 1,
   PARAFILE   = "para_ini_agg.txt"
 )
@@ -48,6 +52,11 @@ base_settings <- list(
 # Use 30–50 for a smoke test; 200–500 for publication-quality indices
 n_sobol <- 50
 n_cores <- 8
+
+# Where the parallel runner places its per-worker project copies. Keep this on a
+# roomy drive on the SAME volume as the project (D:) — each worker copy is
+# ~100+ MB, and AppData\Local\Temp (C:) was filling up and crashing the session.
+ens_temp_dir <- "D:/temp/cosero_parallel"
 
 parallel::detectCores()
 
@@ -63,7 +72,9 @@ param_names <- c(
   # Flow recession
   "H1", "H2", "TVS1", "TVS2", "TAB1", "TAB2", "TAB3",
   # Meteorological corrections
-  "PCOR", "TCOR"
+  "PCOR", "TCOR",
+  # Evapotranspiration (incl. hydraulic lift FHL)
+  "ETSYSCOR", "FKFAK", "FHL"#"ETSLPCOR", 
 )
 
 # =============================================================================
@@ -140,26 +151,56 @@ cat(sprintf("\nTarget subbasin (%s) used for Sobol indices: NSE = %.4f  |  KGE =
             target_subbasin, baseline_nse, baseline_kge))
 
 # =============================================================================
-# 5. RUN PARALLEL ENSEMBLE
+# 5. RUN ENSEMBLE (parallel or serial)
 # =============================================================================
+# run_mode = "parallel" -> run_cosero_ensemble_parallel() (8 cores, fast)
+#          = "serial"   -> run_cosero_ensemble()  (one core, no workers/sockets,
+#                          no shared-file contention; slower but robust). Use
+#                          this when parallel runs show diffuse "hard_fail"s that
+#                          reproduce fine in isolation (i.e. worker/contention
+#                          failures, not parameter problems).
+run_mode <- "parallel"   # "parallel" or "serial"
+
+# Same memory reducer for both modes: keep only runoff (QOBS/QSIM) + ET (ETAGEB)
+# columns per run, plus statistics & defaults_settings. Categories:
+#   runoff = QOBS/QSIM | ET = ETAGEB | states = BW0/BW3 | snow = SWW
+# NULL/empty = keep everything. Prevents the multi-GB ensemble at OUTPUTTYPE = 1.
+ens_reducer <- make_var_reducer(c("runoff", "ET"))
 
 rds_dir <- file.path(project_path, "sensitivity_results")
 dir.create(rds_dir, showWarnings = FALSE, recursive = TRUE)
-rds_file <- file.path(rds_dir, "ensemble_ndc_sensitivity.rds")
+# Separate cache per mode so a serial run doesn't clobber the parallel one
+rds_file <- file.path(rds_dir,
+                      sprintf("ensemble_ndc_sensitivity_%s.rds", run_mode))
 
 if (file.exists(rds_file)) {
-  cat("=== Loading cached ensemble from disk ===\n")
+  cat("=== Loading cached ensemble from disk (", run_mode, ") ===\n", sep = "")
   ensemble <- readRDS(rds_file)
+} else if (run_mode == "serial") {
+  cat("=== Running SERIAL ensemble (this is slow but robust) ===\n")
+  ensemble <- run_cosero_ensemble(
+    project_path    = project_path,
+    parameter_sets  = samples$parameter_sets,
+    par_bounds      = par_bounds,
+    base_settings   = base_settings,   # OUTPUTTYPE set here (see base_settings)
+    quiet           = FALSE,
+    statevar_source = 1,
+    result_reducer  = ens_reducer
+  )
+  saveRDS(ensemble, rds_file)
+  cat("Ensemble saved to:", rds_file, "\n")
 } else {
-  cat("=== Running parallel ensemble ===\n")
+  cat("=== Running PARALLEL ensemble ===\n")
   ensemble <- run_cosero_ensemble_parallel(
     project_path    = project_path,
     parameter_sets  = samples$parameter_sets,
     par_bounds      = par_bounds,
-    base_settings   = base_settings,
+    base_settings   = base_settings,   # OUTPUTTYPE set here (see base_settings)
     n_cores         = n_cores,
+    temp_dir        = ens_temp_dir,    # worker copies on D: (roomy, same volume)
     quiet           = FALSE,
-    statevar_source = 1
+    statevar_source = 1,
+    result_reducer  = ens_reducer
   )
   saveRDS(ensemble, rds_file)
   cat("Ensemble saved to:", rds_file, "\n")
@@ -169,6 +210,131 @@ n_runs <- length(ensemble$results)
 n_ok   <- sum(sapply(ensemble$results, function(r) isTRUE(r$success)))
 cat(sprintf("Successful runs: %d / %d (%.0f%%)\n\n", n_ok, n_runs,
             100 * n_ok / n_runs))
+
+# =============================================================================
+# 5b. FAILURE DIAGNOSTICS — is there a systematic cause?
+# =============================================================================
+# Two distinct failure modes:
+#   hard_fail = COSERO did not complete (result$success == FALSE)
+#   na_metric = ran, but the target-subbasin NSE could not be computed (NA)
+# We compare the parameter distributions of failed vs successful sample points
+# to see whether failure is driven by a particular parameter region.
+
+hard_fail <- !vapply(ensemble$results, function(r) isTRUE(r$success), logical(1))
+na_metric <- !hard_fail & is.na(nse_values_pre <- {
+  # cheap pre-extract of NSE per run (same source extract_ensemble_metrics uses)
+  vapply(ensemble$results, function(r) {
+    s <- r$output_data$statistics
+    if (is.null(s)) return(NA_real_)
+    row <- s[s$sb == sprintf("%04d", as.numeric(target_subbasin)) |
+               s$sb == as.numeric(target_subbasin), ]
+    if (nrow(row) == 0 || !"NSE" %in% names(row)) return(NA_real_)
+    row$NSE[1]
+  }, numeric(1))
+})
+failed <- hard_fail | na_metric
+
+cat(sprintf("Failure breakdown: %d hard fails (COSERO crashed), %d NA-metric (ran, no valid NSE), %d OK\n",
+            sum(hard_fail), sum(na_metric), sum(!failed)))
+
+if (any(failed)) {
+  ps <- as.data.frame(samples$parameter_sets)
+  # Compare median of each parameter: failed vs successful runs
+  cmp <- data.frame(
+    parameter = names(ps),
+    median_ok     = vapply(ps, function(x) median(x[!failed], na.rm = TRUE), numeric(1)),
+    median_failed = vapply(ps, function(x) median(x[failed],  na.rm = TRUE), numeric(1))
+  )
+  cmp$shift <- cmp$median_failed - cmp$median_ok
+  # Normalise the shift by the parameter's sampled range -> comparable across params
+  rng <- vapply(ps, function(x) diff(range(x, na.rm = TRUE)), numeric(1))
+  cmp$shift_frac <- cmp$shift / rng
+  cmp <- cmp[order(-abs(cmp$shift_frac)), ]
+  cat("\nParameters whose FAILED-run median differs most from OK-run median\n")
+  cat("(shift_frac = (median_failed - median_ok) / sampled_range; large |value| = suspect):\n")
+  print(head(cmp[, c("parameter", "median_ok", "median_failed", "shift_frac")], 8),
+        row.names = FALSE)
+
+  # Save the failed sample points for inspection
+  failed_tbl <- cbind(run_id = which(failed),
+                      mode = ifelse(hard_fail[failed], "hard_fail", "na_metric"),
+                      ps[failed, , drop = FALSE])
+  utils::write.csv(failed_tbl,
+                   file.path(rds_dir, "failed_runs.csv"), row.names = FALSE)
+  cat("\nFailed-run parameter sets saved to: ",
+      file.path(rds_dir, "failed_runs.csv"), "\n", sep = "")
+}
+cat("\n")
+
+# =============================================================================
+# 5c. REPRODUCE A SINGLE FAILED RUN (verbose, isolated)
+# =============================================================================
+# Pick one failed sample point, apply its parameters to the parameter file, and
+# run COSERO once with full output so you can SEE why it fails. The original
+# parameter file is backed up and ALWAYS restored afterwards (on.exit), so this
+# is non-destructive.
+#
+# Set repro_run_id to any run_id from failed_runs.csv; default = first failure.
+
+repro_run_id <- if (exists("failed") && any(failed)) which(failed)[2] else NA_integer_
+
+if (!is.na(repro_run_id)) {
+  cat(sprintf("=== Reproducing failed run %d (%s) ===\n",
+              repro_run_id,
+              if (hard_fail[repro_run_id]) "hard_fail" else "na_metric"))
+
+  # Parameter row for this run (drop the run_id/mode bookkeeping cols)
+  repro_params <- samples$parameter_sets[repro_run_id, , drop = FALSE]
+  cat("Parameter values:\n")
+  print(round(unlist(repro_params), 4))
+
+  # Resolve the parameter file COSERO will read (PARAFILE from base_settings)
+  repro_par_file <- file.path(project_path, "input", base_settings$PARAFILE)
+
+  # Back up and guarantee restore (fires on normal exit, error, or interrupt)
+  repro_backup <- paste0(repro_par_file, ".repro_backup")
+  file.copy(repro_par_file, repro_backup, overwrite = TRUE)
+  on.exit({
+    if (file.exists(repro_backup)) {
+      file.copy(repro_backup, repro_par_file, overwrite = TRUE)
+      unlink(repro_backup)
+      cat("Original parameter file restored.\n")
+    }
+  }, add = TRUE)
+
+  # Original values needed by modify_parameter_table (same call the ensemble uses)
+  repro_orig <- read_parameter_table(repro_par_file, names(repro_params),
+                                     zone_id = NULL, quiet = TRUE)
+
+  modify_parameter_table(repro_par_file, repro_params, par_bounds,
+                         repro_orig, quiet = TRUE)
+
+  # Run COSERO with full output visible (NOT quiet) so the failure is exposed
+  cat("\n--- COSERO run (verbose) ---\n")
+  repro_result <- tryCatch(
+    run_cosero(project_path = project_path,
+               defaults_settings = base_settings,
+               statevar_source   = 1,
+               quiet             = FALSE,
+               read_outputs      = TRUE),
+    error = function(e) { cat("run_cosero ERROR:", conditionMessage(e), "\n"); list(success = FALSE) }
+  )
+
+  cat("\n--- Outcome ---\n")
+  cat("success:", isTRUE(repro_result$success), "\n")
+  repro_nse <- tryCatch(extract_run_metrics(repro_result, target_subbasin, "NSE"),
+                        error = function(e) NA_real_)
+  cat(sprintf("NSE (subbasin %s): %s\n", target_subbasin,
+              ifelse(is.na(repro_nse), "NA", sprintf("%.4f", repro_nse))))
+
+  # COSERO's own stdout log is kept in the project root after each run
+  stdout_log <- file.path(project_path, "cosero_stdout.txt")
+  if (file.exists(stdout_log)) {
+    cat("\n--- Last 25 lines of cosero_stdout.txt ---\n")
+    cat(paste(utils::tail(readLines(stdout_log, warn = FALSE), 25), collapse = "\n"), "\n")
+  }
+  # (Original parameter file is restored by on.exit above.)
+}
 
 # =============================================================================
 # 6. EXTRACT METRICS
@@ -206,10 +372,20 @@ sobol_kge <- calculate_sobol_indices(
   R             = 500
 )
 
-# Print top-5 parameters by total-effect index (Ti) for NSE
-ti_nse <- sobol_nse$indices[order(-sobol_nse$indices$Ti), ]
+# Print top-5 parameters by total-effect index (Ti) for NSE.
+# calculate_sobol_indices() returns a sensobol object: indices are in $results
+# in LONG format (columns: parameters, sensitivity = "Si"/"Ti", original, ...).
+# Reshape Si/Ti into one row per parameter, then sort by Ti.
+res_nse  <- as.data.frame(sobol_nse$results)
+si_nse   <- res_nse[res_nse$sensitivity == "Si", c("parameters", "original")]
+ti_nse_l <- res_nse[res_nse$sensitivity == "Ti", c("parameters", "original")]
+names(si_nse)[2]   <- "Si"
+names(ti_nse_l)[2] <- "Ti"
+ti_nse <- merge(si_nse, ti_nse_l, by = "parameters")
+ti_nse <- ti_nse[order(-ti_nse$Ti), ]
+
 cat("Top 5 parameters by Ti (NSE):\n")
-print(head(ti_nse[, c("parameter", "Si", "Ti")], 5))
+print(utils::head(ti_nse, 5), row.names = FALSE)
 cat("\n")
 
 # =============================================================================
@@ -372,12 +548,19 @@ if (n_behav >= 5) {
 # --- 8f. Disaggregation vs standard parameter comparison ---
 # Side-by-side Sobol Ti for the two parameter groups
 
-disag_params  <- c("LAPSE_T", "LAPSE_P", "SOILVAR", "HYDROVAR", "CTVAR")
+# NDC counts as a disaggregation parameter here. Note: NDC is an INTEGER (1-10)
+# sampled continuously then rounded by COSERO, and NDC<=1 switches disaggregation
+# OFF entirely -- so its response is a step change that Sobol (a continuous-input
+# variance method) only approximates. Read its Ti as indicative, not exact.
+disag_params  <- c("LAPSE_T", "LAPSE_P", "SOILVAR", "HYDROVAR", "CTVAR", "NDC")
 std_params    <- setdiff(param_names, disag_params)
 
-ti_df <- sobol_nse$indices %>%
+# ti_nse (built in section 7) is the per-parameter Si/Ti table derived from
+# sobol_nse$results (long format). Reuse it here; the column is `parameters`.
+ti_df <- ti_nse %>%
   mutate(
-    group = ifelse(parameter %in% disag_params, "Disaggregation", "Standard hydro"),
+    parameter = parameters,
+    group = ifelse(parameters %in% disag_params, "Disaggregation", "Standard hydro"),
     Ti    = pmax(Ti, 0)   # clip negative (near-zero Ti) to 0 for display
   ) %>%
   arrange(desc(Ti))
@@ -398,7 +581,146 @@ ggsave(file.path(plot_dir, paste0("sobol_Ti_grouped_NSE_", sb_tag, ".png")),
 cat("Saved: sobol_Ti_grouped_NSE_", sb_tag, ".png\n", sep = "")
 
 # =============================================================================
-# 9. EXPORT RESULTS
+# 10. ET / HYDRAULIC-LIFT SENSITIVITY (reuses the same ensemble)
+# =============================================================================
+# Plain NSE/KGE on discharge is dominated by PCOR and the water-balance/timing
+# parameters, masking the ET correctors (ETSLPCOR, ETSYSCOR, FKFAK) and the new
+# hydraulic-lift parameter FHL. To surface the ET signal we re-extract two
+# different targets Y from the SAME ensemble (no extra model runs):
+#
+#   (a) logNSE on discharge  -> low-flow / dry-season performance, where deep-
+#       root hydraulic lift actually acts. Computed from COSERO.runoff (QSIM/QOBS).
+#   (b) summer-mean actual ET (ETAGEB, Jun-Aug) -> the process the ET params drive
+#       directly. Output-variance based (no ET observations), so it answers
+#       "what controls modelled ET", not "performance".
+#
+# NB FHL and ETVEGCOR are strongly correlated by construction; ETVEGCOR is a
+# fixed a-priori lookup (not sampled here), so FHL calibrates against it cleanly.
+# Expect the ET group to act largely through INTERACTIONS (Ti >> Si).
+
+cat("\n=== Section 10: ET / hydraulic-lift sensitivity ===\n")
+
+spinup_ts <- as.numeric(base_settings$SPINUP)
+sb4       <- sprintf("%04d", as.numeric(target_subbasin))
+
+# --- 10a. Build the two target vectors from the existing ensemble ---
+
+# logNSE on discharge (offset avoids log(0); negatives already NA in runoff)
+extract_lognse <- function(ens, sb_col, spinup) {
+  qs <- paste0("QSIM_", sb_col); qo <- paste0("QOBS_", sb_col)
+  vapply(ens$results, function(r) {
+    if (!isTRUE(r$success) || is.null(r$output_data$runoff)) return(NA_real_)
+    ro <- r$output_data$runoff
+    if (!all(c(qs, qo) %in% names(ro))) return(NA_real_)
+    sim <- ro[[qs]]; obs <- ro[[qo]]
+    if (spinup > 0 && length(sim) > spinup) {
+      sim <- sim[-seq_len(spinup)]; obs <- obs[-seq_len(spinup)]
+    }
+    ok <- !is.na(sim) & !is.na(obs)
+    if (sum(ok) < 10) return(NA_real_)
+    tryCatch(hydroGOF::NSE(log(sim[ok] + 0.01), log(obs[ok] + 0.01)),
+             error = function(e) NA_real_)
+  }, numeric(1))
+}
+
+# Summer (JJA) mean simulated actual ET, from COSERO.plus1 (ETAGEB, timestep mm)
+extract_summer_eta <- function(ens, sb_col, spinup) {
+  eta_col <- paste0("ETAGEB_", sb_col)
+  vapply(ens$results, function(r) {
+    wb <- r$output_data$water_balance
+    if (!isTRUE(r$success) || is.null(wb) || !eta_col %in% names(wb)) return(NA_real_)
+    eta <- wb[[eta_col]]
+    mon <- if (!is.null(wb$DateTime)) as.integer(format(wb$DateTime, "%m")) else NA
+    if (spinup > 0 && length(eta) > spinup) {
+      eta <- eta[-seq_len(spinup)]; mon <- mon[-seq_len(spinup)]
+    }
+    jja <- mon %in% 6:8
+    if (!any(jja, na.rm = TRUE)) return(NA_real_)
+    mean(eta[jja], na.rm = TRUE)
+  }, numeric(1))
+}
+
+lognse_values <- extract_lognse(ensemble, sb4, spinup_ts)
+eta_values    <- extract_summer_eta(ensemble, sb4, spinup_ts)
+
+cat(sprintf("  logNSE: %d/%d valid | median = %.3f\n",
+            sum(!is.na(lognse_values)), length(lognse_values),
+            stats::median(lognse_values, na.rm = TRUE)))
+cat(sprintf("  Summer ETA (mm/step): %d/%d valid | median = %.3f\n",
+            sum(!is.na(eta_values)), length(eta_values),
+            stats::median(eta_values, na.rm = TRUE)))
+
+# --- 10b. Sobol indices for both ET targets ---
+
+sobol_lognse <- calculate_sobol_indices(Y = lognse_values, sobol_samples = samples,
+                                        boot = TRUE, R = 500)
+sobol_eta    <- calculate_sobol_indices(Y = eta_values, sobol_samples = samples,
+                                        boot = TRUE, R = 500)
+
+# Helper: long $results -> per-parameter Si/Ti table, ET params flagged
+et_params <- c("ETSLPCOR", "ETSYSCOR", "FKFAK", "FHL")
+sobol_to_table <- function(sob) {
+  res <- as.data.frame(sob$results)
+  si  <- res[res$sensitivity == "Si", c("parameters", "original")]
+  ti  <- res[res$sensitivity == "Ti", c("parameters", "original")]
+  names(si)[2] <- "Si"; names(ti)[2] <- "Ti"
+  tab <- merge(si, ti, by = "parameters")
+  tab$Si <- pmax(tab$Si, 0); tab$Ti <- pmax(tab$Ti, 0)  # clip near-zero negatives
+  tab$is_et <- tab$parameters %in% et_params
+  tab[order(-tab$Ti), ]
+}
+
+ti_lognse <- sobol_to_table(sobol_lognse)
+ti_eta    <- sobol_to_table(sobol_eta)
+
+cat("\nTop parameters by Ti (logNSE, low-flow discharge):\n")
+print(utils::head(ti_lognse[, c("parameters", "Si", "Ti")], 8), row.names = FALSE)
+cat("\nET-parameter ranks for summer ETA:\n")
+print(ti_eta[ti_eta$is_et, c("parameters", "Si", "Ti")], row.names = FALSE)
+
+# --- 10c. Plots: Ti for both ET targets, ET params highlighted ---
+
+et_ti_plot <- function(tab, target_label) {
+  ggplot(tab, aes(x = reorder(parameters, Ti), y = Ti, fill = is_et)) +
+    geom_col(width = 0.7) +
+    coord_flip() +
+    scale_fill_manual(values = c("FALSE" = "#95a5a6", "TRUE" = "#27ae60"),
+                      labels = c("FALSE" = "Other", "TRUE" = "ET / FHL"),
+                      name = NULL) +
+    labs(title = paste0("Total-Effect Sobol Indices (Ti) — ", target_label,
+                        ", Subbasin ", target_subbasin),
+         subtitle = "Green = ET correctors + hydraulic lift (FHL)",
+         x = NULL, y = "Ti (total-effect index)") +
+    theme_bw(base_size = 11) + theme(legend.position = "top")
+}
+
+p_lognse <- et_ti_plot(ti_lognse, "logNSE (low flow)")
+print(p_lognse)
+ggsave(file.path(plot_dir, paste0("sobol_Ti_logNSE_", sb_tag, ".png")),
+       p_lognse, width = 8, height = 6, dpi = 150)
+cat("Saved: sobol_Ti_logNSE_", sb_tag, ".png\n", sep = "")
+
+p_eta <- et_ti_plot(ti_eta, "Summer actual ET (JJA)")
+print(p_eta)
+ggsave(file.path(plot_dir, paste0("sobol_Ti_summerETA_", sb_tag, ".png")),
+       p_eta, width = 8, height = 6, dpi = 150)
+cat("Saved: sobol_Ti_summerETA_", sb_tag, ".png\n", sep = "")
+
+# Dotty plot of FHL vs both targets — does hydraulic lift move anything?
+p_fhl <- plot_dotty(
+  parameter_sets = samples$parameter_sets[, "FHL", drop = FALSE],
+  Y              = eta_values,
+  y_label        = "Summer ETA (mm/step)",
+  n_col          = 1,
+  show_envelope  = TRUE
+) + labs(title = paste("FHL vs summer ET — Subbasin", target_subbasin))
+print(p_fhl)
+ggsave(file.path(plot_dir, paste0("dotty_FHL_summerETA_", sb_tag, ".png")),
+       p_fhl, width = 6, height = 5, dpi = 150)
+cat("Saved: dotty_FHL_summerETA_", sb_tag, ".png\n", sep = "")
+
+# =============================================================================
+# 11. EXPORT RESULTS
 # =============================================================================
 
 export_sensitivity_results(
@@ -415,6 +737,23 @@ export_sensitivity_results(
   parameter_sets = samples$parameter_sets,
   metrics        = kge_values,
   prefix         = paste0("sobol_KGE_NB", target_subbasin)
+)
+
+# ET targets (section 10)
+export_sensitivity_results(
+  output_dir     = plot_dir,
+  sobol_indices  = sobol_lognse,
+  parameter_sets = samples$parameter_sets,
+  metrics        = lognse_values,
+  prefix         = paste0("sobol_logNSE_NB", target_subbasin)
+)
+
+export_sensitivity_results(
+  output_dir     = plot_dir,
+  sobol_indices  = sobol_eta,
+  parameter_sets = samples$parameter_sets,
+  metrics        = eta_values,
+  prefix         = paste0("sobol_summerETA_NB", target_subbasin)
 )
 
 # =============================================================================

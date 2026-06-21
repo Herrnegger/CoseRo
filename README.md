@@ -200,7 +200,7 @@ result <- run_cosero(
     STARTDATE = "2015 1 1 0 0",
     ENDDATE   = "2015 12 31 23 59",
     SPINUP    = 365,
-    OUTPUTTYPE = 3  # 1=QSIM only, 2=ZRVIEW compatible, 3=full evaluation
+    OUTPUTTYPE = 3  # 0=calibration (runoff+stats), 1=QSIM, 2=ZRVIEW, 3=full evaluation
   ),
   statevar_source = 1,  # 1 = cold start, 2 = warm start (statevar.dmp)
   read_outputs    = TRUE
@@ -261,7 +261,7 @@ par_bounds <- create_optimization_bounds(
   upper             = c(6, 8, 600, 50),
   modification_type = rep("relchg", 4)
 )
-# Or load from bundled CSV (30 pre-defined parameters)
+# Or load from bundled CSV (38 pre-defined parameters)
 par_bounds <- load_parameter_bounds(parameters = c("BETA", "CTMAX", "M", "TAB1"))
 
 # DDS optimization (fast, recommended for 3-10 parameters)
@@ -467,7 +467,7 @@ gauge_mapping <- c(
 
 > **Note:** This feature requires an NDC-enabled COSERO.exe and is available on the `dev/spatial-disaggregation` branch.
 
-COSERO supports within-zone spatial disaggregation via hypsometric elevation classes. The number of disaggregation classes is controlled by the `NDC` parameter in `defaults.txt` (integer 1–10; `NDC = 1` disables disaggregation and gives bit-identical results to baseline).
+COSERO supports within-zone spatial disaggregation via hypsometric elevation classes. The number of disaggregation classes is controlled by the `NDC` column in the parameter file (`para.txt` / `para_ini_agg.txt`), not in `defaults.txt` (integer 1–10; `NDC = 1` disables disaggregation and gives bit-identical results to baseline).
 
 ``` r
 library(CoseRo)
@@ -498,6 +498,8 @@ Hypsometric curves (`HYPSO0_` through `HYPSO100_`, elevation at 0–100% area qu
 
 ### 4. Understanding COSERO Output Types
 
+**OUTPUTTYPE 0 — Calibration mode** — `COSERO.runoff`, `statistics.txt` only. The fastest option; written for optimization/sensitivity workflows that need just discharge and metrics. The optimizers (`optimize_cosero_dds()` / `optimize_cosero_sce()`) default to this.
+
 **OUTPUTTYPE 1 — QSIM only** — `COSERO.runoff`, `COSERO.prec`, `COSERO.plus`, `COSERO.plus1`, `statistics.txt`, `topology.txt`
 
 **OUTPUTTYPE 2 — ZRVIEW compatible** — All OUTPUTTYPE 1 files + `var_glac.txt`, `var_MET.txt`
@@ -527,7 +529,7 @@ CoseRo/
 │   └── extdata/
 │       ├── COSERO_Wildalpen.zip             # Example project
 │       ├── COSERO_Wildalpen_agreggated.zip  # Example project with NDC disaggregation
-│       └── parameter_bounds.csv             # Default parameter bounds (36 parameters)
+│       └── parameter_bounds.csv             # Default parameter bounds (38 parameters)
 └── man/                          # Auto-generated documentation
 ```
 
@@ -556,7 +558,7 @@ CoseRo/
 
 | Function | Description |
 |---|---|
-| `read_cosero_output()` | Read all COSERO output files (auto-detects OUTPUTTYPE 1–3) |
+| `read_cosero_output()` | Read all COSERO output files (auto-detects OUTPUTTYPE 0–3) |
 | `get_subbasin_data()` | Extract discharge data for a specific subbasin |
 | `list_subbasins()` | List available subbasins in output |
 | `read_cosero_parameters()` | Read parameter file (para.txt) |
@@ -577,7 +579,7 @@ CoseRo/
 | `optimize_cosero_dds()` | Optimize parameters with DDS (fast, greedy search) |
 | `optimize_cosero_sce()` | Optimize parameters with SCE-UA (robust, population-based) |
 | `create_optimization_bounds()` | Define parameter bounds for optimization |
-| `load_parameter_bounds()` | Load bounds from bundled CSV (30 pre-defined parameters) |
+| `load_parameter_bounds()` | Load bounds from bundled CSV (38 pre-defined parameters) |
 | `plot_cosero_optimization()` | Plot optimization convergence history |
 | `export_cosero_optimization()` | Export results to CSV and copy report to export folder |
 

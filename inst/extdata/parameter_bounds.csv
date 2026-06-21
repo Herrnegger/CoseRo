@@ -36,3 +36,4 @@ SOILVAR,"CV for within-zone spread of soil storage parameters (M, H1, H2, PEX2, 
 HYDROVAR,"CV for within-zone spread of hydraulic routing parameters (BETA, KBF, TAB1, TVS1, TAB2, TVS2, TAB3)",0.0,2.5,0.5,relchg,Disaggregation
 CTVAR,"CV for within-zone spread of snow melt factors (CTMIN, CTMAX)",0.0,2.5,0.5,relchg,Disaggregation
 NDC,Number of disaggregation classes per zone (integer 1-10; 1 = disaggregation disabled; can be varied externally but not by COSERO's internal optimizer),1,10,1,abschg,Disaggregation
+FHL,Hydraulic-lift efficiency (max fraction of unmet stress-weighted transpiration demand supplied from deep stores; per land-cover class; 0 = original model),0,0.7,0,abschg,Hydraulic lift

@@ -133,6 +133,14 @@ to force a rebuild. Subbasins without observations (Qobs = -999) show the
 simulated series only and "no observations" instead of metrics. Metric
 handling follows the package convention: values <= -999 and negative
 observations are treated as NA and dropped pairwise.
+
+\strong{Metrics CSV.} At each launch the per-subbasin objective functions
+(computed with the spin-up excluded) are written to
+\code{output/.cache/station_metrics.csv}: columns \code{subbasin, lon, lat,
+coord_source, NSE, KGE, r, alpha, beta, n, spinup}. The coordinate is the
+gauging-station point when available, otherwise the catchment representative
+point (WGS84). Handy as a stand-alone table, e.g. for spatial clustering of
+model performance.
 }
 \examples{
 \dontrun{

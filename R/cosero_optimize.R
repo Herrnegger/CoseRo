@@ -204,6 +204,22 @@ create_optimization_bounds <- function(parameters,
 
 # 2 Metric Calculation #####
 
+#' Default the OUTPUTTYPE to 0 (calibration mode) when unset
+#'
+#' Optimization only needs COSERO.runoff + statistics.txt, which OUTPUTTYPE = 0
+#' writes (and nothing else). If the caller's \code{defaults_settings} already
+#' specifies OUTPUTTYPE, it is left untouched; otherwise it is set to 0. A
+#' \code{NULL} settings list is initialised to \code{list(OUTPUTTYPE = 0)}.
+#'
+#' @param defaults_settings Caller-supplied settings list (or NULL).
+#' @return The settings list with OUTPUTTYPE guaranteed to be present.
+#' @keywords internal
+set_default_outputtype <- function(defaults_settings) {
+  if (is.null(defaults_settings)) defaults_settings <- list()
+  if (is.null(defaults_settings$OUTPUTTYPE)) defaults_settings$OUTPUTTYPE <- 0
+  defaults_settings
+}
+
 #' Read Minimal COSERO Output
 #'
 #' Fast reading of only statistics.txt and COSERO.runoff for optimization.
@@ -1409,6 +1425,11 @@ optimize_cosero_dds <- function(cosero_path,
 
   n_params <- nrow(par_bounds)
 
+  # Default to OUTPUTTYPE = 0 (calibration: runoff + statistics only) when the
+  # caller does not specify it. Requires a COSERO build that supports type 0
+  # (dev branch / Lhotse exe); set OUTPUTTYPE >= 1 explicitly for older builds.
+  defaults_settings <- set_default_outputtype(defaults_settings)
+
   # Auto-determine zones from subbasins if not specified
   if (is.null(zones_to_modify)) {
     zone_mapping <- get_zones_for_subbasins(cosero_path, target_subbasins,
@@ -1726,6 +1747,11 @@ optimize_cosero_sce <- function(cosero_path,
   }
 
   n_params <- nrow(par_bounds)
+
+  # Default to OUTPUTTYPE = 0 (calibration: runoff + statistics only) when the
+  # caller does not specify it. Requires a COSERO build that supports type 0
+  # (dev branch / Lhotse exe); set OUTPUTTYPE >= 1 explicitly for older builds.
+  defaults_settings <- set_default_outputtype(defaults_settings)
 
   # Auto-determine zones from subbasins if not specified
   if (is.null(zones_to_modify)) {

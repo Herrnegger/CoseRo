@@ -480,6 +480,12 @@ generate_sobol_samples <- function(par_bounds, n = 50, order = "first") {
 #' @param par_file Path to parameter file to modify (NULL = read from defaults.txt)
 #' @param quiet Logical. If TRUE, suppresses progress messages.
 #' @param statevar_source State variable source: 1 = read from parameter file (default), 2 = read from statevar.dmp file (warm start)
+#' @param result_reducer Optional function applied to each run's result before
+#'   it is stored, to keep only the data downstream analysis needs and bound the
+#'   memory of the accumulated results list for large ensembles at
+#'   OUTPUTTYPE >= 1. NULL (default) stores the full result unchanged. The reducer
+#'   must preserve \code{$success} and whatever \code{$output_data} slots the
+#'   metric extractors need. See \code{\link{make_var_reducer}}.
 #'
 #' @return List containing:
 #'   \item{results}{List of COSERO output data for each run}
@@ -515,20 +521,37 @@ run_cosero_ensemble <- function(project_path,
                                 base_settings = NULL,
                                 par_file = NULL,
                                 quiet = FALSE,
-                                statevar_source = 1) {
+                                statevar_source = 1,
+                                result_reducer = NULL) {
 
-  # Get parameter file from defaults.txt if not specified
+  # result_reducer: optional function applied to each run's result before it is
+  # stored, to keep only the data downstream analysis needs and bound the size
+  # of the accumulated results list (matters for large ensembles at
+  # OUTPUTTYPE >= 1). NULL (default) stores the full result (unchanged behaviour).
+  # See make_var_reducer().
+  if (!is.null(result_reducer) && !is.function(result_reducer)) {
+    stop("result_reducer must be a function or NULL", call. = FALSE)
+  }
+
+  # Resolve the parameter file if not given explicitly. Precedence:
+  #   explicit par_file arg > base_settings$PARAFILE > defaults.txt > para.txt.
+  # An explicit base_settings$PARAFILE is authoritative over defaults.txt, which
+  # may hold a stale PARAFILE from a previous run.
   if (is.null(par_file)) {
-    defaults_file <- file.path(project_path, "input", "defaults.txt")
-    if (file.exists(defaults_file)) {
-      defaults <- read_defaults(defaults_file)
-      if (!is.null(defaults$PARAFILE)) {
-        par_file <- file.path(project_path, "input", defaults$PARAFILE)
+    if (!is.null(base_settings) && !is.null(base_settings$PARAFILE)) {
+      par_file <- file.path(project_path, "input", base_settings$PARAFILE)
+    } else {
+      defaults_file <- file.path(project_path, "input", "defaults.txt")
+      if (file.exists(defaults_file)) {
+        defaults <- read_defaults(defaults_file)
+        if (!is.null(defaults$PARAFILE)) {
+          par_file <- file.path(project_path, "input", defaults$PARAFILE)
+        } else {
+          par_file <- file.path(project_path, "input", "para.txt")
+        }
       } else {
         par_file <- file.path(project_path, "input", "para.txt")
       }
-    } else {
-      par_file <- file.path(project_path, "input", "para.txt")
     }
   }
 
@@ -550,6 +573,23 @@ run_cosero_ensemble <- function(project_path,
   work_file <- file.path(dirname(par_file), work_filename)
   file.copy(par_file, work_file, overwrite = TRUE)
   on.exit(unlink(work_file), add = TRUE)
+
+  # run_cosero() writes base_settings$PARAFILE into defaults.txt, so pointing it
+  # at the working copy below pollutes defaults.txt with the temporary filename.
+  # Capture the original PARAFILE and restore it on exit so the project is left
+  # exactly as found (otherwise a later run reads a now-deleted _ens_work file).
+  defaults_file <- file.path(project_path, "input", "defaults.txt")
+  if (file.exists(defaults_file)) {
+    orig_defaults  <- read_defaults(defaults_file)
+    orig_parafile  <- orig_defaults$PARAFILE
+    if (!is.null(orig_parafile)) {
+      on.exit({
+        if (file.exists(defaults_file)) {
+          modify_defaults(defaults_file, list(PARAFILE = orig_parafile), quiet = TRUE)
+        }
+      }, add = TRUE)
+    }
+  }
 
   # Point COSERO at the working copy
   if (is.null(base_settings)) base_settings <- list()
@@ -599,6 +639,8 @@ run_cosero_ensemble <- function(project_path,
         read_outputs = TRUE,
         statevar_source = statevar_source
       )
+      # Optionally shrink the result before storing (memory)
+      if (!is.null(result_reducer)) result <- result_reducer(result)
       results[[i]] <- result
 
     }, error = function(e) {
@@ -970,6 +1012,100 @@ modify_parameter_table <- function(par_file, params, par_bounds, original_values
                           quiet = TRUE)
 }
 
+#' Build a Variable-Category Result Reducer for Ensemble Runs
+#'
+#' Creates a function suitable for the \code{result_reducer} argument of
+#' \code{\link{run_cosero_ensemble_parallel}}. The returned reducer keeps, for
+#' each run, only the model-output columns whose variable belongs to one of the
+#' requested \code{categories} (across all subbasins), plus the \code{statistics}
+#' table (pre-computed NSE/KGE) and \code{defaults_settings} (for the SPINUP
+#' fallback). The date columns (\code{yyyy mm dd hh mm}, \code{DateTime},
+#' \code{Date}) are always retained. This drastically reduces the in-memory size
+#' of the returned ensemble for large run counts at \code{OUTPUTTYPE >= 1}.
+#'
+#' Recognised categories and the column-name prefixes they keep:
+#' \itemize{
+#'   \item \code{"runoff"}: \code{QOBS_}, \code{QSIM_} (observed / simulated
+#'     discharge). Flow components (\code{QAB*}, \code{Qloc}) are NOT kept.
+#'   \item \code{"ET"}: \code{ETAGEB_} (actual evapotranspiration).
+#'   \item \code{"states"}: \code{BW0GEB_}, \code{BW3GEB_} (upper-soil and
+#'     deep/groundwater storage).
+#'   \item \code{"snow"}: \code{SWWGEB_} (snow water equivalent).
+#' }
+#' Unknown category names are ignored with a warning. If \code{categories} is
+#' \code{NULL} or empty, the reducer is a no-op (the full result is kept).
+#'
+#' @param categories Character vector of variable categories to keep (see above),
+#'   or \code{NULL}/empty to keep everything.
+#' @return A function \code{f(result)} for use as \code{result_reducer}.
+#' @seealso \code{\link{run_cosero_ensemble_parallel}}
+#' @export
+#' @examples
+#' \dontrun{
+#' red <- make_var_reducer(c("runoff", "ET", "snow"))
+#' ens <- run_cosero_ensemble_parallel(project_path, parameter_sets, par_bounds,
+#'                                     base_settings = list(OUTPUTTYPE = 1),
+#'                                     result_reducer = red)
+#' }
+make_var_reducer <- function(categories = NULL) {
+  prefix_map <- list(
+    runoff = c("QOBS", "QSIM"),
+    ET     = c("ETAGEB"),
+    states = c("BW0GEB", "BW3GEB"),
+    snow   = c("SWWGEB")
+  )
+  date_cols <- c("yyyy", "mm", "dd", "hh", "DateTime", "Date")
+
+  # NULL/empty -> no-op reducer (keep full result)
+  if (length(categories) == 0) {
+    return(function(result) result)
+  }
+
+  unknown <- setdiff(categories, names(prefix_map))
+  if (length(unknown) > 0) {
+    warning("make_var_reducer: ignoring unknown categories: ",
+            paste(unknown, collapse = ", "), call. = FALSE)
+  }
+  prefixes <- unlist(prefix_map[intersect(categories, names(prefix_map))],
+                     use.names = FALSE)
+  if (length(prefixes) == 0) {
+    return(function(result) result)
+  }
+  # Anchored prefix regex; matches e.g. QSIM_0003 and ETAGEB_SUM_0003
+  keep_re <- paste0("^(", paste(prefixes, collapse = "|"), ")")
+
+  # Data-frame slots that hold subbasin-suffixed model output and should be
+  # column-filtered (others, e.g. statistics, are kept whole or dropped)
+  output_slots <- c("runoff", "precipitation", "runoff_components",
+                    "water_balance")
+
+  function(result) {
+    if (!isTRUE(result$success) || is.null(result$output_data)) {
+      return(list(success = isTRUE(result$success),
+                  error = result$error, run_id = result$run_id))
+    }
+    od <- result$output_data
+
+    new_od <- list(
+      statistics        = od$statistics,
+      defaults_settings = od$defaults_settings
+    )
+
+    for (slot in output_slots) {
+      df <- od[[slot]]
+      if (is.null(df)) next
+      cols <- names(df)
+      keep <- cols %in% date_cols | grepl(keep_re, cols)
+      # Keep the slot only if it has at least one matching variable column
+      if (any(grepl(keep_re, cols))) {
+        new_od[[slot]] <- df[, keep, drop = FALSE]
+      }
+    }
+
+    list(success = TRUE, output_data = new_od)
+  }
+}
+
 #' Run COSERO Ensemble in Parallel
 #'
 #' @param project_path Path to COSERO project
@@ -980,6 +1116,15 @@ modify_parameter_table <- function(par_file, params, par_bounds, original_values
 #' @param temp_dir Directory for temporary project copies (NULL = use system temp)
 #' @param quiet Suppress output
 #' @param statevar_source State variable source: 1 = read from parameter file (default), 2 = read from statevar.dmp file (warm start)
+#' @param result_reducer Optional function applied to each run's result inside
+#'   the worker before it is returned. Use it to keep only the data downstream
+#'   analysis needs (e.g. one subbasin's runoff/plus1 columns), which sharply
+#'   reduces the memory footprint of the returned ensemble for large run counts
+#'   at OUTPUTTYPE >= 1. NULL (default) returns the full result unchanged. The
+#'   reducer must preserve \code{$success} and whatever \code{$output_data} slots
+#'   the metric extractors need (\code{statistics} for
+#'   \code{extract_ensemble_metrics}; \code{runoff} for
+#'   \code{calculate_ensemble_metrics}).
 #' @return List with results and parameters
 #'
 #' @seealso
@@ -995,11 +1140,21 @@ run_cosero_ensemble_parallel <- function(project_path,
                                          n_cores = NULL,
                                          temp_dir = NULL,
                                          quiet = FALSE,
-                                         statevar_source = 1) {
+                                         statevar_source = 1,
+                                         result_reducer = NULL) {
 
   # Detect cores
   if (is.null(n_cores)) {
     n_cores <- max(1, detectCores() - 1)
+  }
+
+  # result_reducer: optional function applied to each run's result IN THE WORKER
+  # before it is returned to the master. Use it to keep only what downstream
+  # analysis needs (e.g. one subbasin's runoff + plus1 columns), which drastically
+  # cuts the in-memory size of the returned ensemble for large run counts at
+  # OUTPUTTYPE >= 1. NULL (default) returns the full result (unchanged behaviour).
+  if (!is.null(result_reducer) && !is.function(result_reducer)) {
+    stop("result_reducer must be a function or NULL", call. = FALSE)
   }
 
   n_runs <- nrow(parameter_sets)
@@ -1010,9 +1165,14 @@ run_cosero_ensemble_parallel <- function(project_path,
   }
   if (!dir.exists(temp_dir)) dir.create(temp_dir, recursive = TRUE)
 
-  # Get parameter file path
+  # Get parameter file path. An explicit base_settings$PARAFILE takes precedence
+  # over defaults.txt (the caller's intent is authoritative); fall back to the
+  # PARAFILE in defaults.txt, then to "para.txt". This avoids picking up a stale
+  # PARAFILE that a previous run may have left in defaults.txt.
   defaults_file <- file.path(project_path, "input", "defaults.txt")
-  if (file.exists(defaults_file)) {
+  if (!is.null(base_settings) && !is.null(base_settings$PARAFILE)) {
+    par_filename <- base_settings$PARAFILE
+  } else if (file.exists(defaults_file)) {
     defaults <- read_defaults(defaults_file)
     par_filename <- ifelse(!is.null(defaults$PARAFILE), defaults$PARAFILE, "para.txt")
   } else {
@@ -1085,36 +1245,35 @@ run_cosero_ensemble_parallel <- function(project_path,
   # Register cluster with doSNOW for progress tracking
   registerDoSNOW(cl)
 
-  # SCALABLE BATCHED HYBRID FIX:
-  # - Create thread pool (n_cores directories)
-  # - Process runs in small batches to maintain parallelism
-  # - Each batch processed truly in parallel across threads
-  # - Batch size chosen to balance parallelism vs overhead
+  # PERSISTENT-WORKER DESIGN (replaces the earlier batched/modulo scheme):
+  # - Create exactly n_threads project copies (one per worker).
+  # - Bind each worker PERMANENTLY to its own copy via a worker-local variable
+  #   (.cosero_worker_dir), set once.
+  # - Run a SINGLE foreach over all runs with load balancing.
+  # Because a directory is only ever touched by its one owning worker, two runs
+  # can never share a directory -> the cross-batch reuse race (which produced
+  # diffuse "hard_fail"s under cold start) is structurally impossible.
 
   n_threads <- min(n_cores, n_runs)
   thread_dirs <- file.path(temp_dir, paste0("thread_", seq_len(n_threads)))
 
-  # Determine batch size based on total runs
-  # Small batches = more parallelism, large batches = less overhead
-  if (n_runs <= 100) {
-    batch_size <- 4  # For n=25 (275 runs): 69 batches of 4
-  } else if (n_runs <= 500) {
-    batch_size <- 10  # For n=100 (1100 runs): 110 batches of 10
-  } else {
-    batch_size <- 25  # For n=500 (5500 runs): 220 batches of 25
-  }
+  # Guarantee the thread directories are removed even if the run crashes or is
+  # interrupted. Each is a full project copy (~100+ MB); without this, a crash
+  # leaks them (one set per crashed session) and silently fills the temp drive.
+  # The normal end-of-function path also cleans them up (with progress output);
+  # this on.exit is the safety net for the abnormal path.
+  on.exit({
+    for (d in thread_dirs) {
+      if (dir.exists(d)) tryCatch(unlink(d, recursive = TRUE, force = TRUE),
+                                  error = function(e) invisible(NULL))
+    }
+  }, add = TRUE)
 
-  n_batches <- ceiling(n_runs / batch_size)
-
-  if (!quiet) {
-    cat("Preparing", n_threads, "thread directories...\n")
-    cat(sprintf("Will process %d runs in %d batches of ~%d runs each\n",
-                n_runs, n_batches, batch_size))
-  }
+  if (!quiet) cat("Preparing", n_threads, "thread directories...\n")
 
   prep_start <- Sys.time()
 
-  # Create thread directories
+  # Create thread directories (one project copy per worker)
   for (w in 1:n_threads) {
     wdir <- thread_dirs[w]
 
@@ -1150,98 +1309,55 @@ run_cosero_ensemble_parallel <- function(project_path,
   prep_time <- difftime(Sys.time(), prep_start, units = "secs")
   if (!quiet) cat(sprintf("Thread setup completed in %.1fs\n\n", prep_time))
 
-  # Export to threads
-  clusterExport(cl, c("thread_dirs", "statevar_source"), envir = environment())
+  # Export run inputs to the cluster
+  clusterExport(cl, c("thread_dirs", "statevar_source", "result_reducer"),
+                envir = environment())
 
-  # Process in batches for scalability
-  # Ensure each run in a batch uses a UNIQUE worker (no conflicts)
-  if (!quiet) cat(sprintf("Starting %d runs (%d batches of ~%d)...\n", n_runs, n_batches, batch_size))
+  # Permanently bind each worker to ONE directory: assign sequential worker ids
+  # (1..n_threads) once, and store the owning directory worker-locally. Every
+  # task this worker later runs uses .cosero_worker_dir -- never a run-derived
+  # index -- so no directory is ever shared between concurrent runs.
+  parallel::clusterApply(cl, seq_len(n_threads), function(wid, dirs) {
+    assign(".cosero_worker_id",  wid,        envir = globalenv())
+    assign(".cosero_worker_dir", dirs[wid],  envir = globalenv())
+    invisible(NULL)
+  }, dirs = thread_dirs)
 
-  all_results <- vector("list", n_runs)
-  completed_count <- 0
+  if (!quiet) cat(sprintf("Starting %d runs across %d persistent workers...\n",
+                          n_runs, n_threads))
 
-  for (batch_idx in 1:n_batches) {
-    start_idx <- (batch_idx - 1) * batch_size + 1
-    end_idx <- min(batch_idx * batch_size, n_runs)
-    batch_run_ids <- start_idx:end_idx
-    batch_size_actual <- length(batch_run_ids)
+  # Single load-balanced pass over ALL runs (no batch loop)
+  results <- foreach(
+    i = seq_len(n_runs),
+    .packages = c("dplyr", "readr", "tibble", "stringr", "lubridate", "data.table"),
+    .options.snow = opts
+  ) %dopar% {
+    # This worker's OWN directory (set once via clusterApply above)
+    thread_dir <- get(".cosero_worker_dir", envir = globalenv())
+    thread_par_file <- file.path(thread_dir, "input", par_filename)
 
-    # Process this batch in parallel
-    # CRITICAL FIX: Use index within batch (0, 1, 2, 3) not global run ID
-    batch_results <- foreach(
-      batch_position = seq_along(batch_run_ids),
-      .packages = c("dplyr", "readr", "tibble", "stringr", "lubridate", "data.table")
-    ) %dopar% {
-      # Get the actual run ID
-      i <- batch_run_ids[batch_position]
-
-      # Assign thread based on position IN BATCH (ensures no conflicts within batch)
-      thread_idx <- ((batch_position - 1) %% length(thread_dirs)) + 1
-      thread_dir <- thread_dirs[thread_idx]
-      thread_par_file <- file.path(thread_dir, "input", par_filename)
-
-      tryCatch({
-        # Modify parameters
-        modify_parameter_table(thread_par_file, parameter_sets[i, ],
-                               par_bounds, original_values, quiet = TRUE)
-
-        # Run COSERO
-        result <- run_cosero(
-          project_path = thread_dir,
-          defaults_settings = base_settings,
-          quiet = TRUE,
-          read_outputs = TRUE,
-          statevar_source = statevar_source
-        )
-
-        return(result)
-
-      }, error = function(e) {
-        error_msg <- paste0("Run ", i, " failed: ", e$message)
-        warning(error_msg)
-        return(list(success = FALSE, error = error_msg, run_id = i))
-      })
-    }
-
-    # Store batch results
-    all_results[batch_run_ids] <- batch_results
-
-    # CRITICAL: Cleanup between batches to prevent file handle issues
-    rm(batch_results)
-
-    # Only close non-cluster connections (don't close the parallel cluster!)
     tryCatch({
-      # Get all connections
-      all_cons <- showConnections(all = TRUE)
-      if (nrow(all_cons) > 0) {
-        # Close file connections but NOT socket connections (cluster uses those)
-        for (i in 1:nrow(all_cons)) {
-          con_class <- all_cons[i, "class"]
-          if (con_class %in% c("file", "textConnection")) {
-            con_num <- as.integer(rownames(all_cons)[i])
-            tryCatch(close(getConnection(con_num)), error = function(e) invisible(NULL))
-          }
-        }
-      }
-    }, error = function(e) invisible(NULL))
+      modify_parameter_table(thread_par_file, parameter_sets[i, ],
+                             par_bounds, original_values, quiet = TRUE)
 
-    gc(full = TRUE)
-
-    # Small delay to ensure all file handles are released
-    Sys.sleep(0.5)
-
-    completed_count <- completed_count + batch_size_actual
-    if (!quiet) {
-      display_progress(
-        current    = completed_count,
-        total      = n_runs,
-        start_time = parallel_start,
-        run_type   = "Parallel"
+      result <- run_cosero(
+        project_path = thread_dir,
+        defaults_settings = base_settings,
+        quiet = TRUE,
+        read_outputs = TRUE,
+        statevar_source = statevar_source
       )
-    }
-  }
 
-  results <- all_results
+      # Optionally shrink the result in-worker before returning to master
+      if (!is.null(result_reducer)) result <- result_reducer(result)
+
+      result
+
+    }, error = function(e) {
+      warning(paste0("Run ", i, " failed: ", e$message))
+      list(success = FALSE, error = e$message, run_id = i)
+    })
+  }
 
   parallel_time <- as.numeric(difftime(Sys.time(), parallel_start, units = "secs"))
 

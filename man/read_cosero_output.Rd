@@ -7,7 +7,9 @@
 read_cosero_output(output_dir, defaults_file = NULL, quiet = FALSE)
 }
 \arguments{
-\item{output_dir}{Path to COSERO output directory}
+\item{output_dir}{Path to COSERO output directory. As a convenience, a
+project root may also be passed: if it contains no output files but has an
+\code{output/} subfolder that does, that subfolder is used automatically.}
 
 \item{defaults_file}{Path to defaults.txt file (optional). If provided, reads parameter file and settings.}
 
@@ -24,7 +26,13 @@ A list containing:
 \item{glacier}{Glacier variables (if OUTPUTTYPE >= 2)}
 \item{meteorology}{Meteorological variables (if OUTPUTTYPE >= 2)}
 \item{monitor}{Monitoring data (if OUTPUTTYPE >= 3)}
-\item{monitor_subbasins}{Per-subbasin monitoring data (if OUTPUTTYPE >= 3)}
+\item{monitor_subbasins}{Per-subbasin monitoring data (if OUTPUTTYPE >= 3).
+A named list (by subbasin id); each element is
+\code{list(mean, all, n_classes)}. \code{mean} holds one column per state/
+flux variable (the NDC class-00 catchment mean) with clean names; \code{all}
+holds every NDC class (\code{<var>_<class>}, class 00 = mean, 01..N = NDC
+classes); \code{n_classes} is the number of NDC classes (0 for non-NDC
+output, where \code{mean} and \code{all} are identical).}
 \item{rundepth}{Runoff depth data (if OUTPUTTYPE >= 3)}
 \item{longterm_annual}{Annual means (if OUTPUTTYPE >= 3)}
 \item{longterm_seasonal}{Seasonal means (if OUTPUTTYPE >= 3)}
