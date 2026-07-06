@@ -77,3 +77,12 @@ CLAUDE.md
 .claude/
 .agent-ops/
 .claude/settings.local.json
+
+# Shapefiles (never push geodata to GitHub)
+*.shp
+*.shx
+*.dbf
+*.prj
+*.cpg
+*.sbn
+*.sbx

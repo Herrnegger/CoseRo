@@ -123,12 +123,13 @@ for (name in names(result)) {
   }
 }
 
-# Test monitor_subbasins
+# Test monitor_subbasins (each entry is list(mean, all, n_classes))
 if (!is.null(result$monitor_subbasins)) {
   cat("\nmonitor_subbasins structure:\n")
   sb1 <- result$monitor_subbasins[["0001"]]
-  cat("  Subbasin 0001:", nrow(sb1), "rows,", ncol(sb1), "cols\n")
-  cat("  Variables:", paste(head(colnames(sb1), 10), collapse=", "), "...\n")
+  cat("  Subbasin 0001:", nrow(sb1$mean), "rows,", ncol(sb1$mean),
+      "mean cols, NDC classes:", sb1$n_classes, "\n")
+  cat("  Variables:", paste(head(colnames(sb1$mean), 10), collapse=", "), "...\n")
 }
 
 # Test water_balance cumulative conversion
