@@ -78,11 +78,9 @@ CLAUDE.md
 .agent-ops/
 .claude/settings.local.json
 
-# Shapefiles (never push geodata to GitHub)
-*.shp
-*.shx
-*.dbf
-*.prj
-*.cpg
-*.sbn
-*.sbx
+# Large/unneeded geodata: exclude the basins_info_CE shapefile set entirely
+# (gauges_basins_cosero.* IS committed as example input for the cluster script)
+tests/manual/cluster_metrics/input/basins_info_CE.*
+
+# Generated cluster-metrics artifacts (regenerable by running the script)
+tests/manual/cluster_metrics/output/
