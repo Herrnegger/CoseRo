@@ -37,7 +37,7 @@ create_commands_file <- function(commands_file,
 #' @keywords internal
 execute_cosero <- function(project_path, exe_name,
                            commands_file, capture_output,
-                           show_output) {
+                           show_output, omp_threads = NULL) {
   old_wd <- getwd()
   setwd(project_path)
 
@@ -47,12 +47,28 @@ execute_cosero <- function(project_path, exe_name,
   # processes block. File redirect has no buffer limit and is always safe.
   out_file <- file.path(project_path, "cosero_stdout.txt")
 
+  # COSERO parallelizes its own zone loop internally via OpenMP. Left unset,
+  # it defaults to one OpenMP thread per logical core. That is fine for a
+  # single run, but when several COSERO processes are launched at once (the
+  # parallel ensemble runner), each one doing that independently oversubscribes
+  # the machine — n_cores processes x one-thread-per-core each. `set
+  # OMP_NUM_THREADS=N` in the batch file scopes the cap to that one COSERO
+  # process (and its cmd.exe parent); it never touches this R session's own
+  # environment or other workers. NULL (default) leaves COSERO's own default
+  # untouched, which is correct for a single run or the sequential runner.
+  omp_line <- if (!is.null(omp_threads)) {
+    sprintf("set OMP_NUM_THREADS=%d", as.integer(omp_threads))
+  } else {
+    character(0)
+  }
+
   tryCatch({
     batch_file <- "run_cosero_temp.bat"
 
     if (file.exists(commands_file)) {
       batch_content <- c(
         "@echo off",
+        omp_line,
         paste0(exe_name, " < ", basename(commands_file),
                " > cosero_stdout.txt 2>&1")
       )
@@ -69,6 +85,7 @@ execute_cosero <- function(project_path, exe_name,
       # No commands file — redirect via shell for consistency
       batch_content <- c(
         "@echo off",
+        omp_line,
         paste0(exe_name, " > cosero_stdout.txt 2>&1")
       )
       writeLines(batch_content, batch_file)
@@ -380,6 +397,14 @@ print_run_results <- function(output_data,
 #' @param create_backup If TRUE (default), creates backup
 #'   of defaults.txt in parameterfile_backup folder.
 #'   Set to FALSE during optimization runs.
+#' @param omp_threads Number of OpenMP threads COSERO itself may use for its
+#'   internal zone-parallel calculation (sets OMP_NUM_THREADS for this run
+#'   only). NULL (default) leaves COSERO's own default in place, which is
+#'   what a single run wants. Only relevant when several COSERO processes run
+#'   at the same time, e.g. from \code{\link{run_cosero_ensemble_parallel}}
+#'   — there, each process's own thread count should shrink as the number of
+#'   concurrent processes grows, so the two layers of parallelism don't
+#'   multiply into far more threads than the machine has cores.
 #'
 #' @return List containing:
 #'   \item{exit_code}{Integer exit code (0 = success)}
@@ -437,7 +462,8 @@ run_cosero <- function(project_path,
                        quiet = FALSE,
                        statevar_source = 1,
                        tmmon_option = 1,
-                       create_backup = TRUE) {
+                       create_backup = TRUE,
+                       omp_threads = NULL) {
 
   # -- Input Validation --
   if (!dir.exists(project_path)) {
@@ -519,7 +545,7 @@ run_cosero <- function(project_path,
     show_output <- !quiet && capture_output
     exec_result <- execute_cosero(
       project_path, exe_name, commands_file,
-      capture_output, show_output
+      capture_output, show_output, omp_threads = omp_threads
     )
 
     end_time <- Sys.time()

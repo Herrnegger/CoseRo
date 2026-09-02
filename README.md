@@ -318,7 +318,7 @@ ensemble_result <- run_cosero_ensemble_parallel(
   parameter_sets  = samples$parameter_sets,
   par_bounds      = bounds,
   base_settings   = list(STARTDATE = "2015 1 1 0 0", ENDDATE = "2015 12 31 23 59"),
-  n_cores         = 4
+  n_cores         = 4  # concurrent COSERO runs; defaults to 1 if omitted
 )
 
 # 4. Extract metrics and calculate indices
@@ -334,6 +334,8 @@ plot_ensemble_uncertainty(ensemble_result, subbasin_id = "0001")  # QOBS shown a
 # 6. Export
 export_sensitivity_results("sensitivity_results", sobol_indices, samples$parameter_sets, Y)
 ```
+
+**`n_cores` and COSERO's own threading:** COSERO parallelizes its own zone calculation internally (OpenMP), so `n_cores` concurrent COSERO processes each trying to use every core at once can overload the machine — this is why `n_cores` defaults to 1. `run_cosero_ensemble_parallel()` automatically splits the available cores between the `n_cores` R-level workers and each worker's own COSERO process, so raising `n_cores` is safe without any extra configuration; just be aware that a higher `n_cores` means fewer threads per COSERO run, which is a real trade-off worth checking for your project and machine.
 
 #### GeoSphere Austria Data Download
 
@@ -666,7 +668,7 @@ If you use CoseRo in your research, please cite:
 ```
 Herrnegger, M., Fiaz, A., and the COSERO Development Team (2025).
 CoseRo: R Interface and Shiny Application for the COSERO Hydrological Model.
-R package version 0.9.6. https://github.com/Herrnegger/CoseRo
+R package version 0.9.7. https://github.com/Herrnegger/CoseRo
 ```
 
 Or in BibTeX format:
@@ -676,7 +678,7 @@ Or in BibTeX format:
   title  = {CoseRo: R Interface and Shiny Application for the COSERO Hydrological Model},
   author = {Herrnegger, Mathew and Fiaz, Ahmed and {COSERO Development Team}},
   year   = {2025},
-  note   = {R package version 0.9.6},
+  note   = {R package version 0.9.7},
   url    = {https://github.com/Herrnegger/CoseRo}
 }
 ```

@@ -112,10 +112,15 @@ format_time_duration <- function(seconds) {
 #' @return Character vector of matching column names (empty if none found)
 #' @export
 find_parameter_column <- function(param_name, col_names, return_all = FALSE) {
-  # Try direct match with case insensitivity and underscore variants
+  # Try direct match with case insensitivity and underscore variants.
+  # "_B" is included alongside the standard "_" because some COSERO builds
+  # still emit the pre-standardization suffix for the NDC-era CV parameters
+  # (SOILVAR_B, HYDROVAR_B, CTVAR_B) instead of the plain "_" every other
+  # parameter uses -- observed on real project files, not a hypothetical.
   patterns <- c(
-    paste0("^", param_name, "_$"),  # Exact match with underscore
-    paste0("^", param_name, "$")    # Exact match without underscore
+    paste0("^", param_name, "_$"),   # Exact match with underscore
+    paste0("^", param_name, "_B$"),  # Exact match with legacy "_B" suffix
+    paste0("^", param_name, "$")     # Exact match without underscore
   )
 
   for (pattern in patterns) {
@@ -133,6 +138,7 @@ find_parameter_column <- function(param_name, col_names, return_all = FALSE) {
   for (month in 1:12) {
     monthly_patterns <- c(
       paste0("^", base_param, month, "_$"),
+      paste0("^", base_param, month, "_B$"),
       paste0("^", base_param, month, "$")
     )
     for (pattern in monthly_patterns) {
@@ -1112,7 +1118,20 @@ make_var_reducer <- function(categories = NULL) {
 #' @param parameter_sets Tibble with parameter combinations
 #' @param par_bounds Parameter bounds table with modification types
 #' @param base_settings List of base COSERO settings
-#' @param n_cores Number of parallel cores (NULL = detect automatically)
+#' @param n_cores Number of parallel R workers, i.e. concurrent COSERO
+#'   processes (default: 1). COSERO parallelizes its own zone calculation
+#'   internally via OpenMP, so running several COSERO processes at once
+#'   multiplies that with the number of workers — a 4-worker ensemble on an
+#'   8-core machine can easily end up wanting 32+ threads. To keep that in
+#'   check, each worker's COSERO process is capped to
+#'   \code{floor((parallel::detectCores() - 2) / n_cores)} OpenMP threads:
+#'   two cores are always kept out of the pool for the OS and other
+#'   applications, and what remains is split across the R-level workers, so
+#'   the two layers of parallelism divide the machine's cores instead of
+#'   multiplying past them — even at \code{n_cores = 1}, a single COSERO
+#'   process will not claim every logical core. The conservative default of
+#'   1 keeps this simple by default; raise it once you've checked the
+#'   machine (and the project's zone count) can take the concurrency.
 #' @param temp_dir Directory for temporary project copies (NULL = use system temp)
 #' @param quiet Suppress output
 #' @param statevar_source State variable source: 1 = read from parameter file (default), 2 = read from statevar.dmp file (warm start)
@@ -1137,16 +1156,24 @@ run_cosero_ensemble_parallel <- function(project_path,
                                          parameter_sets,
                                          par_bounds,
                                          base_settings = NULL,
-                                         n_cores = NULL,
+                                         n_cores = 1,
                                          temp_dir = NULL,
                                          quiet = FALSE,
                                          statevar_source = 1,
                                          result_reducer = NULL) {
 
-  # Detect cores
-  if (is.null(n_cores)) {
-    n_cores <- max(1, detectCores() - 1)
-  }
+  if (is.null(n_cores)) n_cores <- 1
+
+  # Split the machine's cores between R-level workers and COSERO's own
+  # OpenMP zone-parallelism, rather than letting both scale independently.
+  # Two cores are always kept out of the pool entirely (OS, RStudio, other
+  # applications) -- even at n_cores = 1 a single COSERO process should not
+  # claim every logical core on the machine. As n_cores grows, each worker's
+  # own thread budget shrinks accordingly, so total thread demand stays
+  # roughly bounded by (detectCores() - 2) regardless of how many workers
+  # are running concurrently.
+  omp_pool    <- max(1L, detectCores() - 2L)
+  omp_threads <- max(1L, floor(omp_pool / n_cores))
 
   # result_reducer: optional function applied to each run's result IN THE WORKER
   # before it is returned to the master. Use it to keep only what downstream
@@ -1187,10 +1214,6 @@ run_cosero_ensemble_parallel <- function(project_path,
   # Read original parameter values (detect format) - always quiet
   original_values <- read_parameter_table(par_file, names(parameter_sets), zone_id = NULL, quiet = TRUE)
 
-  # Split runs into chunks for parallel processing
-  run_indices <- 1:n_runs
-  chunks <- split(run_indices, cut(run_indices, n_cores, labels = FALSE))
-
   if (!quiet) cat("Starting parallel execution...\n")
   start_time <- Sys.time()
 
@@ -1228,7 +1251,8 @@ run_cosero_ensemble_parallel <- function(project_path,
   # Run parallel jobs with live progress updates
   if (!quiet) {
     cat(sprintf("\nStarting %d COSERO simulations (parallel)\n", n_runs))
-    cat(sprintf("Using %d cores\n\n", n_cores))
+    cat(sprintf("Using %d worker(s), %d OpenMP thread(s) each\n\n",
+               n_cores, omp_threads))
 
     # Setup progress function for live updates
     progress_start <- Sys.time()
@@ -1285,8 +1309,14 @@ run_cosero_ensemble_parallel <- function(project_path,
       src <- normalizePath(project_path, winslash = "\\", mustWork = TRUE)
       dst <- normalizePath(wdir, winslash = "\\", mustWork = FALSE)
 
-      # robocopy: /E=subdirs, /XJ=no junctions, /MT:8=8 threads, quiet flags
-      cmd <- sprintf('robocopy "%s" "%s" /E /XJ /MT:8 /NFL /NDL /NJH /NJS /NC /NS /NP', src, dst)
+      # robocopy: /E=subdirs, /XJ=no junctions, /MT:8=8 threads, quiet flags.
+      # /XD output: each worker's run_cosero() call writes its own fresh
+      # output/ (created automatically if missing), so copying the source
+      # project's existing output is both unnecessary and, for a project with
+      # prior runs left in output/, can dominate the copy time -- e.g. a
+      # project with old OUTPUTTYPE=3 output can be 1+ GB there alone.
+      cmd <- sprintf('robocopy "%s" "%s" /E /XJ /MT:8 /XD "%s" /NFL /NDL /NJH /NJS /NC /NS /NP',
+                     src, dst, file.path(src, "output"))
       exit_code <- system(cmd, intern=FALSE, ignore.stdout=TRUE, show.output.on.console=FALSE)
 
       # robocopy codes: 0-7=success, 8+=error
@@ -1310,7 +1340,8 @@ run_cosero_ensemble_parallel <- function(project_path,
   if (!quiet) cat(sprintf("Thread setup completed in %.1fs\n\n", prep_time))
 
   # Export run inputs to the cluster
-  clusterExport(cl, c("thread_dirs", "statevar_source", "result_reducer"),
+  clusterExport(cl, c("thread_dirs", "statevar_source", "result_reducer",
+                      "omp_threads"),
                 envir = environment())
 
   # Permanently bind each worker to ONE directory: assign sequential worker ids
@@ -1345,7 +1376,8 @@ run_cosero_ensemble_parallel <- function(project_path,
         defaults_settings = base_settings,
         quiet = TRUE,
         read_outputs = TRUE,
-        statevar_source = statevar_source
+        statevar_source = statevar_source,
+        omp_threads = omp_threads
       )
 
       # Optionally shrink the result in-worker before returning to master

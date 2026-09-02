@@ -160,8 +160,11 @@ convert_txt_to_binary <- function(txt_file, bin_file = NULL,
   t_start <- Sys.time()
   message("Reading: ", basename(txt_file))
 
-  # Read entire file at once — fread is memory-mapped and handles ~10 GB well
-  dt <- data.table::fread(txt_file, header = FALSE, sep = " ",
+  # Read entire file at once — fread is memory-mapped and handles ~10 GB well.
+  # sep is auto-detected (not hardcoded): this package's own SPARTACUS/WINFORE
+  # writers emit space-separated ASCII, but COSERO input files from other
+  # sources (e.g. tab-separated) must also convert correctly.
+  dt <- data.table::fread(txt_file, header = FALSE,
                           showProgress = TRUE, data.table = FALSE)
 
   n_rows  <- nrow(dt)

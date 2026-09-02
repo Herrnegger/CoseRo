@@ -13,7 +13,8 @@ run_cosero(
   quiet = FALSE,
   statevar_source = 1,
   tmmon_option = 1,
-  create_backup = TRUE
+  create_backup = TRUE,
+  omp_threads = NULL
 )
 }
 \arguments{
@@ -84,6 +85,15 @@ and errors (default: FALSE)}
 \item{create_backup}{If TRUE (default), creates backup
 of defaults.txt in parameterfile_backup folder.
 Set to FALSE during optimization runs.}
+
+\item{omp_threads}{Number of OpenMP threads COSERO itself may use for its
+internal zone-parallel calculation (sets OMP_NUM_THREADS for this run
+only). NULL (default) leaves COSERO's own default in place, which is
+what a single run wants. Only relevant when several COSERO processes run
+at the same time, e.g. from \code{\link{run_cosero_ensemble_parallel}}
+— there, each process's own thread count should shrink as the number of
+concurrent processes grows, so the two layers of parallelism don't
+multiply into far more threads than the machine has cores.}
 }
 \value{
 List containing:
