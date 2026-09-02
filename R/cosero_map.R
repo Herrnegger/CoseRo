@@ -47,8 +47,9 @@
 #' OpenStreetMap / Topographic / Hillshade / Satellite base maps). Stations
 #' and catchment
 #' polygons can be coloured by performance metric (NSE, KGE, r or BETA) via a
-#' "Colour by metric" selector, and a "Full extent" button re-zooms to all
-#' features. Hovering a feature shows a popup with its long-term monthly
+#' "Colour by metric" selector, a "Find subbasin" box zooms straight to a
+#' subbasin by ID (type-ahead; useful when there are thousands of features),
+#' and a "Full extent" button re-zooms to all features. Hovering a feature shows a popup with its long-term monthly
 #' discharge regime (observed vs simulated, with annual-mean reference lines)
 #' and an inverted rain/snow hyetograph (mm/month). Clicking a station or a
 #' catchment polygon opens a near-full-screen viewer with four linked
@@ -120,8 +121,11 @@
 #' clicked feature's ID does not match any output column, the viewer reports
 #' "no data".
 #'
-#' \strong{Station colouring.} The "Colour by metric" selector recolours the
-#' features by NSE, KGE, r or BETA, with a matching legend. NSE/KGE/r use a
+#' \strong{Feature colouring.} The "Colour by metric" selector recolours both
+#' the station points and the catchment polygons (so it works in
+#' catchments-only projects) by NSE, KGE, r or BETA, with a matching legend.
+#' Polygons are drawn semi-transparent so the basemap stays readable.
+#' NSE/KGE/r use a
 #' sequential blue (good) to red (worse) scale; BETA uses a diverging scale
 #' around 1 (under- vs over-estimation, balanced within 5 percent). Metrics
 #' are computed once at launch with the spin-up excluded; features without
@@ -143,7 +147,10 @@
 #'
 #' \strong{Cache.} The fst cache is invalidated automatically when a source
 #' file's modification time or size changes; pass \code{clean_cache = TRUE}
-#' to force a rebuild. Subbasins without observations (Qobs = -999) show the
+#' to force a rebuild. The per-subbasin metrics are cached next to it in
+#' \code{station_metrics.rds}, keyed on the runoff fst identity and
+#' \code{spinup}, so they are recomputed only when the cache is rebuilt or a
+#' different spin-up is requested. Subbasins without observations (Qobs = -999) show the
 #' simulated series only and "no observations" instead of metrics. Metric
 #' handling follows the package convention: values <= -999 and negative
 #' observations are treated as NA and dropped pairwise.
@@ -280,9 +287,14 @@ launch_cosero_map <- function(stations_shp = NULL,
   }
   cache <- build_output_cache(output_dir)
 
-  # Per-subbasin performance metrics for the station coloring (spinup excluded)
-  message("Computing station performance metrics ...")
-  station_metrics <- compute_all_station_metrics(cache, spinup = spinup)
+  # Per-subbasin performance metrics for the feature colouring (spinup
+  # excluded). Cached alongside the fst files: the full pass reads every
+  # QOBS_/QSIM_ column and costs ~9 s for 13,605 subbasins, while the result
+  # is only ~1.4 MB. Keyed on the runoff fst identity AND spinup, so a cache
+  # rebuild or a different spinup recomputes automatically.
+  station_metrics <- load_or_compute_station_metrics(
+    cache, spinup = spinup, cache_dir = file.path(output_dir, ".cache")
+  )
 
   # Persist metrics + one coordinate per subbasin (station, else catchment
   # centroid) to output/.cache/station_metrics.csv -- e.g. for spatial clustering
@@ -510,10 +522,18 @@ convert_output_for_cache <- function(key, ascii_path, bin_path, spec,
   }
   if (is.null(df)) return(NULL)
 
-  # Mirror read_cosero_runoff(): discharge cannot be negative
+  # Mirror read_cosero_runoff(): discharge cannot be negative.
+  # Build the cleaned columns first and assign them in ONE `[<-` call:
+  # `df[[col]][...] <- NA` inside a loop re-copies the whole frame on every
+  # column, which on a 27,210-column runoff file costs ~40 s vs ~0.9 s here.
   if (key == "runoff" && used == "binary") {
-    for (col in grep("^(QOBS_|QSIM_|Qloc_)", colnames(df), value = TRUE)) {
-      df[[col]][df[[col]] < 0] <- NA
+    neg_cols <- grep("^(QOBS_|QSIM_|Qloc_)", colnames(df))
+    if (length(neg_cols) > 0) {
+      df[neg_cols] <- lapply(neg_cols, function(j) {
+        v <- df[[j]]
+        v[v < 0] <- NA
+        v
+      })
     }
   }
 
@@ -525,9 +545,12 @@ convert_output_for_cache <- function(key, ascii_path, bin_path, spec,
     df <- convert_sum_columns_to_timestep(df, lt$mon + 1L, lt$mday)
   }
 
+  # Subset / filter only when they actually change something -- each of these
+  # copies the entire frame, and for the binary path they are usually no-ops.
   keep <- c("DateTime", grep("_\\d+$", colnames(df), value = TRUE))
-  df <- df[, keep, drop = FALSE]
-  df <- df[!is.na(df$DateTime), , drop = FALSE]
+  if (length(keep) != ncol(df)) df <- df[, keep, drop = FALSE]
+  bad_dt <- is.na(df$DateTime)
+  if (any(bad_dt)) df <- df[!bad_dt, , drop = FALSE]
 
   if (!quiet) {
     message("  Cached ", basename(ascii_path), " (", used, ", ",
@@ -735,29 +758,46 @@ edge_values_match <- function(bin_vals, ascii_vals, tol = 0.006) {
 #' @keywords internal
 convert_sum_columns_to_timestep <- function(df, month_vec, day_vec) {
   sum_cols <- grep("_SUM_", colnames(df), value = TRUE)
-  for (col in sum_cols) {
-    new_col <- gsub("_SUM_", "_", col)
-    vals <- df[[col]]
+  if (length(sum_cols) == 0) return(df)
+
+  # The water-year reset rows are the same for every column -- compute once,
+  # not once per column (this used to sit inside the loop). Row 1 is excluded
+  # here rather than re-tested per index (the old `idx > 1` guard).
+  reset_idx <- which(month_vec == 9 & day_vec == 1)
+  reset_idx <- reset_idx[reset_idx > 1]
+
+  # Build the derived columns into a list and bind ONCE. Assigning into the
+  # data frame inside the loop (df[[new_col]] <- ...) re-copies the whole
+  # frame on each append, which is quadratic in the column count: measured
+  # 0.15 ms/col at 500 columns but 0.61 ms/col at 5,000. On the Europe-wide
+  # project (40,815 _SUM_ columns, growing the frame to ~122k columns) that
+  # dominated the entire cache build. Vectorising the reset fix removes the
+  # inner scalar loop as well.
+  out <- vector("list", length(sum_cols))
+  names(out) <- gsub("_SUM_", "_", sum_cols)
+  for (i in seq_along(sum_cols)) {
+    vals <- df[[sum_cols[i]]]
     timestep_vals <- c(vals[1], diff(vals))
-    sept_1_indices <- which(month_vec == 9 & day_vec == 1)
-    for (idx in sept_1_indices) {
-      if (idx > 1 && !is.na(timestep_vals[idx]) && timestep_vals[idx] < 0) {
-        timestep_vals[idx] <- vals[idx]
-      }
+    if (length(reset_idx) > 0) {
+      # On Sep 1 the cumulative counter restarts, so a negative diff means
+      # "counter reset" -- keep the cumulative value itself. NA-safe.
+      hit <- reset_idx[which(timestep_vals[reset_idx] < 0)]
+      if (length(hit) > 0) timestep_vals[hit] <- vals[hit]
     }
-    df[[new_col]] <- timestep_vals
+    out[[i]] <- timestep_vals
   }
-  df
+  cbind(df, as.data.frame(out, stringsAsFactors = FALSE))
 }
 
 # 4 Per-click data access #####
 
-#' Find the columns belonging to a subbasin (3/4-digit format probing)
+#' Find the columns belonging to a subbasin (3/4/5-digit format probing)
 #' @keywords internal
 probe_subbasin_columns <- function(col_names, sb_id) {
   sb_num <- suppressWarnings(as.numeric(sb_id))
   fmts <- if (!is.na(sb_num)) {
-    c(sprintf("%04d", sb_num), sprintf("%03d", sb_num), sprintf("%d", sb_num))
+    c(sprintf("%05d", sb_num), sprintf("%04d", sb_num),
+      sprintf("%03d", sb_num), sprintf("%d", sb_num))
   } else {
     as.character(sb_id)
   }
@@ -970,6 +1010,56 @@ compute_all_station_metrics <- function(cache, spinup = 0L, chunk_size = 200L) {
 
 #' Write per-subbasin metrics + coordinates to a CSV (for spatial clustering)
 #'
+#' Load cached per-subbasin metrics, or compute and cache them
+#'
+#' Wraps \code{compute_all_station_metrics()} with an rds sidecar in the same
+#' \code{.cache} directory as the fst files. The full pass has to touch every
+#' QOBS_/QSIM_ column (~9 s for 13,605 subbasins) while the result is ~1.4 MB,
+#' so it is worth persisting between launches.
+#'
+#' The cache key is the runoff fst path, its mtime and size, plus \code{spinup}
+#' -- so rebuilding the fst cache (\code{clean_cache = TRUE}, or a re-run of
+#' COSERO) or asking for a different spin-up recomputes rather than returning
+#' stale metrics. A corrupt or unreadable sidecar is silently recomputed.
+#' @keywords internal
+load_or_compute_station_metrics <- function(cache, spinup = 0L,
+                                            cache_dir = NULL,
+                                            chunk_size = 200L) {
+  rds_path <- if (!is.null(cache_dir)) {
+    file.path(cache_dir, "station_metrics.rds")
+  } else {
+    NULL
+  }
+  runoff_path <- cache$runoff$path
+  key <- list(
+    path   = runoff_path,
+    mtime  = as.numeric(file.mtime(runoff_path)),
+    size   = as.numeric(file.size(runoff_path)),
+    spinup = as.integer(spinup)
+  )
+
+  if (!is.null(rds_path) && file.exists(rds_path)) {
+    hit <- tryCatch(readRDS(rds_path), error = function(e) NULL)
+    if (is.list(hit) && identical(hit$key, key) && is.data.frame(hit$metrics)) {
+      message("Reusing cached station performance metrics")
+      return(hit$metrics)
+    }
+  }
+
+  message("Computing station performance metrics ...")
+  metrics <- compute_all_station_metrics(cache, spinup = spinup,
+                                         chunk_size = chunk_size)
+  if (!is.null(rds_path)) {
+    # A failed write must not break the launch -- the metrics are in hand
+    tryCatch(saveRDS(list(key = key, metrics = metrics), rds_path),
+             error = function(e) {
+               warning("Could not cache station metrics: ",
+                       conditionMessage(e), call. = FALSE)
+             })
+  }
+  metrics
+}
+
 #' Joins the launch-time metrics (\code{compute_all_station_metrics()}) to one
 #' WGS84 coordinate per subbasin: the gauging-station point when available,
 #' otherwise the catchment representative point. Written to
@@ -1177,6 +1267,16 @@ map_viewer_ui <- function(id) {
                                        "NSE" = "NSE", "KGE" = "KGE",
                                        "r" = "r", "BETA (bias)" = "beta"),
                            selected = "none", width = "180px"),
+        # Type-ahead subbasin finder: with thousands of features, scanning the
+        # map by eye is hopeless. Choices are filled server-side
+        # (updateSelectizeInput, server = TRUE) so the browser never receives
+        # the full ID list.
+        shiny::selectizeInput(
+          ns("goto_id"), label = "Find subbasin", choices = NULL,
+          selected = "", width = "150px",
+          options = list(placeholder = "type an ID",
+                         maxOptions = 100L, allowEmptyOption = TRUE)
+        ),
         shiny::actionButton(ns("zoom_full"), label = "Full extent",
                             icon = shiny::icon("expand"),
                             class = "btn-sm", style = "margin-bottom: 4px;")
@@ -1239,7 +1339,7 @@ map_viewer_server <- function(id, stations, id_field, catchments,
     rv <- shiny::reactiveValues(station = NULL,
                                 plus_sel = NULL, plus1_sel = NULL)
 
-    # Map an ID vector -> rows in station_metrics (3/4-digit format probing)
+    # Map an ID vector -> rows in station_metrics (3/4/5-digit format probing)
     metric_rows_for <- function(ids) {
       if (is.null(station_metrics) || nrow(station_metrics) == 0 ||
           length(ids) == 0) {
@@ -1248,7 +1348,8 @@ map_viewer_server <- function(id, stations, id_field, catchments,
       vapply(ids, function(sb_id) {
         num <- suppressWarnings(as.numeric(sb_id))
         fmts <- if (!is.na(num)) {
-          c(sprintf("%04d", num), sprintf("%03d", num), sprintf("%d", num))
+          c(sprintf("%05d", num), sprintf("%04d", num),
+            sprintf("%03d", num), sprintf("%d", num))
         } else {
           as.character(sb_id)
         }
@@ -1258,6 +1359,59 @@ map_viewer_server <- function(id, stations, id_field, catchments,
       }, integer(1), USE.NAMES = FALSE)
     }
     metric_rows <- metric_rows_for(station_ids)
+    catch_metric_rows <- if (!is.null(catchments)) {
+      metric_rows_for(catch_ids)
+    } else {
+      integer(0)
+    }
+
+    # Draw / redraw the catchment polygons, shaded by the selected metric.
+    # Mirrors draw_stations(): works on the initial map object and on a
+    # leafletProxy (clear = TRUE). When a station layer is present it owns
+    # the legend, so polygons only carry one in catchments-only projects.
+    draw_catchments <- function(m, metric, clear = FALSE) {
+      if (is.null(catchments)) return(m)
+      legend <- NULL
+      if (metric == "none" || is.null(station_metrics)) {
+        fill_colors <- "#bbbbbb"
+        fill_opacity <- 0.15
+        poly_labels <- catch_ids
+      } else {
+        vals <- station_metrics[[metric]][catch_metric_rows]
+        legend <- metric_color_classes(metric, vals)
+        fill_colors <- legend$point_colors
+        # Opaque enough to read the metric, still lets the basemap through
+        fill_opacity <- 0.75
+        poly_labels <- ifelse(
+          is.na(vals),
+          paste0(catch_ids, " | no observations"),
+          sprintf("%s | %s = %.2f", catch_ids, legend$title, vals)
+        )
+      }
+      if (clear) {
+        m <- leaflet::clearGroup(m, "Catchments")
+        if (!has_stations) m <- leaflet::removeControl(m, "perf_legend")
+      }
+      m <- leaflet::addPolygons(
+        m, data = catchments, layerId = catch_ids,
+        weight = 1, color = "#666666",
+        fillColor = fill_colors, fillOpacity = fill_opacity,
+        group = "Catchments", label = poly_labels,
+        highlightOptions = leaflet::highlightOptions(
+          weight = 2, color = "#005f73", fillOpacity = 0.30,
+          bringToFront = FALSE
+        )
+      )
+      # Stations draw their own legend; avoid adding a second identical one
+      if (!is.null(legend) && !has_stations) {
+        m <- leaflet::addLegend(
+          m, position = "bottomright", colors = legend$legend_colors,
+          labels = legend$legend_labels, title = legend$title,
+          opacity = 0.9, layerId = "perf_legend"
+        )
+      }
+      m
+    }
 
     # Draw / redraw the stations layer; works on the initial map object and
     # on a leafletProxy (clear = TRUE). No-op when there is no station layer.
@@ -1320,25 +1474,22 @@ map_viewer_server <- function(id, stations, id_field, catchments,
                                      group = "Hillshade")
       m <- leaflet::addProviderTiles(m, "Esri.WorldImagery",
                                      group = "Satellite")
-      m <- leaflet::addProviderTiles(m, "CartoDB.Positron",
+      # Esri.WorldGrayCanvas, not CartoDB.Positron: CARTO moved
+      # basemaps.cartocdn.com behind an account, so the Positron tiles now
+      # answer anonymous browser requests with an API-key challenge. The Esri
+      # light-grey canvas is equivalent cartography and needs no key.
+      m <- leaflet::addProviderTiles(m, "Esri.WorldGrayCanvas",
                                      group = "Light")
       overlay_groups <- character(0)
+      sel_metric <- shiny::isolate(input$color_by)
+      if (is.null(sel_metric)) sel_metric <- "none"
       if (!is.null(catchments)) {
         # Polygons are clickable (layerId = subbasin ID); highlight on hover
-        m <- leaflet::addPolygons(
-          m, data = catchments, layerId = catch_ids,
-          weight = 1, color = "#666666",
-          fillColor = "#bbbbbb", fillOpacity = 0.15, group = "Catchments",
-          label = catch_ids,
-          highlightOptions = leaflet::highlightOptions(
-            weight = 2, color = "#005f73", fillOpacity = 0.30, bringToFront = FALSE
-          )
-        )
+        m <- draw_catchments(m, sel_metric)
         overlay_groups <- c(overlay_groups, "Catchments")
       }
       if (has_stations) overlay_groups <- c(overlay_groups, "Stations")
-      sel_metric <- shiny::isolate(input$color_by)
-      m <- draw_stations(m, if (is.null(sel_metric)) "none" else sel_metric)
+      m <- draw_stations(m, sel_metric)
       m <- leaflet::addLayersControl(
         m,
         baseGroups = c("Light", "OpenStreetMap", "Topographic", "Hillshade",
@@ -1350,10 +1501,11 @@ map_viewer_server <- function(id, stations, id_field, catchments,
                          map_bounds$lng2, map_bounds$lat2)
     })
 
-    # Recolor stations when the metric selector changes
+    # Recolor stations AND catchments when the metric selector changes
     shiny::observeEvent(input$color_by, {
-      draw_stations(leaflet::leafletProxy("map", session), input$color_by,
-                    clear = TRUE)
+      proxy <- leaflet::leafletProxy("map", session)
+      draw_catchments(proxy, input$color_by, clear = TRUE)
+      draw_stations(proxy, input$color_by, clear = TRUE)
     }, ignoreInit = TRUE)
 
     # Zoom to full extent of all layers
@@ -1363,6 +1515,39 @@ map_viewer_server <- function(id, stations, id_field, catchments,
         map_bounds$lng1, map_bounds$lat1, map_bounds$lng2, map_bounds$lat2
       )
     })
+
+    # --- "Find subbasin": type-ahead ID search that zooms to the feature -----
+    # Sorted numerically where the IDs are numbers, so the dropdown reads
+    # 1, 2, 10 rather than 1, 10, 2.
+    goto_ids <- unique(c(catch_ids, station_ids))
+    if (length(goto_ids) > 0) {
+      ord <- suppressWarnings(as.numeric(goto_ids))
+      goto_ids <- if (anyNA(ord)) sort(goto_ids) else goto_ids[order(ord)]
+    }
+    shiny::updateSelectizeInput(session, "goto_id",
+                                choices = c("", goto_ids), selected = "",
+                                server = TRUE)
+
+    shiny::observeEvent(input$goto_id, {
+      sb <- input$goto_id
+      if (is.null(sb) || !nzchar(sb)) return(invisible(NULL))
+      proxy <- leaflet::leafletProxy("map", session)
+
+      # Prefer the polygon: zoom to its real extent so the whole catchment
+      # is visible. Fall back to the station point (no extent of its own).
+      j <- match(sb, catch_ids)
+      if (!is.na(j)) {
+        bb <- as.numeric(sf::st_bbox(sf::st_geometry(catchments)[j]))
+        # Pad a degenerate bbox (a tiny catchment) so flyToBounds still zooms
+        if (bb[3] - bb[1] < 1e-4) bb[c(1, 3)] <- bb[c(1, 3)] + c(-5e-4, 5e-4)
+        if (bb[4] - bb[2] < 1e-4) bb[c(2, 4)] <- bb[c(2, 4)] + c(-5e-4, 5e-4)
+        leaflet::flyToBounds(proxy, bb[1], bb[2], bb[3], bb[4])
+      } else {
+        k <- match(sb, station_ids)
+        if (is.na(k)) return(invisible(NULL))
+        leaflet::flyTo(proxy, lng = coords[k, 1], lat = coords[k, 2], zoom = 11)
+      }
+    }, ignoreInit = TRUE)
 
     nearest_station <- function(lat, lng) {
       if (!has_stations) return(NULL)
