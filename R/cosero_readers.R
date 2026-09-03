@@ -489,6 +489,7 @@ read_cosero_parameters <- function(param_file, skip_lines = 1, quiet = FALSE) {
   header_line <- lines[header_start]
   col_names <- unlist(strsplit(trimws(header_line), "\\s+"))
   col_names <- col_names[nchar(col_names) > 0]
+  col_names <- normalize_id_column_names(col_names)
 
   # Get data lines
   data_start <- header_start + 1
@@ -575,6 +576,24 @@ write_cosero_parameters <- function(par_file, param_data,
   }
 
   invisible(NULL)
+}
+
+#' @keywords internal
+normalize_id_column_names <- function(col_names) {
+  # The structural zone/subbasin identity columns are always written with a
+  # trailing underscore (NB_, IZ_, NZ_, WATERBODY_, SOILTYPE_), and every
+  # downstream reader/writer assumes that canonical form. Unlike calibration
+  # parameters -- matched leniently by find_parameter_column() regardless of
+  # a trailing underscore -- these are matched by direct name (param_data$NB_,
+  # "NB_" %in% colnames(...)), so a file using the bare form (NB, IZ, ...)
+  # would otherwise silently fail those checks or be mis-typed by
+  # convert_parameter_types(). Normalize once here, right after the header is
+  # parsed, so every downstream consumer only ever sees the canonical name.
+  id_columns <- c("NB", "IZ", "NZ", "WATERBODY", "SOILTYPE")
+  bare <- sub("_$", "", col_names)
+  is_id <- toupper(bare) %in% id_columns
+  col_names[is_id] <- paste0(toupper(bare[is_id]), "_")
+  col_names
 }
 
 parse_parameter_data <- function(data_lines, col_names) {

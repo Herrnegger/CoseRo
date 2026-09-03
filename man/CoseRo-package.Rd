@@ -6,6 +6,8 @@
 \alias{CoseRo}
 \title{CoseRo: R Interface and Shiny Application for the COSERO Hydrological Model}
 \description{
+\if{html}{\figure{logo.svg}{options: style='float: right' alt='logo' width='120'}}
+
 A comprehensive R interface for the COSERO hydrological model, covering the full modelling workflow: project setup, simulation execution, output reading, interactive visualisation (Shiny app), Sobol-based global sensitivity analysis, and parameter optimisation (DDS and SCE-UA). Input data preprocessing utilities convert GeoSphere Austria SPARTACUS precipitation and temperature, WINFORE ET0, and eHYD discharge data into COSERO-ready formats. Simulations can be driven programmatically or through the interactive GUI.
 
 The CoseRo R package provides an R interface for the COSERO hydrological model, including:
@@ -115,6 +117,11 @@ Useful links:
 }
 \author{
 \strong{Maintainer}: Mathew Herrnegger \email{mathew.herrnegger@boku.ac.at}
+
+Authors:
+\itemize{
+  \item Mathew Herrnegger \email{mathew.herrnegger@boku.ac.at}
+}
 
 Other contributors:
 \itemize{

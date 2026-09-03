@@ -1,7 +1,7 @@
 Package: CoseRo
 Type: Package
 Title: R Interface and Shiny Application for the COSERO Hydrological Model
-Version: 0.9.6
+Version: 0.9.7
 Authors@R: c(
     person("Mathew", "Herrnegger",
            role = c("aut", "cre"),
@@ -61,8 +61,8 @@ Suggests:
     fst (>= 0.9.8),
     rmapshaper (>= 0.5.0),
     base64enc
-RoxygenNote: 7.3.3
 Roxygen: list(markdown = TRUE)
 URL: https://github.com/Herrnegger/CoseRo
 BugReports: https://github.com/Herrnegger/CoseRo/issues
 SystemRequirements: COSERO.exe (Windows executable for hydrological modeling)
+Config/roxygen2/version: 8.1.0

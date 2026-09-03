@@ -84,3 +84,6 @@ tests/manual/cluster_metrics/input/basins_info_CE.*
 
 # Generated cluster-metrics artifacts (regenerable by running the script)
 tests/manual/cluster_metrics/output/
+
+# Scratch analyses (ad-hoc, not package content)
+scratch/

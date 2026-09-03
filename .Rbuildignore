@@ -16,6 +16,7 @@
 ^.*\.backup.*$
 ^.*backup_.*$
 ^dev$
+^scratch$
 ^\.claude$
 ^\.agent-ops$
 ^sensitivity_report_files$

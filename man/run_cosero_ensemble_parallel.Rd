@@ -9,7 +9,7 @@ run_cosero_ensemble_parallel(
   parameter_sets,
   par_bounds,
   base_settings = NULL,
-  n_cores = NULL,
+  n_cores = 1,
   temp_dir = NULL,
   quiet = FALSE,
   statevar_source = 1,
@@ -25,7 +25,20 @@ run_cosero_ensemble_parallel(
 
 \item{base_settings}{List of base COSERO settings}
 
-\item{n_cores}{Number of parallel cores (NULL = detect automatically)}
+\item{n_cores}{Number of parallel R workers, i.e. concurrent COSERO
+processes (default: 1). COSERO parallelizes its own zone calculation
+internally via OpenMP, so running several COSERO processes at once
+multiplies that with the number of workers — a 4-worker ensemble on an
+8-core machine can easily end up wanting 32+ threads. To keep that in
+check, each worker's COSERO process is capped to
+\code{floor((parallel::detectCores() - 2) / n_cores)} OpenMP threads:
+two cores are always kept out of the pool for the OS and other
+applications, and what remains is split across the R-level workers, so
+the two layers of parallelism divide the machine's cores instead of
+multiplying past them — even at \code{n_cores = 1}, a single COSERO
+process will not claim every logical core. The conservative default of
+1 keeps this simple by default; raise it once you've checked the
+machine (and the project's zone count) can take the concurrency.}
 
 \item{temp_dir}{Directory for temporary project copies (NULL = use system temp)}
 
