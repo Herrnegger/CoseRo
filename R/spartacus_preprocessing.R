@@ -98,6 +98,9 @@ NULL
 #'   peak memory use.
 #' @param overwrite If \code{TRUE} (default), an existing output file is
 #'   silently overwritten.
+#' @param sep Column separator passed to \code{data.table::fread()}. The default
+#'   \code{"auto"} detects space- or tab-separated input automatically; supply
+#'   an explicit value (e.g. a space or tab) to override detection.
 #'
 #' @return Invisibly returns the path to the written binary file.
 #'
@@ -135,7 +138,8 @@ NULL
 #' @export
 convert_txt_to_binary <- function(txt_file, bin_file = NULL,
                                   chunk_size = 10000L,
-                                  overwrite = TRUE) {
+                                  overwrite = TRUE,
+                                  sep = "auto") {
 
   if (!file.exists(txt_file)) {
     stop("txt_file does not exist: ", txt_file, call. = FALSE)
@@ -161,7 +165,7 @@ convert_txt_to_binary <- function(txt_file, bin_file = NULL,
   message("Reading: ", basename(txt_file))
 
   # Read entire file at once — fread is memory-mapped and handles ~10 GB well
-  dt <- data.table::fread(txt_file, header = FALSE, sep = " ",
+  dt <- data.table::fread(txt_file, header = FALSE, sep = sep,
                           showProgress = TRUE, data.table = FALSE)
 
   n_rows  <- nrow(dt)

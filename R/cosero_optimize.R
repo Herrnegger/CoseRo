@@ -65,7 +65,10 @@ get_zones_for_subbasins <- function(cosero_path, subbasins = "all",
 
   # Handle "all"
   if (length(subbasins) == 1 && tolower(subbasins) == "all") {
-    subbasins <- sprintf("%03d", sort(all_subbasins))
+    # Pad to the width of the largest id, so 13,605 subbasins give "00001"
+    # rather than a truncating "%03d"
+    id_width <- max(3L, nchar(as.character(max(all_subbasins))))
+    subbasins <- sprintf(paste0("%0", id_width, "d"), sort(all_subbasins))
     zones <- param_data$NZ_
     if (!quiet) message("Using all ", length(all_subbasins), " subbasins (", length(zones), " zones)")
     return(list(zones = zones, subbasins = subbasins))
@@ -283,9 +286,14 @@ calculate_single_metric <- function(result, subbasin, metric, spinup_value = 0) 
 
   # Auto-detect subbasin column format (COSERO may use 3 or 4 digits)
   sb_num <- as.numeric(subbasin)
+  # %05d first: projects with >= 10,000 subbasins write QOBS_04240 /
+  # QSIM_04240, which %03d/%04d cannot produce (both give "4240"), so the
+  # lookup failed and the subbasin was wrongly reported as having no
+  # observations.
   possible_formats <- c(
-    sprintf("%03d", sb_num),
+    sprintf("%05d", sb_num),
     sprintf("%04d", sb_num),
+    sprintf("%03d", sb_num),
     sprintf("%d", sb_num)
   )
 
@@ -1072,8 +1080,8 @@ print_optimization_report <- function(algorithm, par_filename,
   get_stats_row <- function(stats_df, subbasin) {
     if (is.null(stats_df)) return(NULL)
     sb_num <- as.numeric(subbasin)
-    mask <- stats_df$sb %in% c(sprintf("%03d", sb_num), sprintf("%04d", sb_num),
-                                sprintf("%d", sb_num))
+    mask <- stats_df$sb %in% c(sprintf("%05d", sb_num), sprintf("%04d", sb_num),
+                                sprintf("%03d", sb_num), sprintf("%d", sb_num))
     if (!any(mask)) return(NULL)
     stats_df[mask, , drop = FALSE][1, ]
   }

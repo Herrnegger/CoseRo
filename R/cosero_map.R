@@ -621,7 +621,13 @@ read_cosero_binary_file <- function(bin_path, value_names, has_dates,
   for (nms in name_candidates) {
     n_vals <- length(nms)
     if (n_vals < 1) next
-    rec_bytes <- (if (has_dates) 20L else 0L) + 4L * n_vals
+    # as.numeric(): rec_bytes * n_max exceeds .Machine$integer.max once a file
+    # passes ~2.1 GB (COSERO.plus1 with 81,630 columns x 7,671 rows needs
+    # 2,504,734,920 bytes). Integer arithmetic silently overflows to NA and the
+    # subsequent index range fails with "NA/NaN argument"; a double operand
+    # promotes the whole expression and keeps exact integer precision well
+    # beyond 2^53 bytes.
+    rec_bytes <- as.numeric((if (has_dates) 20L else 0L) + 4L * n_vals)
     n_max <- (sz - hdr_bytes) %/% rec_bytes  # may include stale tail records
     if (n_max < 1) next
     sel <- match(nms, value_names)

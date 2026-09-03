@@ -89,10 +89,13 @@ extract_run_metrics <- function(run_result,
   sb_id_nums <- as.numeric(subbasin_id)
   sb_id_strs_3 <- sprintf("%03d", sb_id_nums)
   sb_id_strs_4 <- sprintf("%04d", sb_id_nums)
+  # 5-digit ids: projects with >= 10,000 subbasins pad to %05d (QOBS_04240,
+  # statistics.txt "00001"), which %03d/%04d cannot produce.
+  sb_id_strs_5 <- sprintf("%05d", sb_id_nums)
 
-  # Filter for specified subbasins (try both formats)
+  # Filter for specified subbasins (try all formats)
   mask <- stats$sb %in% sb_id_strs_3 | stats$sb %in% sb_id_strs_4 |
-          stats$sb %in% sb_id_nums
+          stats$sb %in% sb_id_strs_5 | stats$sb %in% sb_id_nums
   sb_stats <- stats[mask, ]
 
   if (nrow(sb_stats) == 0) {
@@ -212,8 +215,9 @@ calculate_run_metrics <- function(run_result,
     # Auto-detect subbasin column format
     sb_id_num <- as.numeric(sb_id)
     possible_formats <- c(
-      sprintf("%03d", sb_id_num),
+      sprintf("%05d", sb_id_num),
       sprintf("%04d", sb_id_num),
+      sprintf("%03d", sb_id_num),
       sprintf("%d", sb_id_num)
     )
 
