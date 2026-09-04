@@ -8,7 +8,8 @@ convert_txt_to_binary(
   txt_file,
   bin_file = NULL,
   chunk_size = 10000L,
-  overwrite = TRUE
+  overwrite = TRUE,
+  sep = "auto"
 )
 }
 \arguments{
@@ -26,6 +27,10 @@ peak memory use.}
 
 \item{overwrite}{If \code{TRUE} (default), an existing output file is
 silently overwritten.}
+
+\item{sep}{Column separator passed to \code{data.table::fread()}. The default
+\code{"auto"} detects space- or tab-separated input automatically; supply
+an explicit value (e.g. a space or tab) to override detection.}
 }
 \value{
 Invisibly returns the path to the written binary file.

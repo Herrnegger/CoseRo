@@ -2,7 +2,11 @@
 % Please edit documentation in R/cosero_map.R
 \name{write_station_metrics_csv}
 \alias{write_station_metrics_csv}
-\title{Write per-subbasin metrics + coordinates to a CSV (for spatial clustering)}
+\title{Joins the launch-time metrics (\code{compute_all_station_metrics()}) to one
+WGS84 coordinate per subbasin: the gauging-station point when available,
+otherwise the catchment representative point. Written to
+\code{output/.cache/station_metrics.csv} at every launch. Columns:
+subbasin, lon, lat, coord_source, NSE, KGE, r, alpha, beta, n, spinup.}
 \usage{
 write_station_metrics_csv(
   station_metrics,

@@ -80,8 +80,9 @@ intermediate-catchment polygons on an interactive map (selectable Light /
 OpenStreetMap / Topographic / Hillshade / Satellite base maps). Stations
 and catchment
 polygons can be coloured by performance metric (NSE, KGE, r or BETA) via a
-"Colour by metric" selector, and a "Full extent" button re-zooms to all
-features. Hovering a feature shows a popup with its long-term monthly
+"Colour by metric" selector, a "Find subbasin" box zooms straight to a
+subbasin by ID (type-ahead; useful when there are thousands of features),
+and a "Full extent" button re-zooms to all features. Hovering a feature shows a popup with its long-term monthly
 discharge regime (observed vs simulated, with annual-mean reference lines)
 and an inverted rain/snow hyetograph (mm/month). Clicking a station or a
 catchment polygon opens a near-full-screen viewer with four linked
@@ -106,8 +107,11 @@ clickable (points drawn on top of polygons when both are present); if a
 clicked feature's ID does not match any output column, the viewer reports
 "no data".
 
-\strong{Station colouring.} The "Colour by metric" selector recolours the
-features by NSE, KGE, r or BETA, with a matching legend. NSE/KGE/r use a
+\strong{Feature colouring.} The "Colour by metric" selector recolours both
+the station points and the catchment polygons (so it works in
+catchments-only projects) by NSE, KGE, r or BETA, with a matching legend.
+Polygons are drawn semi-transparent so the basemap stays readable.
+NSE/KGE/r use a
 sequential blue (good) to red (worse) scale; BETA uses a diverging scale
 around 1 (under- vs over-estimation, balanced within 5 percent). Metrics
 are computed once at launch with the spin-up excluded; features without
@@ -129,7 +133,10 @@ If \code{leafgl} is installed, stations are drawn with WebGL (handles
 
 \strong{Cache.} The fst cache is invalidated automatically when a source
 file's modification time or size changes; pass \code{clean_cache = TRUE}
-to force a rebuild. Subbasins without observations (Qobs = -999) show the
+to force a rebuild. The per-subbasin metrics are cached next to it in
+\code{station_metrics.rds}, keyed on the runoff fst identity and
+\code{spinup}, so they are recomputed only when the cache is rebuilt or a
+different spin-up is requested. Subbasins without observations (Qobs = -999) show the
 simulated series only and "no observations" instead of metrics. Metric
 handling follows the package convention: values <= -999 and negative
 observations are treated as NA and dropped pairwise.

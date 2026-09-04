@@ -2,11 +2,11 @@
 % Please edit documentation in R/cosero_map.R
 \name{probe_subbasin_columns}
 \alias{probe_subbasin_columns}
-\title{Find the columns belonging to a subbasin (3/4-digit format probing)}
+\title{Find the columns belonging to a subbasin (3/4/5-digit format probing)}
 \usage{
 probe_subbasin_columns(col_names, sb_id)
 }
 \description{
-Find the columns belonging to a subbasin (3/4-digit format probing)
+Find the columns belonging to a subbasin (3/4/5-digit format probing)
 }
 \keyword{internal}
