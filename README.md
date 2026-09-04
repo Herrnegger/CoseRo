@@ -244,6 +244,13 @@ longterm_annual  <- output$longterm_annual     # long-term_annual_means.txt
 metrics <- extract_run_metrics(result, subbasin_id = "001", metric = "NSE")
 metrics <- calculate_run_metrics(result, subbasin_id = "001", metric = "KGE")
 
+# Low-flow weighted metric (NSE on log-transformed discharge)
+lognse <- calculate_run_metrics(result, subbasin_id = "001", metric = "logNSE")
+
+# Peak Difference: NSE over the 15 highest independent flood peaks,
+# event window auto-scaled from the run's own timestamps (hourly -> 48h)
+pd <- calculate_run_metrics(result, subbasin_id = "001", metric = "PDIFF")
+
 # Subbasin helpers
 subbasin_data <- get_subbasin_data(output$runoff, subbasin_id = "0001")
 list_subbasins(output$runoff)
@@ -273,7 +280,8 @@ result_dds <- optimize_cosero_dds(
   defaults_settings = list(SPINUP = 365, OUTPUTTYPE = 1),
   max_iter          = 2000
 )
-# Optimized file auto-saved: input/para_optimized_NB1_NSE_<timestamp>.txt
+# Optimized file auto-saved: output/para_optimized_NB1_NSE_<timestamp>.txt
+# (a matching _report.txt is saved alongside it)
 
 # SCE-UA optimization (more robust, slower)
 result_sce <- optimize_cosero_sce(
@@ -292,6 +300,18 @@ result_multi <- optimize_cosero_dds(
   target_subbasins = "001",
   metric           = c("NSE", "KGE"),
   metric_weights   = c(0.6, 0.4),
+  max_iter         = 2000
+)
+
+# Three-way multi-objective covering the whole flow range:
+# 70% NSE (overall fit) + 20% logNSE (low flows) + 10% PDIFF (flood peaks)
+result_balanced <- optimize_cosero_dds(
+  cosero_path      = "D:/COSERO_project",
+  par_bounds       = par_bounds,
+  target_subbasins = "001",
+  metric           = c("NSE", "logNSE", "PDIFF"),
+  metric_weights   = c(0.7, 0.2, 0.1),
+  metric_args      = list(n_maxima = 20, window_hours = 24),  # PDIFF options
   max_iter         = 2000
 )
 
@@ -567,6 +587,14 @@ CoseRo/
 | `write_cosero_parameters()` | Write parameter data frame to file |
 | `detect_outputtype()` | Detect OUTPUTTYPE by checking which files exist |
 
+### Run Metrics
+
+| Function | Description |
+|---|---|
+| `extract_run_metrics()` | Extract pre-calculated metrics (NSE, KGE, PDIFF, ...) from `statistics.txt` |
+| `calculate_run_metrics()` | Calculate metrics (incl. `logNSE`, `PDIFF`) from QSIM/QOBS, with spin-up exclusion |
+| `pdiff()` | Peak Difference metric: NSE over the N highest independent flood peaks |
+
 ### Configuration Management
 
 | Function | Description |
@@ -666,19 +694,19 @@ devtools::check()
 If you use CoseRo in your research, please cite:
 
 ```
-Herrnegger, M., Fiaz, A., and the COSERO Development Team (2025).
+Herrnegger, M., Fiaz, A., and the COSERO Development Team (2026).
 CoseRo: R Interface and Shiny Application for the COSERO Hydrological Model.
-R package version 0.9.7. https://github.com/Herrnegger/CoseRo
+R package version 0.9.8. https://github.com/Herrnegger/CoseRo
 ```
 
 Or in BibTeX format:
 
 ```bibtex
-@Manual{cosero2025,
+@Manual{cosero2026,
   title  = {CoseRo: R Interface and Shiny Application for the COSERO Hydrological Model},
   author = {Herrnegger, Mathew and Fiaz, Ahmed and {COSERO Development Team}},
-  year   = {2025},
-  note   = {R package version 0.9.7},
+  year   = {2026},
+  note   = {R package version 0.9.8},
   url    = {https://github.com/Herrnegger/CoseRo}
 }
 ```

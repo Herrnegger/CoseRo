@@ -4,17 +4,28 @@
 \alias{get_param_summary}
 \title{Get Parameter Value Summary Across Zones}
 \usage{
-get_param_summary(original_values, par_bounds)
+get_param_summary(original_values, par_bounds, zone_mask = NULL)
 }
 \arguments{
-\item{original_values}{Named list of parameter values (from obj_fun attribute)}
+\item{original_values}{Named list of parameter values (from obj_fun attribute).
+Each vector is in the same row order as the parameter file it was read
+from (one value per zone), with no zone identity attached.}
 
 \item{par_bounds}{Parameter bounds data frame}
+
+\item{zone_mask}{Optional logical vector, same length and row order as each
+vector in \code{original_values}, selecting which zones to summarize.
+\code{NULL} (default) summarizes all zones. Use this to report only the
+zones actually modified by \code{zones_to_modify} -- averaging in
+untouched zones alongside modified ones can shift, or even reverse, the
+apparent direction of change (e.g. an increase in the modified zone can
+look like a catchment-wide decrease once unmodified zones dilute it).}
 }
 \value{
 Data frame with parameter, mean, median, min, max columns
 }
 \description{
-Computes mean, median, min, max of parameter values across all zones.
+Computes mean, median, min, max of parameter values, optionally restricted
+to a subset of zones.
 }
 \keyword{internal}

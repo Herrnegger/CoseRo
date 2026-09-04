@@ -1219,7 +1219,12 @@ run_cosero_ensemble_parallel <- function(project_path,
 
   # Create cluster
   cl <- makeCluster(n_cores)
-  on.exit(stopCluster(cl))
+  # add = TRUE so this never silently replaces another handler registered
+  # earlier (and so later handlers can be added without clobbering it).
+  cluster_stopped <- FALSE
+  on.exit({
+    if (!cluster_stopped) tryCatch(stopCluster(cl), error = function(e) invisible(NULL))
+  }, add = TRUE)
 
   # Export necessary objects and functions to cluster
   clusterExport(cl, c("project_path", "parameter_sets", "par_bounds", "base_settings",
@@ -1396,7 +1401,11 @@ run_cosero_ensemble_parallel <- function(project_path,
   # CRITICAL MEMORY CLEANUP STEP 1: Stop cluster IMMEDIATELY to free thread memory
   if (!quiet) cat("\nCleaning up parallel threads...\n")
   stopCluster(cl)
-  on.exit()
+  # Mark the cluster stopped so the on.exit handler does not stop it twice.
+  # Do NOT call bare on.exit() here: that clears ALL handlers, including the
+  # thread-directory safety net registered above, so a failure in the memory
+  # pruning below would leak one ~100+ MB project copy per worker.
+  cluster_stopped <- TRUE
 
   # CRITICAL MEMORY CLEANUP STEP 2: Remove SOME large output data
   # KEEP runoff data (needed for NSE/KGE calculation)

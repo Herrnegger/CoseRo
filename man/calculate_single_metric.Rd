@@ -4,16 +4,28 @@
 \alias{calculate_single_metric}
 \title{Calculate Single Metric}
 \usage{
-calculate_single_metric(result, subbasin, metric, spinup_value = 0)
+calculate_single_metric(
+  result,
+  subbasin,
+  metric,
+  spinup_value = 0,
+  metric_args = list()
+)
 }
 \arguments{
 \item{result}{COSERO run result from run_cosero()}
 
 \item{subbasin}{Subbasin ID (character or numeric)}
 
-\item{metric}{Metric name ("NSE", "KGE", "lnNSE", "rNSE", "RMSE", "PBIAS", "VE")}
+\item{metric}{Metric name ("NSE", "KGE", "logNSE" (\code{"lnNSE"} accepted
+as a synonym), "rNSE", "RMSE", "PBIAS", "VE", "PDIFF", "r2", "r")}
 
 \item{spinup_value}{Number of timesteps to skip for spinup}
+
+\item{metric_args}{Named list of extra arguments passed to the metric
+function. Only used by \code{"PDIFF"}, which accepts \code{n_maxima},
+\code{window}, \code{window_hours} and \code{na_value}
+(see \code{\link{pdiff}}).}
 }
 \value{
 Numeric metric value (NA if calculation fails)

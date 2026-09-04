@@ -8,7 +8,8 @@ calculate_run_metrics(
   run_result,
   subbasin_id = "001",
   metric = "KGE",
-  spinup = NULL
+  spinup = NULL,
+  ...
 )
 }
 \arguments{
@@ -22,10 +23,14 @@ calculate_run_metrics(
 }}
 
 \item{metric}{Performance metric
-("NSE", "KGE", "RMSE", "PBIAS")}
+("NSE", "KGE", "logNSE", "RMSE", "PBIAS", "PDIFF")}
 
 \item{spinup}{Spin-up period in timesteps (optional).
 If NULL, reads from run_result$defaults_settings$SPINUP}
+
+\item{...}{Additional arguments passed to the underlying metric function.
+Only \code{"PDIFF"} uses these; it accepts \code{n_maxima}, \code{window},
+\code{window_hours} and \code{na_value} (see \code{\link{pdiff}}).}
 }
 \value{
 Single numeric value (if one subbasin) or named vector
@@ -65,11 +70,30 @@ kge <- calculate_run_metrics(result,
                              subbasin_id = "001",
                              metric = "KGE",
                              spinup = 100)
+
+# Peak-difference metric. The event window is auto-scaled from the
+# run's timestamps (hourly -> 48 steps, daily -> 2 steps).
+pd <- calculate_run_metrics(result,
+                            subbasin_id = "001",
+                            metric = "PDIFF")
+
+# Customise: 25 peaks and a 72-hour event window
+pd <- calculate_run_metrics(result,
+                            subbasin_id = "001",
+                            metric = "PDIFF",
+                            n_maxima = 25,
+                            window_hours = 72)
+
+# Low-flow oriented metric: NSE on log-transformed discharge
+lognse <- calculate_run_metrics(result,
+                                subbasin_id = "001",
+                                metric = "logNSE")
 }
 }
 \seealso{
 \code{\link{extract_run_metrics}} to extract pre-calculated
 metrics (faster),
+\code{\link{pdiff}} for the peak-difference metric and its options,
 \code{\link{extract_ensemble_metrics}} for ensemble results,
 \code{\link{calculate_ensemble_metrics}} to calculate metrics
 for ensembles

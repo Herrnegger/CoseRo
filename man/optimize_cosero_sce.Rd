@@ -14,6 +14,7 @@ optimize_cosero_sce(
   subbasin_weights = NULL,
   aggregation = "mean",
   defaults_settings = NULL,
+  metric_args = list(),
   maxn = 10000,
   kstop = 10,
   pcento = 0.01,
@@ -46,12 +47,20 @@ using the parameter file. Use this for manual control, e.g., to optimize only
 certain elevation bands or land use types.}
 
 \item{metric}{Character vector. Performance metric(s) to optimize.
-Options: \code{"NSE"} (default), \code{"KGE"}, \code{"lnNSE"}, \code{"rNSE"},
-\code{"RMSE"}, \code{"PBIAS"}, \code{"VE"}, \code{"r2"} (coefficient of
-determination, emphasises timing), \code{"r"} (Pearson correlation).
+Options: \code{"NSE"} (default), \code{"KGE"},
+\code{"logNSE"} (NSE on log-transformed discharge, emphasises low flows;
+\code{"lnNSE"} is accepted as a synonym), \code{"rNSE"},
+\code{"RMSE"}, \code{"PBIAS"}, \code{"VE"}, \code{"PDIFF"} (Nash-Sutcliffe
+efficiency of the highest independent flood peaks, see \code{\link{pdiff}}),
+\code{"r2"} (coefficient of determination, emphasises timing),
+\code{"r"} (Pearson correlation).
 Note: \code{"NSE"} and \code{"KGE"} are read from \code{statistics.txt} (fast);
 all others are calculated from the discharge time series.
-For multi-objective, provide vector: \code{c("NSE", "KGE")}.}
+For multi-objective, provide vector: \code{c("NSE", "KGE")}.
+All supported metrics have their optimum at the maximum, so
+\code{"PDIFF"} can be combined with \code{"NSE"} directly, e.g.
+\code{metric = c("NSE", "PDIFF")} with \code{metric_weights = c(0.7, 0.3)}
+to trade overall fit against peak accuracy.}
 
 \item{metric_weights}{Numeric vector or NULL. Weights for combining multiple
 metrics (must sum to 1). Required when \code{metric} has length greater than 1.
@@ -67,6 +76,18 @@ Options: \code{"mean"} (default), \code{"weighted"} (requires subbasin_weights),
 
 \item{defaults_settings}{Named list. COSERO configuration settings including
 \code{STARTDATE}, \code{ENDDATE}, \code{SPINUP}, \code{OUTPUTTYPE}, \code{PARAFILE}.}
+
+\item{metric_args}{Named list of extra arguments for the metric calculation,
+applied to every evaluation (baseline, each iteration, and the final run).
+Currently only \code{"PDIFF"} uses these; it accepts \code{n_maxima},
+\code{window}, \code{window_hours} and \code{na_value}
+(see \code{\link{pdiff}}). Example:
+\code{metric_args = list(n_maxima = 25, window_hours = 72)}.
+The list is shared across all entries of \code{metric}, but metrics that
+take no such arguments (\code{"NSE"}, \code{"logNSE"}, ...) ignore it, so
+it is safe to pass alongside a multi-objective \code{metric} vector.
+Note that \code{pdiff()} requires either a \code{window} in timesteps or
+timestamps in the runoff output; COSERO output always carries the latter.}
 
 \item{maxn}{Maximum number of function evaluations}
 
@@ -166,6 +187,27 @@ result_custom <- optimize_cosero_sce(
   ngs = 3,        # More complexes for better exploration
   verbose = TRUE
 )
+
+# Example 3: Three-way multi-objective across the whole flow range
+# 70\% NSE (overall fit) + 20\% logNSE (low flows) + 10\% PDIFF (flood peaks).
+# Weights must sum to 1; all three are maximised, so no sign handling.
+# metric_args passes PDIFF's options through to every evaluation:
+# 20 peaks and a +/-24 h event window (defaults: 15 peaks, +/-48 h).
+result_balanced <- optimize_cosero_sce(
+  cosero_path = "D:/COSERO_project",
+  par_bounds = par_bounds,
+  target_subbasins = "001",
+  metric = c("NSE", "logNSE", "PDIFF"),
+  metric_weights = c(0.7, 0.2, 0.1),
+  metric_args = list(n_maxima = 20, window_hours = 24),
+  defaults_settings = list(SPINUP = 365),
+  maxn = 5000,
+  ngs = 3
+)
+
+# Per-metric breakdown, before and after calibration
+print(result_balanced$initial_metrics)
+print(result_balanced$final_metrics)
 
 # Compare DDS vs SCE-UA
 result_dds <- optimize_cosero_dds(

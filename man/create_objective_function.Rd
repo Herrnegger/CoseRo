@@ -14,6 +14,7 @@ create_objective_function(
   subbasin_weights = NULL,
   aggregation = "mean",
   defaults_settings = NULL,
+  metric_args = list(),
   verbose = TRUE,
   use_minimal_reading = TRUE
 )
@@ -36,6 +37,9 @@ create_objective_function(
 \item{aggregation}{Aggregation: "mean", "weighted", "min", "product"}
 
 \item{defaults_settings}{COSERO settings}
+
+\item{metric_args}{Named list of extra arguments forwarded to the metric
+calculation (see \code{\link{calculate_single_metric}})}
 
 \item{verbose}{Print progress}
 

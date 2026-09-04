@@ -12,7 +12,10 @@ read_optimized_values(opt_file, par_bounds)
 \item{par_bounds}{Parameter bounds data frame}
 }
 \value{
-Named list of parameter values (same structure as original_values)
+Named list of parameter values (same structure as original_values),
+plus an \code{NZ_} element with that file's zone column -- same row
+order as every value vector -- for building a zone_mask for
+\code{\link{get_param_summary}}.
 }
 \description{
 Reads the optimized para file and extracts parameter values for summary.
