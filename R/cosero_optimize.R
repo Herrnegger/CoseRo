@@ -258,12 +258,18 @@ read_cosero_minimal <- function(output_dir, quiet = TRUE) {
 #'
 #' @param result COSERO run result from run_cosero()
 #' @param subbasin Subbasin ID (character or numeric)
-#' @param metric Metric name ("NSE", "KGE", "lnNSE", "rNSE", "RMSE", "PBIAS", "VE")
+#' @param metric Metric name ("NSE", "KGE", "logNSE" (\code{"lnNSE"} accepted
+#'   as a synonym), "rNSE", "RMSE", "PBIAS", "VE", "PDIFF", "r2", "r")
 #' @param spinup_value Number of timesteps to skip for spinup
+#' @param metric_args Named list of extra arguments passed to the metric
+#'   function. Only used by \code{"PDIFF"}, which accepts \code{n_maxima},
+#'   \code{window}, \code{window_hours} and \code{na_value}
+#'   (see \code{\link{pdiff}}).
 #'
 #' @return Numeric metric value (NA if calculation fails)
 #' @keywords internal
-calculate_single_metric <- function(result, subbasin, metric, spinup_value = 0) {
+calculate_single_metric <- function(result, subbasin, metric, spinup_value = 0,
+                                    metric_args = list()) {
   
   # Try pre-calculated statistics first
   if (metric %in% c("NSE", "KGE", "BIAS", "RMSE")) {
@@ -326,11 +332,38 @@ calculate_single_metric <- function(result, subbasin, metric, spinup_value = 0) 
     switch(metric,
       "NSE" = hydroGOF::NSE(sim, obs),
       "KGE" = hydroGOF::KGE(sim, obs),
-      "lnNSE" = hydroGOF::NSE(log(sim + 0.01), log(obs + 0.01)),
+      # logNSE / lnNSE are the same metric: NSE on log-transformed discharge,
+      # which de-emphasises floods and weights low flows. The epsilon offset
+      # keeps zero-flow timesteps finite (see log_offset()).
+      "logNSE" = ,
+      "lnNSE" = {
+        eps <- log_offset(obs)
+        hydroGOF::NSE(log(sim + eps), log(obs + eps))
+      },
       "rNSE" = hydroGOF::NSE(sqrt(sim), sqrt(obs)),
       "RMSE" = -hydroGOF::rmse(sim, obs),
       "PBIAS" = 1 - abs(hydroGOF::pbias(sim, obs)) / 100,
       "VE" = 1 - abs(sum(sim) - sum(obs)) / sum(obs),
+      # PDIFF needs the UNFILTERED series: dropping invalid pairs would
+      # compress the time axis and corrupt the event window widths. pdiff()
+      # does its own sentinel/NA handling internally.
+      "PDIFF" = {
+        raw_sim <- runoff[[qsim_col]]
+        raw_obs <- runoff[[qobs_col]]
+        raw_time <- if ("DateTime" %in% colnames(runoff)) runoff$DateTime else NULL
+
+        if (spinup_value > 0 && length(raw_sim) > spinup_value) {
+          keep <- (spinup_value + 1):length(raw_sim)
+          raw_sim <- raw_sim[keep]
+          raw_obs <- raw_obs[keep]
+          if (!is.null(raw_time)) raw_time <- raw_time[keep]
+        }
+
+        do.call(pdiff, c(
+          list(sim = raw_sim, obs = raw_obs, time = raw_time),
+          metric_args
+        ))
+      },
       "r2" = cor(sim, obs)^2,
       "r"  = cor(sim, obs),
       stop("Unknown metric: ", metric, call. = FALSE)
@@ -356,6 +389,8 @@ calculate_single_metric <- function(result, subbasin, metric, spinup_value = 0) 
 #' @param subbasin_weights Weights for subbasins (sum to 1)
 #' @param aggregation Aggregation: "mean", "weighted", "min", "product"
 #' @param defaults_settings COSERO settings
+#' @param metric_args Named list of extra arguments forwarded to the metric
+#'   calculation (see \code{\link{calculate_single_metric}})
 #' @param verbose Print progress
 #' @param use_minimal_reading Fast reading (statistics + runoff only)
 #'
@@ -372,6 +407,7 @@ create_objective_function <- function(cosero_path,
                                       subbasin_weights = NULL,
                                       aggregation = "mean",
                                       defaults_settings = NULL,
+                                      metric_args = list(),
                                       verbose = TRUE,
                                       use_minimal_reading = TRUE) {
 
@@ -386,6 +422,7 @@ create_objective_function <- function(cosero_path,
   force(subbasin_weights)
   force(aggregation)
   force(defaults_settings)
+  force(metric_args)
   force(verbose)
   force(use_minimal_reading)
 
@@ -438,16 +475,44 @@ create_objective_function <- function(cosero_path,
     }
   }
   
+  # An interrupted earlier run can leave the working-copy name in defaults.txt.
+  # Recover the real parameter file before anything else: otherwise the working
+  # copy would be built from a leftover temporary, and (once the suffix is
+  # stripped) source and destination could even be the same file.
+  if (grepl("_opt_work", par_filename, fixed = TRUE)) {
+    recovered <- paste0(sub("(_opt_work)+$", "",
+                            tools::file_path_sans_ext(par_filename)),
+                        ".", tools::file_ext(par_filename))
+    if (file.exists(file.path(cosero_path, "input", recovered))) {
+      par_filename <- recovered
+    }
+  }
+
   par_file <- file.path(cosero_path, "input", par_filename)
   if (!file.exists(par_file)) stop("Parameter file not found: ", par_file, call. = FALSE)
 
   # Use a working copy for all modifications — original file is never touched.
   # COSERO reads the working copy via defaults_settings$PARAFILE override.
-  work_filename <- paste0(tools::file_path_sans_ext(par_filename), "_opt_work.",
-                          tools::file_ext(par_filename))
+  #
+  # Guard against compounding the suffix: if a previous run was interrupted it
+  # may have left "<name>_opt_work" in defaults.txt, and suffixing that again
+  # yields "<name>_opt_work_opt_work", which points at a file COSERO cannot
+  # find on the NEXT run.
+  par_stem <- tools::file_path_sans_ext(par_filename)
+  par_stem <- sub("(_opt_work)+$", "", par_stem)
+  work_filename <- paste0(par_stem, "_opt_work.", tools::file_ext(par_filename))
   work_file <- file.path(cosero_path, "input", work_filename)
+  if (normalizePath(par_file, winslash = "/", mustWork = FALSE) ==
+      normalizePath(work_file, winslash = "/", mustWork = FALSE)) {
+    stop("Refusing to overwrite the parameter file with its own working copy: ",
+         par_filename, ". Set PARAFILE in defaults.txt to the real parameter ",
+         "file (not a '_opt_work' temporary).", call. = FALSE)
+  }
   file.copy(par_file, work_file, overwrite = TRUE)
-  on.exit(unlink(work_file), add = TRUE)
+  # NOTE: deliberately no on.exit(unlink(work_file)) here — this function only
+  # BUILDS the closure, so an on.exit would delete the working copy before a
+  # single objective evaluation had run. Cleanup is the caller's job (see the
+  # on.exit in optimize_cosero_dds/_sce, which also restores defaults.txt).
 
   # Tell COSERO to use the working copy; redirect par_file so closure writes to it
   defaults_settings$PARAFILE <- work_filename
@@ -556,7 +621,7 @@ create_objective_function <- function(cosero_path,
     for (i in seq_along(target_subbasins)) {
       for (j in seq_along(metric)) {
         metric_matrix[i, j] <- calculate_single_metric(
-          result, target_subbasins[i], metric[j], spinup_value
+          result, target_subbasins[i], metric[j], spinup_value, metric_args = metric_args
         )
       }
     }
@@ -612,6 +677,10 @@ create_objective_function <- function(cosero_path,
   attr(obj_fun, "original_values") <- original_values
   attr(obj_fun, "param_structure") <- param_structure
   attr(obj_fun, "defaults_settings") <- defaults_settings  # PARAFILE = work_filename
+  # For caller-side cleanup: the working copy to delete, and the PARAFILE value
+  # that must be written back into defaults.txt once optimization finishes.
+  attr(obj_fun, "work_file") <- work_file
+  attr(obj_fun, "original_parafile") <- par_filename
 
   return(obj_fun)
 }
@@ -809,12 +878,15 @@ save_optimized_params <- function(cosero_path, par_bounds, target_subbasins,
 #' @param target_subbasins Subbasin IDs
 #' @param metric Metric(s) to extract
 #' @param defaults_settings COSERO settings
+#' @param metric_args Named list of extra arguments forwarded to the metric
+#'   calculation (see \code{\link{calculate_single_metric}})
 #' @param verbose Print progress
 #'
 #' @return List with initial_run result and initial_metrics matrix
 #' @keywords internal
 run_initial_baseline <- function(cosero_path, target_subbasins, metric,
-                                 defaults_settings, verbose = TRUE) {
+                                 defaults_settings, metric_args = list(),
+                                 verbose = TRUE) {
 
   if (verbose) cat("Running initial baseline model...\n")
 
@@ -855,7 +927,7 @@ run_initial_baseline <- function(cosero_path, target_subbasins, metric,
   for (i in seq_along(target_subbasins)) {
     for (j in seq_along(metric)) {
       initial_metrics[i, j] <- calculate_single_metric(
-        initial_run, target_subbasins[i], metric[j], spinup_value
+        initial_run, target_subbasins[i], metric[j], spinup_value, metric_args = metric_args
       )
     }
   }
@@ -947,16 +1019,29 @@ resolve_ungauged_subbasins <- function(initial_metrics, target_subbasins,
 
 #' Get Parameter Value Summary Across Zones
 #'
-#' Computes mean, median, min, max of parameter values across all zones.
+#' Computes mean, median, min, max of parameter values, optionally restricted
+#' to a subset of zones.
 #'
-#' @param original_values Named list of parameter values (from obj_fun attribute)
+#' @param original_values Named list of parameter values (from obj_fun attribute).
+#'   Each vector is in the same row order as the parameter file it was read
+#'   from (one value per zone), with no zone identity attached.
 #' @param par_bounds Parameter bounds data frame
+#' @param zone_mask Optional logical vector, same length and row order as each
+#'   vector in \code{original_values}, selecting which zones to summarize.
+#'   \code{NULL} (default) summarizes all zones. Use this to report only the
+#'   zones actually modified by \code{zones_to_modify} -- averaging in
+#'   untouched zones alongside modified ones can shift, or even reverse, the
+#'   apparent direction of change (e.g. an increase in the modified zone can
+#'   look like a catchment-wide decrease once unmodified zones dilute it).
 #'
 #' @return Data frame with parameter, mean, median, min, max columns
 #' @keywords internal
-get_param_summary <- function(original_values, par_bounds) {
+get_param_summary <- function(original_values, par_bounds, zone_mask = NULL) {
   summary_rows <- lapply(par_bounds$parameter, function(pname) {
     vals <- original_values[[pname]]
+    if (!is.null(zone_mask) && !is.null(vals) && length(vals) == length(zone_mask)) {
+      vals <- vals[zone_mask]
+    }
     if (is.null(vals) || length(vals) == 0) {
       data.frame(parameter = pname, mean = NA, median = NA,
                  min = NA, max = NA, stringsAsFactors = FALSE)
@@ -980,7 +1065,10 @@ get_param_summary <- function(original_values, par_bounds) {
 #' @param opt_file Path to optimized parameter file
 #' @param par_bounds Parameter bounds data frame
 #'
-#' @return Named list of parameter values (same structure as original_values)
+#' @return Named list of parameter values (same structure as original_values),
+#'   plus an \code{NZ_} element with that file's zone column -- same row
+#'   order as every value vector -- for building a zone_mask for
+#'   \code{\link{get_param_summary}}.
 #' @keywords internal
 read_optimized_values <- function(opt_file, par_bounds) {
   param_data <- read.table(
@@ -988,7 +1076,7 @@ read_optimized_values <- function(opt_file, par_bounds) {
     stringsAsFactors = FALSE, check.names = FALSE, comment.char = ""
   )
 
-  opt_values <- list()
+  opt_values <- list(NZ_ = param_data$NZ_)
   for (param_name in par_bounds$parameter) {
     param_cols <- find_parameter_column(param_name, colnames(param_data),
                                         return_all = TRUE)
@@ -1162,7 +1250,11 @@ print_optimization_report <- function(algorithm, par_filename,
   if (!is.null(initial_param_summary) && !is.null(final_param_summary)) {
     cat("\n")
     cat(strrep("\u2500", line_w), "\n")
-    cat("  Parameter Changes (spatial mean across zones)\n")
+    zone_note <- if (!is.null(zones_to_modify)) {
+      sprintf(" (zone%s %s)", if (length(zones_to_modify) == 1) "" else "s",
+              paste(zones_to_modify, collapse = ", "))
+    } else ""
+    cat("  Parameter Changes -- spatial mean of MODIFIED zones only", zone_note, "\n", sep = "")
     cat(strrep("\u2500", line_w), "\n")
 
     fmt_pval <- function(v) {
@@ -1225,12 +1317,20 @@ print_optimization_report <- function(algorithm, par_filename,
 #'   certain elevation bands or land use types.
 #'
 #' @param metric Character vector. Performance metric(s) to optimize.
-#'   Options: \code{"NSE"} (default), \code{"KGE"}, \code{"lnNSE"}, \code{"rNSE"},
-#'   \code{"RMSE"}, \code{"PBIAS"}, \code{"VE"}, \code{"r2"} (coefficient of
-#'   determination, emphasises timing), \code{"r"} (Pearson correlation).
+#'   Options: \code{"NSE"} (default), \code{"KGE"},
+#'   \code{"logNSE"} (NSE on log-transformed discharge, emphasises low flows;
+#'   \code{"lnNSE"} is accepted as a synonym), \code{"rNSE"},
+#'   \code{"RMSE"}, \code{"PBIAS"}, \code{"VE"}, \code{"PDIFF"} (Nash-Sutcliffe
+#'   efficiency of the highest independent flood peaks, see \code{\link{pdiff}}),
+#'   \code{"r2"} (coefficient of determination, emphasises timing),
+#'   \code{"r"} (Pearson correlation).
 #'   Note: \code{"NSE"} and \code{"KGE"} are read from \code{statistics.txt} (fast);
 #'   all others are calculated from the discharge time series.
 #'   For multi-objective, provide vector: \code{c("NSE", "KGE")}.
+#'   All supported metrics have their optimum at the maximum, so
+#'   \code{"PDIFF"} can be combined with \code{"NSE"} directly, e.g.
+#'   \code{metric = c("NSE", "PDIFF")} with \code{metric_weights = c(0.7, 0.3)}
+#'   to trade overall fit against peak accuracy.
 #'
 #' @param metric_weights Numeric vector or NULL. Weights for combining multiple
 #'   metrics (must sum to 1). Required when \code{metric} has length greater than 1.
@@ -1246,6 +1346,18 @@ print_optimization_report <- function(algorithm, par_filename,
 #'
 #' @param defaults_settings Named list. COSERO configuration settings including
 #'   \code{STARTDATE}, \code{ENDDATE}, \code{SPINUP}, \code{OUTPUTTYPE}, \code{PARAFILE}.
+#'
+#' @param metric_args Named list of extra arguments for the metric calculation,
+#'   applied to every evaluation (baseline, each iteration, and the final run).
+#'   Currently only \code{"PDIFF"} uses these; it accepts \code{n_maxima},
+#'   \code{window}, \code{window_hours} and \code{na_value}
+#'   (see \code{\link{pdiff}}). Example:
+#'   \code{metric_args = list(n_maxima = 25, window_hours = 72)}.
+#'   The list is shared across all entries of \code{metric}, but metrics that
+#'   take no such arguments (\code{"NSE"}, \code{"logNSE"}, ...) ignore it, so
+#'   it is safe to pass alongside a multi-objective \code{metric} vector.
+#'   Note that \code{pdiff()} requires either a \code{window} in timesteps or
+#'   timestamps in the runoff output; COSERO output always carries the latter.
 #'
 #' @param max_iter Integer. Maximum number of DDS iterations.
 #'   Recommended: 50-100 (quick test), 500-1000 (standard), 2000-5000 (production).
@@ -1357,7 +1469,45 @@ print_optimization_report <- function(algorithm, par_filename,
 #'   max_iter = 2000
 #' )
 #'
-#' # Example 3: Multiple subbasins with weighted aggregation
+#' # Example 3: Three-way multi-objective balancing the whole flow range
+#' # 70% NSE      - overall fit, dominated by medium and high flows
+#' # 20% logNSE   - low flows / recession behaviour
+#' # 10% PDIFF    - flood peak magnitudes
+#' # Weights must sum to 1. All three metrics have their optimum at the
+#' # maximum, so they combine directly with no sign handling.
+#' result_balanced <- optimize_cosero_dds(
+#'   cosero_path = "D:/COSERO_project",
+#'   par_bounds = par_bounds,
+#'   target_subbasins = "001",
+#'   metric = c("NSE", "logNSE", "PDIFF"),
+#'   metric_weights = c(0.7, 0.2, 0.1),
+#'   # PDIFF options, applied to every evaluation (baseline, each
+#'   # iteration, and the final run). Here: 20 peaks and a +/-24 h event
+#'   # window instead of the defaults of 15 peaks and +/-48 h.
+#'   metric_args = list(n_maxima = 20, window_hours = 24),
+#'   defaults_settings = list(SPINUP = 365),
+#'   max_iter = 2000
+#' )
+#'
+#' # The window can equally be given directly in timesteps, bypassing the
+#' # automatic conversion from hours (48 steps = the COSERO Fortran default,
+#' # which equals 48 h only on hourly input):
+#' result_fixed_window <- optimize_cosero_dds(
+#'   cosero_path = "D:/COSERO_project",
+#'   par_bounds = par_bounds,
+#'   target_subbasins = "001",
+#'   metric = c("NSE", "logNSE", "PDIFF"),
+#'   metric_weights = c(0.7, 0.2, 0.1),
+#'   metric_args = list(n_maxima = 20, window = 48),
+#'   defaults_settings = list(SPINUP = 365),
+#'   max_iter = 2000
+#' )
+#'
+#' # Inspect how each component metric ended up, not just the combined score
+#' print(result_balanced$initial_metrics)   # baseline, per subbasin x metric
+#' print(result_balanced$final_metrics)     # after calibration
+#'
+#' # Example 4: Multiple subbasins with weighted aggregation
 #' result_multi_basin <- optimize_cosero_dds(
 #'   cosero_path = "D:/COSERO_project",
 #'   par_bounds = par_bounds,
@@ -1368,7 +1518,7 @@ print_optimization_report <- function(algorithm, par_filename,
 #'   max_iter = 1500
 #' )
 #'
-#' # Example 4: Optimize only specific zones
+#' # Example 5: Optimize only specific zones
 #' result_zones <- optimize_cosero_dds(
 #'   cosero_path = "D:/COSERO_project",
 #'   par_bounds = par_bounds,
@@ -1378,7 +1528,7 @@ print_optimization_report <- function(algorithm, par_filename,
 #'   max_iter = 1000
 #' )
 #'
-#' # Example 5: Complete workflow with export
+#' # Example 6: Complete workflow with export
 #' # Define parameters
 #' par_bounds <- create_optimization_bounds(
 #'   parameters = c("BETA", "CTMAX", "LP", "FC"),
@@ -1417,6 +1567,7 @@ optimize_cosero_dds <- function(cosero_path,
                                 subbasin_weights = NULL,
                                 aggregation = "mean",
                                 defaults_settings = NULL,
+                                metric_args = list(),
                                 max_iter = 1000,
                                 r = 0.2,
                                 verbose = TRUE,
@@ -1450,6 +1601,19 @@ optimize_cosero_dds <- function(cosero_path,
       if (!is.null(defaults$PARAFILE)) par_filename <- defaults$PARAFILE
     }
   }
+  # An interrupted earlier run may have left the working-copy name behind in
+  # defaults.txt; report (and operate on) the user's real parameter file.
+  if (grepl("_opt_work", par_filename, fixed = TRUE)) {
+    recovered <- paste0(sub("(_opt_work)+$", "",
+                            tools::file_path_sans_ext(par_filename)),
+                        ".", tools::file_ext(par_filename))
+    if (file.exists(file.path(cosero_path, "input", recovered))) {
+      warning("defaults.txt PARAFILE pointed at the optimization working copy ",
+              "'", par_filename, "' (left by an interrupted run); using '",
+              recovered, "' instead.", call. = FALSE)
+      par_filename <- recovered
+    }
+  }
 
   if (verbose) {
     cat("DDS Optimization:\n")
@@ -1470,7 +1634,8 @@ optimize_cosero_dds <- function(cosero_path,
 
   # Initial baseline run
   baseline <- run_initial_baseline(
-    cosero_path, target_subbasins, metric, defaults_settings, verbose
+    cosero_path, target_subbasins, metric, defaults_settings,
+    metric_args = metric_args, verbose = verbose
   )
   initial_metrics <- baseline$initial_metrics
 
@@ -1484,12 +1649,33 @@ optimize_cosero_dds <- function(cosero_path,
   obj_fun <- create_objective_function(
     cosero_path, par_bounds, target_subbasins, zones_to_modify,
     metric, metric_weights, subbasin_weights, aggregation,
-    defaults_settings, verbose, use_minimal_reading
+    defaults_settings, metric_args = metric_args, verbose = verbose,
+    use_minimal_reading = use_minimal_reading
   )
 
-  # Initial parameter summary
+  # Remove the working parameter copy and put defaults.txt back to the user's
+  # own PARAFILE. run_cosero() writes PARAFILE into defaults.txt on every call,
+  # so without this the project is left pointing at "<name>_opt_work.txt" — a
+  # file this function deletes — breaking the next plain run_cosero(). Fires on
+  # normal exit, error, and user interrupt.
+  on.exit({
+    wf <- attr(obj_fun, "work_file")
+    if (!is.null(wf) && file.exists(wf)) unlink(wf)
+    orig_pf <- attr(obj_fun, "original_parafile")
+    df <- file.path(cosero_path, "input", "defaults.txt")
+    if (!is.null(orig_pf) && file.exists(df)) {
+      try(modify_defaults(df, list(PARAFILE = orig_pf), quiet = TRUE),
+          silent = TRUE)
+    }
+  }, add = TRUE)
+
+  # Initial parameter summary -- restricted to the zones actually modified.
+  # Averaging in untouched zones can shift or even reverse the apparent
+  # direction of a parameter's change (see get_param_summary()).
+  report_zone_mask <- attr(obj_fun, "param_structure")$param_data_original$NZ_ %in%
+    zones_to_modify
   initial_param_summary <- get_param_summary(
-    attr(obj_fun, "original_values"), par_bounds
+    attr(obj_fun, "original_values"), par_bounds, zone_mask = report_zone_mask
   )
 
   lower <- par_bounds$min
@@ -1539,7 +1725,7 @@ optimize_cosero_dds <- function(cosero_path,
     for (i in seq_along(target_subbasins)) {
       for (j in seq_along(metric)) {
         final_metrics[i, j] <- calculate_single_metric(
-          final_run_data, target_subbasins[i], metric[j], spinup_value
+          final_run_data, target_subbasins[i], metric[j], spinup_value, metric_args = metric_args
         )
       }
     }
@@ -1547,7 +1733,9 @@ optimize_cosero_dds <- function(cosero_path,
 
   if (file.exists(opt_file)) {
     opt_values <- read_optimized_values(opt_file, par_bounds)
-    final_param_summary <- get_param_summary(opt_values, par_bounds)
+    final_param_summary <- get_param_summary(
+      opt_values, par_bounds, zone_mask = opt_values$NZ_ %in% zones_to_modify
+    )
   }
 
   # Extract full statistics for report
@@ -1706,6 +1894,27 @@ optimize_cosero_dds <- function(cosero_path,
 #'   verbose = TRUE
 #' )
 #'
+#' # Example 3: Three-way multi-objective across the whole flow range
+#' # 70% NSE (overall fit) + 20% logNSE (low flows) + 10% PDIFF (flood peaks).
+#' # Weights must sum to 1; all three are maximised, so no sign handling.
+#' # metric_args passes PDIFF's options through to every evaluation:
+#' # 20 peaks and a +/-24 h event window (defaults: 15 peaks, +/-48 h).
+#' result_balanced <- optimize_cosero_sce(
+#'   cosero_path = "D:/COSERO_project",
+#'   par_bounds = par_bounds,
+#'   target_subbasins = "001",
+#'   metric = c("NSE", "logNSE", "PDIFF"),
+#'   metric_weights = c(0.7, 0.2, 0.1),
+#'   metric_args = list(n_maxima = 20, window_hours = 24),
+#'   defaults_settings = list(SPINUP = 365),
+#'   maxn = 5000,
+#'   ngs = 3
+#' )
+#'
+#' # Per-metric breakdown, before and after calibration
+#' print(result_balanced$initial_metrics)
+#' print(result_balanced$final_metrics)
+#'
 #' # Compare DDS vs SCE-UA
 #' result_dds <- optimize_cosero_dds(
 #'   cosero_path = "D:/COSERO_project",
@@ -1735,6 +1944,7 @@ optimize_cosero_sce <- function(cosero_path,
                                 subbasin_weights = NULL,
                                 aggregation = "mean",
                                 defaults_settings = NULL,
+                                metric_args = list(),
                                 maxn = 10000,
                                 kstop = 10,
                                 pcento = 0.01,
@@ -1773,6 +1983,19 @@ optimize_cosero_sce <- function(cosero_path,
       if (!is.null(defaults$PARAFILE)) par_filename <- defaults$PARAFILE
     }
   }
+  # An interrupted earlier run may have left the working-copy name behind in
+  # defaults.txt; report (and operate on) the user's real parameter file.
+  if (grepl("_opt_work", par_filename, fixed = TRUE)) {
+    recovered <- paste0(sub("(_opt_work)+$", "",
+                            tools::file_path_sans_ext(par_filename)),
+                        ".", tools::file_ext(par_filename))
+    if (file.exists(file.path(cosero_path, "input", recovered))) {
+      warning("defaults.txt PARAFILE pointed at the optimization working copy ",
+              "'", par_filename, "' (left by an interrupted run); using '",
+              recovered, "' instead.", call. = FALSE)
+      par_filename <- recovered
+    }
+  }
 
   if (verbose) {
     cat("SCE-UA Optimization:\n")
@@ -1788,7 +2011,8 @@ optimize_cosero_sce <- function(cosero_path,
 
   # Initial baseline run
   baseline <- run_initial_baseline(
-    cosero_path, target_subbasins, metric, defaults_settings, verbose
+    cosero_path, target_subbasins, metric, defaults_settings,
+    metric_args = metric_args, verbose = verbose
   )
   initial_metrics <- baseline$initial_metrics
 
@@ -1802,12 +2026,33 @@ optimize_cosero_sce <- function(cosero_path,
   obj_fun <- create_objective_function(
     cosero_path, par_bounds, target_subbasins, zones_to_modify,
     metric, metric_weights, subbasin_weights, aggregation,
-    defaults_settings, verbose, use_minimal_reading
+    defaults_settings, metric_args = metric_args, verbose = verbose,
+    use_minimal_reading = use_minimal_reading
   )
 
-  # Initial parameter summary
+  # Remove the working parameter copy and put defaults.txt back to the user's
+  # own PARAFILE. run_cosero() writes PARAFILE into defaults.txt on every call,
+  # so without this the project is left pointing at "<name>_opt_work.txt" — a
+  # file this function deletes — breaking the next plain run_cosero(). Fires on
+  # normal exit, error, and user interrupt.
+  on.exit({
+    wf <- attr(obj_fun, "work_file")
+    if (!is.null(wf) && file.exists(wf)) unlink(wf)
+    orig_pf <- attr(obj_fun, "original_parafile")
+    df <- file.path(cosero_path, "input", "defaults.txt")
+    if (!is.null(orig_pf) && file.exists(df)) {
+      try(modify_defaults(df, list(PARAFILE = orig_pf), quiet = TRUE),
+          silent = TRUE)
+    }
+  }, add = TRUE)
+
+  # Initial parameter summary -- restricted to the zones actually modified.
+  # Averaging in untouched zones can shift or even reverse the apparent
+  # direction of a parameter's change (see get_param_summary()).
+  report_zone_mask <- attr(obj_fun, "param_structure")$param_data_original$NZ_ %in%
+    zones_to_modify
   initial_param_summary <- get_param_summary(
-    attr(obj_fun, "original_values"), par_bounds
+    attr(obj_fun, "original_values"), par_bounds, zone_mask = report_zone_mask
   )
 
   lower <- par_bounds$min
@@ -1882,7 +2127,7 @@ optimize_cosero_sce <- function(cosero_path,
     for (i in seq_along(target_subbasins)) {
       for (j in seq_along(metric)) {
         final_metrics[i, j] <- calculate_single_metric(
-          final_run_data, target_subbasins[i], metric[j], spinup_value
+          final_run_data, target_subbasins[i], metric[j], spinup_value, metric_args = metric_args
         )
       }
     }
@@ -1890,7 +2135,9 @@ optimize_cosero_sce <- function(cosero_path,
 
   if (file.exists(opt_file)) {
     opt_values <- read_optimized_values(opt_file, par_bounds)
-    final_param_summary <- get_param_summary(opt_values, par_bounds)
+    final_param_summary <- get_param_summary(
+      opt_values, par_bounds, zone_mask = opt_values$NZ_ %in% zones_to_modify
+    )
   }
 
   # Extract full statistics for report

@@ -134,9 +134,12 @@ extract_run_metrics <- function(run_result,
 #'   - Multiple IDs: c("001", "002") (returns named vector)
 #'   - "all": Calculate for all subbasins (returns named vector)
 #' @param metric Performance metric
-#'   ("NSE", "KGE", "RMSE", "PBIAS")
+#'   ("NSE", "KGE", "logNSE", "RMSE", "PBIAS", "PDIFF")
 #' @param spinup Spin-up period in timesteps (optional).
 #'   If NULL, reads from run_result$defaults_settings$SPINUP
+#' @param ... Additional arguments passed to the underlying metric function.
+#'   Only \code{"PDIFF"} uses these; it accepts \code{n_maxima}, \code{window},
+#'   \code{window_hours} and \code{na_value} (see \code{\link{pdiff}}).
 #'
 #' @return Single numeric value (if one subbasin) or named vector
 #'   (if multiple/all)
@@ -144,6 +147,7 @@ extract_run_metrics <- function(run_result,
 #' @seealso
 #' \code{\link{extract_run_metrics}} to extract pre-calculated
 #'   metrics (faster),
+#' \code{\link{pdiff}} for the peak-difference metric and its options,
 #' \code{\link{extract_ensemble_metrics}} for ensemble results,
 #' \code{\link{calculate_ensemble_metrics}} to calculate metrics
 #'   for ensembles
@@ -173,11 +177,29 @@ extract_run_metrics <- function(run_result,
 #'                              subbasin_id = "001",
 #'                              metric = "KGE",
 #'                              spinup = 100)
+#'
+#' # Peak-difference metric. The event window is auto-scaled from the
+#' # run's timestamps (hourly -> 48 steps, daily -> 2 steps).
+#' pd <- calculate_run_metrics(result,
+#'                             subbasin_id = "001",
+#'                             metric = "PDIFF")
+#'
+#' # Customise: 25 peaks and a 72-hour event window
+#' pd <- calculate_run_metrics(result,
+#'                             subbasin_id = "001",
+#'                             metric = "PDIFF",
+#'                             n_maxima = 25,
+#'                             window_hours = 72)
+#'
+#' # Low-flow oriented metric: NSE on log-transformed discharge
+#' lognse <- calculate_run_metrics(result,
+#'                                 subbasin_id = "001",
+#'                                 metric = "logNSE")
 #' }
 calculate_run_metrics <- function(run_result,
                                   subbasin_id = "001",
                                   metric = "KGE",
-                                  spinup = NULL) {
+                                  spinup = NULL, ...) {
 
   # Check if run was successful
   if (!run_result$success) {
@@ -262,9 +284,35 @@ calculate_run_metrics <- function(run_result,
         hydroGOF::rmse(simulated, observed)
       } else if (metric == "PBIAS") {
         hydroGOF::pbias(simulated, observed)
+      } else if (metric %in% c("logNSE", "lnNSE")) {
+        # read_cosero_runoff() already maps negatives (incl. the -999
+        # sentinel) to NA, so only complete pairs need selecting here.
+        # Unlike PDIFF this metric is timestep-independent, so compressing
+        # the series is harmless.
+        keep <- !is.na(simulated) & !is.na(observed)
+        s <- simulated[keep]
+        o <- observed[keep]
+        if (length(o) < 10) {
+          NA
+        } else {
+          eps <- log_offset(o)
+          hydroGOF::NSE(log(s + eps), log(o + eps))
+        }
+      } else if (metric == "PDIFF") {
+        # pdiff() needs a continuous time axis: the series must NOT be
+        # compressed by dropping invalid pairs, or event window widths would
+        # be wrong. Sentinels/NAs are handled inside pdiff().
+        time_vec <- NULL
+        if ("DateTime" %in% colnames(runoff)) {
+          time_vec <- runoff$DateTime
+          if (spinup_duration > 0 && length(time_vec) > spinup_duration) {
+            time_vec <- time_vec[(spinup_duration + 1):length(time_vec)]
+          }
+        }
+        pdiff(simulated, observed, time = time_vec, ...)
       } else {
         stop("Unknown metric: ", metric,
-             ". Supported: KGE, NSE, RMSE, PBIAS",
+             ". Supported: KGE, NSE, logNSE, RMSE, PBIAS, PDIFF",
              call. = FALSE)
       }
     }, error = function(e) {
@@ -300,4 +348,38 @@ calculate_run_metrics <- function(run_result,
 
   # Single subbasin case
   calc_single_subbasin(subbasin_id)
+}
+
+# ============================================================================
+# Log-transform Offset Helper
+# ============================================================================
+
+#' Offset for Log-Transformed Discharge Metrics
+#'
+#' Returns the epsilon added to discharge before log-transforming for
+#' \code{logNSE}. Zero-flow timesteps are common in small or intermittent
+#' catchments and would give \code{log(0) = -Inf}, so a small positive offset
+#' is required.
+#'
+#' A fixed offset cannot serve all catchments: \code{0.01} is negligible for a
+#' large river with mean flow of 100 m3/s, but dominates a headwater with mean
+#' flow of 0.05 m3/s, distorting the metric. The offset therefore scales with
+#' the observed mean, following the common recommendation of one hundredth of
+#' mean observed discharge (Pushpalatha et al., 2012).
+#'
+#' @param obs Numeric vector of observed discharge (invalid values already
+#'   removed).
+#'
+#' @return Positive numeric scalar offset.
+#'
+#' @references
+#' Pushpalatha, R., Perrin, C., Le Moine, N., Andreassian, V. (2012).
+#' A review of efficiency criteria suitable for evaluating low-flow simulations.
+#' Journal of Hydrology 420-421, 171-182. doi:10.1016/j.jhydrol.2011.11.055
+#'
+#' @keywords internal
+log_offset <- function(obs) {
+  m <- mean(obs, na.rm = TRUE)
+  if (!is.finite(m) || m <= 0) return(0.01)
+  max(m / 100, .Machine$double.eps)
 }

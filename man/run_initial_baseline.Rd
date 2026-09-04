@@ -9,6 +9,7 @@ run_initial_baseline(
   target_subbasins,
   metric,
   defaults_settings,
+  metric_args = list(),
   verbose = TRUE
 )
 }
@@ -20,6 +21,9 @@ run_initial_baseline(
 \item{metric}{Metric(s) to extract}
 
 \item{defaults_settings}{COSERO settings}
+
+\item{metric_args}{Named list of extra arguments forwarded to the metric
+calculation (see \code{\link{calculate_single_metric}})}
 
 \item{verbose}{Print progress}
 }

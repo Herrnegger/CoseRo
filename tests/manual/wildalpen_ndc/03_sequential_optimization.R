@@ -79,9 +79,6 @@ param_names <- c(
 # SETUP HELPERS
 # =============================================================================
 
-results_dir <- file.path(project_path, "optimisation_results")
-dir.create(results_dir, showWarnings = FALSE, recursive = TRUE)
-
 # Named list to collect results from each step
 opt_steps <- list()
 
@@ -98,7 +95,10 @@ section <- function(title) {
 
 section("Verifying aggregated example project")
 
-if (!dir.exists(project_path)) {
+# Check for the exe specifically, not dir.exists(project_path) -- the
+# results_dir dir.create() below (recursive = TRUE) would otherwise create
+# project_path as a side effect and silently skip setup on a fresh path.
+if (!file.exists(file.path(project_path, "COSERO.exe"))) {
   setup_cosero_project_example_aggregated(project_path)
   cat("Project created at:", project_path, "\n")
 } else {
@@ -110,6 +110,9 @@ stopifnot(
   file.exists(file.path(project_path, "COSERO.exe")),
   file.exists(file.path(project_path, "input", "para_ini_agg.txt"))
 )
+
+results_dir <- file.path(project_path, "optimisation_results")
+dir.create(results_dir, showWarnings = FALSE, recursive = TRUE)
 
 par_file_initial <- file.path(project_path, "input", "para_ini_agg.txt")
 cat("Initial parameter file:", par_file_initial, "\n\n")
