@@ -66,3 +66,4 @@ URL: https://github.com/Herrnegger/CoseRo
 BugReports: https://github.com/Herrnegger/CoseRo/issues
 SystemRequirements: COSERO.exe (Windows executable for hydrological modeling)
 Config/roxygen2/version: 8.1.0
+RoxygenNote: 7.3.3

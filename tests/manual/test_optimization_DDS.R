@@ -12,7 +12,7 @@ library(ggplot2)
 # SETUP PROJECT
 # =============================================================================
 
-project_path <- "D:/temp/COSERO_Optim_DDS"
+project_path <- "D:\\KLIRES\\working files\\Model_subset_26"
 
 # Create fresh project from example
 if (dir.exists(project_path)) {
@@ -40,10 +40,10 @@ param_names <- c("M", "KBF", "TAB1", "H1", "TVS1", "TAB2", "H2", "TVS2", "TAB3")
 
 # Optimization settings
 max_iterations <- 50  # Increase to 500-2000 for production
-target_subbasin <- c("001","002","003")
+target_subbasin <- c("001")
 
 # Simulation period
-start_date <- "2014 1 1 0 0"
+start_date <- "2003 1 1 0 0"
 end_date <- "2017 12 31 0 0"
 spinup <- 365
 
