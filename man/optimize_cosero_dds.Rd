@@ -15,6 +15,7 @@ optimize_cosero_dds(
   aggregation = "mean",
   defaults_settings = NULL,
   metric_args = list(),
+  penalty = NULL,
   max_iter = 1000,
   r = 0.2,
   verbose = TRUE,
@@ -87,6 +88,17 @@ it is safe to pass alongside a multi-objective \code{metric} vector.
 Note that \code{pdiff()} requires either a \code{window} in timesteps or
 timestamps in the runoff output; COSERO output always carries the latter.}
 
+\item{penalty}{Penalty added to the objective, or NULL (default, none).
+Currently \code{"PenSWE"} (see \code{\link{penswe}}): snow water
+equivalent left on 31 August, the end of the hydrological year. Give
+\code{penalty = "PenSWE"} for the defaults, or
+\code{penalty = list(PenSWE = list(weight = 0.001, threshold = 5))} to
+set any of \code{weight} (objective units per mm of excess, default
+0.001, i.e. 100 mm cost 0.1 NSE), \code{threshold} (mm, default 5),
+\code{date} (\code{"MM-DD"}, default \code{"08-31"}) and \code{subbasins}
+(default: all \code{target_subbasins}, including ungauged ones). See
+section "PenSWE" in Details.}
+
 \item{max_iter}{Integer. Maximum number of DDS iterations.
 Recommended: 50-100 (quick test), 500-1000 (standard), 2000-5000 (production).}
 
@@ -115,6 +127,11 @@ A list containing:
 \item \code{zones_to_modify}: Zone IDs that were modified
 \item \code{metric}: Metric(s) used
 \item \code{algorithm}: "DDS"
+\item \code{penalty}: Resolved penalty settings (NULL without penalty)
+\item \code{initial_penswe}, \code{final_penswe}: \code{\link{penswe}}
+results for the baseline and optimized run (NULL without PenSWE)
+\item \code{eval_log}: Data frame with objective, metric and penswe (mm)
+of every successful evaluation
 }
 }
 \description{
@@ -146,6 +163,20 @@ performance metrics can be computed for ungauged subbasins, they are
 automatically excluded from the objective function. With
 \code{aggregation = "weighted"}, assign them a weight of 0; with the
 other aggregation methods they are simply skipped.
+
+\strong{PenSWE:}
+With \code{penalty = "PenSWE"} the objective becomes
+\code{-metric + weight * PenSWE}, where PenSWE is the mean over subbasins
+of the mean over years of \code{max(0, SWE on 31.08 - threshold)} in mm.
+It is one combined objective, so it works with any \code{metric},
+\code{metric_weights} and \code{aggregation}. Parameter sets that keep every
+subbasin below the threshold pay nothing. The penalty covers all
+\code{target_subbasins}, including ungauged ones, and uses the given
+\code{subbasin_weights} with \code{aggregation = "weighted"} (the plain mean
+otherwise). SWE is read from \code{output/swwgeb.txt}, which requires a
+COSERO build that writes it (also at OUTPUTTYPE 0); the file is only read
+when PenSWE is used. \code{-value} is then the penalised objective, not the
+metric alone -- see \code{eval_log} for the two parts.
 
 \strong{Algorithm Details:}
 DDS is a single-solution heuristic that scales the search dimension based on the
@@ -279,6 +310,23 @@ export_cosero_optimization(result, "D:/optimization_results")
 # Access optimal parameters
 optimal_params <- result$par_bounds[, c("parameter", "optimal_value")]
 print(optimal_params)
+
+# Example 7: Penalise snow accumulation (snow towers)
+# Every subbasin whose SWE on 31.08 exceeds 5 mm adds weight x excess (mm)
+# to the objective, gauged or not.
+result_swe <- optimize_cosero_dds(
+  cosero_path = "D:/COSERO_project",
+  par_bounds = par_bounds,
+  target_subbasins = "all",
+  metric = c("NSE", "KGE"),
+  metric_weights = c(0.5, 0.5),
+  penalty = list(PenSWE = list(weight = 0.001, threshold = 5)),
+  defaults_settings = list(SPINUP = 365),
+  max_iter = 1000
+)
+result_swe$initial_penswe$value   # mm, baseline
+result_swe$final_penswe$value     # mm, optimized
+head(result_swe$eval_log)         # objective = -metric + weight * penswe
 }
 }
 \references{

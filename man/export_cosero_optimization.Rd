@@ -25,6 +25,9 @@ Creates three files in output_dir:
 \item optimization_history.csv - Iteration-by-iteration convergence (DDS only)
 \item optimization_summary.csv - Summary metadata (algorithm, runtime, metrics)
 }
+Also \code{evaluation_log.csv} (objective, metric and penswe of every
+evaluation) and, with PenSWE, \code{penswe_per_subbasin.csv} (baseline vs
+optimized excess per subbasin).
 }
 \examples{
 \dontrun{

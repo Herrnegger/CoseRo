@@ -16,7 +16,9 @@ create_objective_function(
   defaults_settings = NULL,
   metric_args = list(),
   verbose = TRUE,
-  use_minimal_reading = TRUE
+  use_minimal_reading = TRUE,
+  penalty = NULL,
+  penalty_weights = NULL
 )
 }
 \arguments{
@@ -44,11 +46,20 @@ calculation (see \code{\link{calculate_single_metric}})}
 \item{verbose}{Print progress}
 
 \item{use_minimal_reading}{Fast reading (statistics + runoff only)}
+
+\item{penalty}{Resolved penalty settings from \code{resolve_penalty()}, or
+NULL. With PenSWE, swwgeb.txt is read after every run and
+\code{weight * PenSWE} is added to the objective.}
+
+\item{penalty_weights}{Subbasin weights for PenSWE (aligned with
+\code{penalty$PenSWE$subbasins}), or NULL for the unweighted mean}
 }
 \value{
 A function that takes a parameter vector and returns the objective value
-(negative metric for minimization). Has attributes "par_file" and "original_values"
-for restoring the original parameter file after optimization.
+(negative metric for minimization, plus any penalty). Has attributes
+"par_file" and "original_values" for restoring the original parameter file
+after optimization, and "eval_log", a function returning the objective,
+metric and PenSWE of every successful evaluation.
 }
 \description{
 Creates a closure that evaluates COSERO model performance for optimization.

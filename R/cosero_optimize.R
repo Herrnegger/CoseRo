@@ -401,10 +401,17 @@ calculate_single_metric <- function(result, subbasin, metric, spinup_value = 0,
 #'   calculation (see \code{\link{calculate_single_metric}})
 #' @param verbose Print progress
 #' @param use_minimal_reading Fast reading (statistics + runoff only)
+#' @param penalty Resolved penalty settings from \code{resolve_penalty()}, or
+#'   NULL. With PenSWE, swwgeb.txt is read after every run and
+#'   \code{weight * PenSWE} is added to the objective.
+#' @param penalty_weights Subbasin weights for PenSWE (aligned with
+#'   \code{penalty$PenSWE$subbasins}), or NULL for the unweighted mean
 #'
 #' @return A function that takes a parameter vector and returns the objective value
-#'   (negative metric for minimization). Has attributes "par_file" and "original_values"
-#'   for restoring the original parameter file after optimization.
+#'   (negative metric for minimization, plus any penalty). Has attributes
+#'   "par_file" and "original_values" for restoring the original parameter file
+#'   after optimization, and "eval_log", a function returning the objective,
+#'   metric and PenSWE of every successful evaluation.
 #' @keywords internal
 create_objective_function <- function(cosero_path,
                                       par_bounds,
@@ -417,7 +424,9 @@ create_objective_function <- function(cosero_path,
                                       defaults_settings = NULL,
                                       metric_args = list(),
                                       verbose = TRUE,
-                                      use_minimal_reading = TRUE) {
+                                      use_minimal_reading = TRUE,
+                                      penalty = NULL,
+                                      penalty_weights = NULL) {
 
 
   # Force evaluation of all closure variables to avoid lazy evaluation issues
@@ -433,10 +442,20 @@ create_objective_function <- function(cosero_path,
   force(metric_args)
   force(verbose)
   force(use_minimal_reading)
+  force(penalty)
+  force(penalty_weights)
 
   n_subbasins <- length(target_subbasins)
   n_metrics <- length(metric)
-  
+
+  # An unknown metric evaluates to NA for every subbasin, so every run would
+  # return 1e6 and the optimizer would search blind
+  if ("PenSWE" %in% metric) {
+    stop("PenSWE is a penalty, not a metric: remove it from 'metric' and use ",
+         "penalty = list(PenSWE = list(weight = 0.001, threshold = 5)).",
+         call. = FALSE)
+  }
+
   # Validate weights
   if (n_metrics > 1) {
     if (is.null(metric_weights)) {
@@ -561,9 +580,16 @@ create_objective_function <- function(cosero_path,
   # Return objective function with backup info as attribute
   eval_count <- 0
 
+  # Per-evaluation components, so a penalised run shows whether the metric or
+  # the penalty moved the objective
+  log_eval <- integer(0)
+  log_objective <- numeric(0)
+  log_metric <- numeric(0)
+  log_penswe <- numeric(0)
+
   obj_fun <- function(x) {
     eval_count <<- eval_count + 1
-    
+
     params_to_apply <- setNames(as.list(x), par_bounds$parameter)
     
     # Modify parameters
@@ -584,7 +610,9 @@ create_objective_function <- function(cosero_path,
     })
     
     if (!mod_success) return(1e6)
-    
+
+    if (!is.null(penalty$PenSWE)) clear_swwgeb(cosero_path)
+
     # Run COSERO (always quiet - DDS verbosity is separate)
     result <- tryCatch({
       if (use_minimal_reading) {
@@ -672,8 +700,28 @@ create_objective_function <- function(cosero_path,
       "min"      = min(metric_values[valid_sb]),
       "product"  = prod(metric_values[valid_sb])
     )
+    metric_value <- obj_value
 
     obj_value <- -obj_value
+
+    # PenSWE covers every penalty subbasin, gauged or not: snow accumulation
+    # needs no discharge observations
+    pen_value <- NA_real_
+    if (!is.null(penalty$PenSWE)) {
+      pen <- run_penswe(file.path(cosero_path, "output"), penalty$PenSWE,
+                        spinup_value, penalty_weights)
+      if (is.null(pen) || is.na(pen$value)) {
+        if (verbose) cat("Run", eval_count, "- PenSWE could not be evaluated\n")
+        return(1e6)
+      }
+      pen_value <- pen$value
+      obj_value <- obj_value + penalty$PenSWE$weight * pen_value
+    }
+
+    log_eval      <<- c(log_eval, eval_count)
+    log_objective <<- c(log_objective, obj_value)
+    log_metric    <<- c(log_metric, metric_value)
+    log_penswe    <<- c(log_penswe, pen_value)
 
     return(obj_value)
   }
@@ -689,6 +737,10 @@ create_objective_function <- function(cosero_path,
   # that must be written back into defaults.txt once optimization finishes.
   attr(obj_fun, "work_file") <- work_file
   attr(obj_fun, "original_parafile") <- par_filename
+  attr(obj_fun, "eval_log") <- function() {
+    data.frame(eval = log_eval, objective = log_objective,
+               metric = log_metric, penswe = log_penswe)
+  }
 
   return(obj_fun)
 }
@@ -859,6 +911,10 @@ save_optimized_params <- function(cosero_path, par_bounds, target_subbasins,
   original_values <- attr(obj_fun, "original_values")
 
   subbasin_str <- paste(gsub("^0+", "", target_subbasins), collapse = "_")
+  # Listing hundreds of ids would push the path past the Windows 260-char limit
+  if (length(target_subbasins) > 10) {
+    subbasin_str <- paste0(length(target_subbasins), "sb")
+  }
   metric_str <- paste(metric, collapse = "_")
   timestamp <- format(Sys.time(), "%Y%m%d_%H%M%S")
   opt_filename <- sprintf("para_optimized_NB%s_%s_%s.txt", subbasin_str, metric_str, timestamp)
@@ -889,14 +945,20 @@ save_optimized_params <- function(cosero_path, par_bounds, target_subbasins,
 #' @param metric_args Named list of extra arguments forwarded to the metric
 #'   calculation (see \code{\link{calculate_single_metric}})
 #' @param verbose Print progress
+#' @param penalty Resolved penalty settings from \code{resolve_penalty()}, or NULL
+#' @param penalty_weights Subbasin weights for PenSWE, or NULL
 #'
-#' @return List with initial_run result and initial_metrics matrix
+#' @return List with initial_run result, initial_metrics matrix and
+#'   initial_penswe (result of \code{\link{penswe}}, NULL without PenSWE)
 #' @keywords internal
 run_initial_baseline <- function(cosero_path, target_subbasins, metric,
                                  defaults_settings, metric_args = list(),
-                                 verbose = TRUE) {
+                                 verbose = TRUE, penalty = NULL,
+                                 penalty_weights = NULL) {
 
   if (verbose) cat("Running initial baseline model...\n")
+
+  if (!is.null(penalty$PenSWE)) clear_swwgeb(cosero_path)
 
   initial_run <- tryCatch({
     run_cosero(
@@ -955,7 +1017,39 @@ run_initial_baseline <- function(cosero_path, target_subbasins, metric,
     cat("\n")
   }
 
-  list(initial_run = initial_run, initial_metrics = initial_metrics)
+  # PenSWE: fail here, once, rather than on every evaluation
+  initial_penswe <- NULL
+  if (!is.null(penalty$PenSWE)) {
+    cfg <- penalty$PenSWE
+    initial_penswe <- run_penswe(output_dir, cfg, spinup_value, penalty_weights)
+    if (is.null(initial_penswe)) {
+      stop("PenSWE needs output/swwgeb.txt, but the baseline run did not write ",
+           "it. Use a COSERO build that writes swwgeb.txt (also at OUTPUTTYPE 0) ",
+           "as COSERO.exe.", call. = FALSE)
+    }
+    missing <- initial_penswe$per_subbasin$subbasin[
+      initial_penswe$per_subbasin$n_years == 0]
+    if (length(missing) == length(cfg$subbasins)) {
+      stop("PenSWE could not evaluate any subbasin: either no ", cfg$date,
+           " falls after the spin-up, or none of the subbasins has an ",
+           "SWWGEB column in swwgeb.txt.", call. = FALSE)
+    }
+    if (length(missing) > 0) {
+      warning("PenSWE: no SWWGEB column for subbasin(s) ",
+              paste(missing, collapse = ", "), " - excluded from the penalty.",
+              call. = FALSE)
+    }
+    if (verbose) {
+      ps <- initial_penswe$per_subbasin
+      cat(sprintf("  Initial PenSWE: %.2f mm (x %g = %.4f) | %d of %d subbasins above %g mm on %s in at least one year\n\n",
+                  initial_penswe$value, cfg$weight,
+                  cfg$weight * initial_penswe$value,
+                  sum(ps$years_over > 0), nrow(ps), cfg$threshold, cfg$date))
+    }
+  }
+
+  list(initial_run = initial_run, initial_metrics = initial_metrics,
+       initial_penswe = initial_penswe)
 }
 
 
@@ -1121,6 +1215,9 @@ read_optimized_values <- function(opt_file, par_bounds) {
 #' @param initial_stats Statistics data frame from initial run (optional)
 #' @param final_stats Statistics data frame from final run (optional)
 #' @param opt_filename Optimized parameter filename
+#' @param penalty Resolved penalty settings (optional)
+#' @param initial_penswe,final_penswe Results of \code{\link{penswe}} for the
+#'   baseline and final run (optional)
 #'
 #' @keywords internal
 print_optimization_report <- function(algorithm, par_filename,
@@ -1134,7 +1231,10 @@ print_optimization_report <- function(algorithm, par_filename,
                                       opt_filename,
                                       par_bounds = NULL,
                                       output_file = NULL,
-                                      print_to_console = TRUE) {
+                                      print_to_console = TRUE,
+                                      penalty = NULL,
+                                      initial_penswe = NULL,
+                                      final_penswe = NULL) {
 
   # Capture all output so we can both print and write to file
   report_lines <- utils::capture.output({
@@ -1159,6 +1259,11 @@ print_optimization_report <- function(algorithm, par_filename,
     cat("  Metric weights  : ", paste(round(metric_weights, 3), collapse = ", "), "\n", sep = "")
   }
   cat("  Aggregation     : ", aggregation, "\n", sep = "")
+  if (!is.null(penalty$PenSWE)) {
+    cat("  Penalty         : PenSWE (SWE on ", penalty$PenSWE$date, " > ",
+        penalty$PenSWE$threshold, " mm, weight ", penalty$PenSWE$weight,
+        " per mm, ", length(penalty$PenSWE$subbasins), " subbasins)\n", sep = "")
+  }
   cat("  Runtime         : ", round(runtime, 1), " seconds (", n_iter, " ",
       if (algorithm == "DDS") "iterations" else "evaluations", ")\n", sep = "")
 
@@ -1250,6 +1355,53 @@ print_optimization_report <- function(algorithm, par_filename,
         init_str    <- if (is.na(init_mean))  sprintf("%10s", "NA") else sprintf("%10.4f", init_mean)
         final_str   <- if (is.na(final_mean)) sprintf("%10s", "NA") else sprintf("%10.4f", final_mean)
         cat(sprintf("  %-10s  %10s  %10s  %10s\n", "Mean", init_str, final_str, change_str))
+      }
+    }
+  }
+
+  # PenSWE - snow left at the end of the hydrological year
+  if (!is.null(penalty$PenSWE) && !is.null(initial_penswe)) {
+    cfg <- penalty$PenSWE
+    cat("\n")
+    cat(strrep("─", line_w), "\n")
+    cat("  PenSWE -- mean SWE excess above ", cfg$threshold, " mm on ",
+        cfg$date, " (", nrow(initial_penswe$swe_on_date), " years)\n", sep = "")
+    cat(strrep("─", line_w), "\n")
+
+    fmt_mm <- function(v) if (is.null(v) || is.na(v)) "NA" else sprintf("%.2f", v)
+    ps_init  <- initial_penswe$per_subbasin
+    ps_final <- if (!is.null(final_penswe)) final_penswe$per_subbasin else NULL
+    n_over <- function(ps) if (is.null(ps)) NA else sum(ps$years_over > 0)
+
+    cat(sprintf("  PenSWE          : %s mm  ->  %s mm\n",
+                fmt_mm(initial_penswe$value), fmt_mm(final_penswe$value)))
+    fmt_cost <- function(v) if (is.null(v) || is.na(v)) "NA" else sprintf("%.4f", cfg$weight * v)
+    cat(sprintf("  Objective cost  : %s  ->  %s\n",
+                fmt_cost(initial_penswe$value), fmt_cost(final_penswe$value)))
+    cat(sprintf("  Subbasins above threshold in any year: %d  ->  %s  (of %d)\n",
+                n_over(ps_init), n_over(ps_final), nrow(ps_init)))
+
+    # Worst offenders at baseline, plus any that got worse
+    worst <- ps_init$subbasin[order(-ps_init$mean_excess)]
+    worst <- worst[ps_init$mean_excess[match(worst, ps_init$subbasin)] > 0]
+    if (!is.null(ps_final)) {
+      grown <- ps_final$subbasin[ps_final$mean_excess >
+                                   ps_init$mean_excess[match(ps_final$subbasin, ps_init$subbasin)]]
+      worst <- unique(c(head(worst, 15), grown[!is.na(grown)]))
+    } else {
+      worst <- head(worst, 15)
+    }
+    if (length(worst) > 0) {
+      cat(sprintf("\n  %-10s  %12s  %12s  %10s\n",
+                  "Subbasin", "Initial mm", "Optimized mm",
+                  if (is.null(ps_final)) "Max SWE" else "Opt maxSWE"))
+      for (sb in worst) {
+        i_row <- ps_init[ps_init$subbasin == sb, ]
+        f_row <- if (!is.null(ps_final)) ps_final[ps_final$subbasin == sb, ] else NULL
+        cat(sprintf("  %-10s  %12s  %12s  %10s\n", sb,
+                    fmt_mm(i_row$mean_excess),
+                    fmt_mm(if (is.null(f_row)) NA else f_row$mean_excess),
+                    fmt_mm(if (is.null(f_row)) i_row$max_swe else f_row$max_swe)))
       }
     }
   }
@@ -1367,6 +1519,17 @@ print_optimization_report <- function(algorithm, par_filename,
 #'   Note that \code{pdiff()} requires either a \code{window} in timesteps or
 #'   timestamps in the runoff output; COSERO output always carries the latter.
 #'
+#' @param penalty Penalty added to the objective, or NULL (default, none).
+#'   Currently \code{"PenSWE"} (see \code{\link{penswe}}): snow water
+#'   equivalent left on 31 August, the end of the hydrological year. Give
+#'   \code{penalty = "PenSWE"} for the defaults, or
+#'   \code{penalty = list(PenSWE = list(weight = 0.001, threshold = 5))} to
+#'   set any of \code{weight} (objective units per mm of excess, default
+#'   0.001, i.e. 100 mm cost 0.1 NSE), \code{threshold} (mm, default 5),
+#'   \code{date} (\code{"MM-DD"}, default \code{"08-31"}) and \code{subbasins}
+#'   (default: all \code{target_subbasins}, including ungauged ones). See
+#'   section "PenSWE" in Details.
+#'
 #' @param max_iter Integer. Maximum number of DDS iterations.
 #'   Recommended: 50-100 (quick test), 500-1000 (standard), 2000-5000 (production).
 #'
@@ -1394,6 +1557,11 @@ print_optimization_report <- function(algorithm, par_filename,
 #'     \item \code{zones_to_modify}: Zone IDs that were modified
 #'     \item \code{metric}: Metric(s) used
 #'     \item \code{algorithm}: "DDS"
+#'     \item \code{penalty}: Resolved penalty settings (NULL without penalty)
+#'     \item \code{initial_penswe}, \code{final_penswe}: \code{\link{penswe}}
+#'       results for the baseline and optimized run (NULL without PenSWE)
+#'     \item \code{eval_log}: Data frame with objective, metric and penswe (mm)
+#'       of every successful evaluation
 #'   }
 #'
 #' @details
@@ -1420,6 +1588,20 @@ print_optimization_report <- function(algorithm, par_filename,
 #' automatically excluded from the objective function. With
 #' \code{aggregation = "weighted"}, assign them a weight of 0; with the
 #' other aggregation methods they are simply skipped.
+#'
+#' \strong{PenSWE:}
+#' With \code{penalty = "PenSWE"} the objective becomes
+#' \code{-metric + weight * PenSWE}, where PenSWE is the mean over subbasins
+#' of the mean over years of \code{max(0, SWE on 31.08 - threshold)} in mm.
+#' It is one combined objective, so it works with any \code{metric},
+#' \code{metric_weights} and \code{aggregation}. Parameter sets that keep every
+#' subbasin below the threshold pay nothing. The penalty covers all
+#' \code{target_subbasins}, including ungauged ones, and uses the given
+#' \code{subbasin_weights} with \code{aggregation = "weighted"} (the plain mean
+#' otherwise). SWE is read from \code{output/swwgeb.txt}, which requires a
+#' COSERO build that writes it (also at OUTPUTTYPE 0); the file is only read
+#' when PenSWE is used. \code{-value} is then the penalised objective, not the
+#' metric alone -- see \code{eval_log} for the two parts.
 #'
 #' \strong{Algorithm Details:}
 #' DDS is a single-solution heuristic that scales the search dimension based on the
@@ -1565,6 +1747,23 @@ print_optimization_report <- function(algorithm, par_filename,
 #' # Access optimal parameters
 #' optimal_params <- result$par_bounds[, c("parameter", "optimal_value")]
 #' print(optimal_params)
+#'
+#' # Example 7: Penalise snow accumulation (snow towers)
+#' # Every subbasin whose SWE on 31.08 exceeds 5 mm adds weight x excess (mm)
+#' # to the objective, gauged or not.
+#' result_swe <- optimize_cosero_dds(
+#'   cosero_path = "D:/COSERO_project",
+#'   par_bounds = par_bounds,
+#'   target_subbasins = "all",
+#'   metric = c("NSE", "KGE"),
+#'   metric_weights = c(0.5, 0.5),
+#'   penalty = list(PenSWE = list(weight = 0.001, threshold = 5)),
+#'   defaults_settings = list(SPINUP = 365),
+#'   max_iter = 1000
+#' )
+#' result_swe$initial_penswe$value   # mm, baseline
+#' result_swe$final_penswe$value     # mm, optimized
+#' head(result_swe$eval_log)         # objective = -metric + weight * penswe
 #' }
 optimize_cosero_dds <- function(cosero_path,
                                 par_bounds,
@@ -1576,6 +1775,7 @@ optimize_cosero_dds <- function(cosero_path,
                                 aggregation = "mean",
                                 defaults_settings = NULL,
                                 metric_args = list(),
+                                penalty = NULL,
                                 max_iter = 1000,
                                 r = 0.2,
                                 verbose = TRUE,
@@ -1597,6 +1797,10 @@ optimize_cosero_dds <- function(cosero_path,
     zones_to_modify <- zone_mapping$zones
     target_subbasins <- zone_mapping$subbasins
   }
+
+  penalty <- resolve_penalty(penalty, target_subbasins)
+  penalty_weights <- penalty_subbasin_weights(penalty, aggregation,
+                                              subbasin_weights, target_subbasins)
 
   # Determine parameter file name for display
   par_filename <- "para.txt"
@@ -1637,13 +1841,19 @@ optimize_cosero_dds <- function(cosero_path,
       cat("  Metric weights:", paste(round(metric_weights, 3), collapse = ", "), "\n")
     }
     cat("  Aggregation:", aggregation, "\n")
+    if (!is.null(penalty$PenSWE)) {
+      cat("  Penalty: PenSWE (weight", penalty$PenSWE$weight, "per mm above",
+          penalty$PenSWE$threshold, "mm on", penalty$PenSWE$date, ",",
+          length(penalty$PenSWE$subbasins), "subbasins)\n")
+    }
     cat("  Max iterations:", max_iter, "\n\n")
   }
 
   # Initial baseline run
   baseline <- run_initial_baseline(
     cosero_path, target_subbasins, metric, defaults_settings,
-    metric_args = metric_args, verbose = verbose
+    metric_args = metric_args, verbose = verbose,
+    penalty = penalty, penalty_weights = penalty_weights
   )
   initial_metrics <- baseline$initial_metrics
 
@@ -1658,7 +1868,8 @@ optimize_cosero_dds <- function(cosero_path,
     cosero_path, par_bounds, target_subbasins, zones_to_modify,
     metric, metric_weights, subbasin_weights, aggregation,
     defaults_settings, metric_args = metric_args, verbose = verbose,
-    use_minimal_reading = use_minimal_reading
+    use_minimal_reading = use_minimal_reading,
+    penalty = penalty, penalty_weights = penalty_weights
   )
 
   # Remove the working parameter copy and put defaults.txt back to the user's
@@ -1707,6 +1918,7 @@ optimize_cosero_dds <- function(cosero_path,
   # Final run with full outputs (uses obj_fun's original_values for correct baseline)
   final_run_data <- NULL
   if (read_final_outputs) {
+    if (!is.null(penalty$PenSWE)) clear_swwgeb(cosero_path)
     final_run_data <- run_final_optimization(
       cosero_path, par_bounds, zones_to_modify, defaults_settings, obj_fun, verbose
     )
@@ -1716,7 +1928,8 @@ optimize_cosero_dds <- function(cosero_path,
   # Save optimized parameter file (uses obj_fun's original_values for correct baseline)
   opt_file <- save_optimized_params(
     cosero_path, par_bounds, target_subbasins,
-    zones_to_modify, metric, obj_fun, verbose
+    zones_to_modify, c(metric, if (!is.null(penalty)) names(penalty)),
+    obj_fun, verbose
   )
 
   # Extract final metrics and parameter summary
@@ -1743,6 +1956,15 @@ optimize_cosero_dds <- function(cosero_path,
     opt_values <- read_optimized_values(opt_file, par_bounds)
     final_param_summary <- get_param_summary(
       opt_values, par_bounds, zone_mask = opt_values$NZ_ %in% zones_to_modify
+    )
+  }
+
+  final_penswe <- NULL
+  if (!is.null(penalty$PenSWE) && !is.null(final_run_data) && final_run_data$success) {
+    final_penswe <- run_penswe(
+      file.path(cosero_path, "output"), penalty$PenSWE,
+      if (is.null(defaults_settings$SPINUP)) 0 else as.numeric(defaults_settings$SPINUP),
+      penalty_weights
     )
   }
 
@@ -1776,7 +1998,10 @@ optimize_cosero_dds <- function(cosero_path,
     opt_filename = basename(opt_file),
     par_bounds = par_bounds,
     output_file = report_file,
-    print_to_console = verbose
+    print_to_console = verbose,
+    penalty = penalty,
+    initial_penswe = baseline$initial_penswe,
+    final_penswe = final_penswe
   )
   if (verbose) cat("Saved optimization report to:", report_filename, "\n")
 
@@ -1801,7 +2026,11 @@ optimize_cosero_dds <- function(cosero_path,
     initial_metrics = initial_metrics,
     final_metrics = final_metrics,
     initial_param_summary = initial_param_summary,
-    final_param_summary = final_param_summary
+    final_param_summary = final_param_summary,
+    penalty = penalty,
+    initial_penswe = baseline$initial_penswe,
+    final_penswe = final_penswe,
+    eval_log = attr(obj_fun, "eval_log")()
   )
 }
 #' Optimize COSERO Parameters with SCE-UA Algorithm
@@ -1953,6 +2182,7 @@ optimize_cosero_sce <- function(cosero_path,
                                 aggregation = "mean",
                                 defaults_settings = NULL,
                                 metric_args = list(),
+                                penalty = NULL,
                                 maxn = 10000,
                                 kstop = 10,
                                 pcento = 0.01,
@@ -1979,6 +2209,10 @@ optimize_cosero_sce <- function(cosero_path,
     zones_to_modify <- zone_mapping$zones
     target_subbasins <- zone_mapping$subbasins
   }
+
+  penalty <- resolve_penalty(penalty, target_subbasins)
+  penalty_weights <- penalty_subbasin_weights(penalty, aggregation,
+                                              subbasin_weights, target_subbasins)
 
   # Determine parameter file name for display
   par_filename <- "para.txt"
@@ -2014,13 +2248,19 @@ optimize_cosero_sce <- function(cosero_path,
       cat("  Subbasin weights:", paste(round(subbasin_weights, 3), collapse = ", "), "\n")
     }
     cat("  Zones to modify:", if (is.null(zones_to_modify)) "all" else length(zones_to_modify), "\n")
+    if (!is.null(penalty$PenSWE)) {
+      cat("  Penalty: PenSWE (weight", penalty$PenSWE$weight, "per mm above",
+          penalty$PenSWE$threshold, "mm on", penalty$PenSWE$date, ",",
+          length(penalty$PenSWE$subbasins), "subbasins)\n")
+    }
     cat("  Max evaluations:", maxn, "\n\n")
   }
 
   # Initial baseline run
   baseline <- run_initial_baseline(
     cosero_path, target_subbasins, metric, defaults_settings,
-    metric_args = metric_args, verbose = verbose
+    metric_args = metric_args, verbose = verbose,
+    penalty = penalty, penalty_weights = penalty_weights
   )
   initial_metrics <- baseline$initial_metrics
 
@@ -2035,7 +2275,8 @@ optimize_cosero_sce <- function(cosero_path,
     cosero_path, par_bounds, target_subbasins, zones_to_modify,
     metric, metric_weights, subbasin_weights, aggregation,
     defaults_settings, metric_args = metric_args, verbose = verbose,
-    use_minimal_reading = use_minimal_reading
+    use_minimal_reading = use_minimal_reading,
+    penalty = penalty, penalty_weights = penalty_weights
   )
 
   # Remove the working parameter copy and put defaults.txt back to the user's
@@ -2080,7 +2321,10 @@ optimize_cosero_sce <- function(cosero_path,
     if (val < best_value) best_value <<- val
     if (verbose && (eval_count %% print_interval == 0 || eval_count == 1)) {
       cat(sprintf("Eval %d | Best %s: %.4f\n",
-                  eval_count, paste(metric, collapse = "+"), -best_value))
+                  eval_count,
+                  paste(c(paste(metric, collapse = "+"), names(penalty)),
+                        collapse = " - "),
+                  -best_value))
     }
     val
   }
@@ -2109,6 +2353,7 @@ optimize_cosero_sce <- function(cosero_path,
   # Final run with full outputs (uses obj_fun's original_values for correct baseline)
   final_run_data <- NULL
   if (read_final_outputs) {
+    if (!is.null(penalty$PenSWE)) clear_swwgeb(cosero_path)
     final_run_data <- run_final_optimization(
       cosero_path, par_bounds, zones_to_modify, defaults_settings, obj_fun, verbose
     )
@@ -2118,7 +2363,8 @@ optimize_cosero_sce <- function(cosero_path,
   # Save optimized parameter file (uses obj_fun's original_values for correct baseline)
   opt_file <- save_optimized_params(
     cosero_path, par_bounds, target_subbasins,
-    zones_to_modify, metric, obj_fun, verbose
+    zones_to_modify, c(metric, if (!is.null(penalty)) names(penalty)),
+    obj_fun, verbose
   )
 
   # Extract final metrics and parameter summary
@@ -2145,6 +2391,15 @@ optimize_cosero_sce <- function(cosero_path,
     opt_values <- read_optimized_values(opt_file, par_bounds)
     final_param_summary <- get_param_summary(
       opt_values, par_bounds, zone_mask = opt_values$NZ_ %in% zones_to_modify
+    )
+  }
+
+  final_penswe <- NULL
+  if (!is.null(penalty$PenSWE) && !is.null(final_run_data) && final_run_data$success) {
+    final_penswe <- run_penswe(
+      file.path(cosero_path, "output"), penalty$PenSWE,
+      if (is.null(defaults_settings$SPINUP)) 0 else as.numeric(defaults_settings$SPINUP),
+      penalty_weights
     )
   }
 
@@ -2178,7 +2433,10 @@ optimize_cosero_sce <- function(cosero_path,
     opt_filename = basename(opt_file),
     par_bounds = par_bounds,
     output_file = report_file,
-    print_to_console = verbose
+    print_to_console = verbose,
+    penalty = penalty,
+    initial_penswe = baseline$initial_penswe,
+    final_penswe = final_penswe
   )
   if (verbose) cat("Saved optimization report to:", report_filename, "\n")
 
@@ -2203,7 +2461,11 @@ optimize_cosero_sce <- function(cosero_path,
     initial_metrics = initial_metrics,
     final_metrics = final_metrics,
     initial_param_summary = initial_param_summary,
-    final_param_summary = final_param_summary
+    final_param_summary = final_param_summary,
+    penalty = penalty,
+    initial_penswe = baseline$initial_penswe,
+    final_penswe = final_penswe,
+    eval_log = attr(obj_fun, "eval_log")()
   )
 }
 
@@ -2269,7 +2531,10 @@ plot_cosero_optimization <- function(opt_result) {
       ggplot2::theme_bw() +
       ggplot2::labs(
         x = "Iteration",
-        y = if (length(opt_result$metric) == 1) opt_result$metric else "Combined",
+        y = if (!is.null(opt_result$penalty)) {
+          paste(paste(opt_result$metric, collapse = "+"), "-",
+                paste(names(opt_result$penalty), collapse = "+"))
+        } else if (length(opt_result$metric) == 1) opt_result$metric else "Combined",
         title = paste(opt_result$algorithm, "Optimization History")
       )
   } else {
@@ -2295,6 +2560,9 @@ plot_cosero_optimization <- function(opt_result) {
 #'   \item optimization_history.csv - Iteration-by-iteration convergence (DDS only)
 #'   \item optimization_summary.csv - Summary metadata (algorithm, runtime, metrics)
 #' }
+#' Also \code{evaluation_log.csv} (objective, metric and penswe of every
+#' evaluation) and, with PenSWE, \code{penswe_per_subbasin.csv} (baseline vs
+#' optimized excess per subbasin).
 #'
 #' @return Invisible NULL (called for side effects)
 #' @export
@@ -2360,6 +2628,24 @@ export_cosero_optimization <- function(opt_result, output_dir) {
             file.path(output_dir, "optimization_summary.csv"),
             row.names = FALSE)
 
+  # PenSWE per subbasin, baseline vs optimized
+  if (!is.null(opt_result$initial_penswe)) {
+    penswe_df <- opt_result$initial_penswe$per_subbasin
+    names(penswe_df)[-1] <- paste0(names(penswe_df)[-1], "_initial")
+    if (!is.null(opt_result$final_penswe)) {
+      final_df <- opt_result$final_penswe$per_subbasin
+      names(final_df)[-1] <- paste0(names(final_df)[-1], "_optimized")
+      penswe_df <- merge(penswe_df, final_df, by = "subbasin", sort = FALSE)
+    }
+    write.csv(penswe_df, file.path(output_dir, "penswe_per_subbasin.csv"),
+              row.names = FALSE)
+  }
+
+  if (!is.null(opt_result$eval_log) && nrow(opt_result$eval_log) > 0) {
+    write.csv(opt_result$eval_log, file.path(output_dir, "evaluation_log.csv"),
+              row.names = FALSE)
+  }
+
   # Report text file
   report_copied <- FALSE
   if (!is.null(opt_result$report_file) && file.exists(opt_result$report_file)) {
@@ -2373,6 +2659,10 @@ export_cosero_optimization <- function(opt_result, output_dir) {
   cat("  - optimal_parameters.csv\n")
   if (!is.null(opt_result$history)) cat("  - optimization_history.csv\n")
   cat("  - optimization_summary.csv\n")
+  if (!is.null(opt_result$initial_penswe)) cat("  - penswe_per_subbasin.csv\n")
+  if (!is.null(opt_result$eval_log) && nrow(opt_result$eval_log) > 0) {
+    cat("  - evaluation_log.csv\n")
+  }
   if (report_copied) cat("  -", basename(opt_result$report_file), "\n")
 
   invisible(NULL)

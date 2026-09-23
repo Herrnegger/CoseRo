@@ -15,6 +15,7 @@ optimize_cosero_sce(
   aggregation = "mean",
   defaults_settings = NULL,
   metric_args = list(),
+  penalty = NULL,
   maxn = 10000,
   kstop = 10,
   pcento = 0.01,
@@ -88,6 +89,17 @@ take no such arguments (\code{"NSE"}, \code{"logNSE"}, ...) ignore it, so
 it is safe to pass alongside a multi-objective \code{metric} vector.
 Note that \code{pdiff()} requires either a \code{window} in timesteps or
 timestamps in the runoff output; COSERO output always carries the latter.}
+
+\item{penalty}{Penalty added to the objective, or NULL (default, none).
+Currently \code{"PenSWE"} (see \code{\link{penswe}}): snow water
+equivalent left on 31 August, the end of the hydrological year. Give
+\code{penalty = "PenSWE"} for the defaults, or
+\code{penalty = list(PenSWE = list(weight = 0.001, threshold = 5))} to
+set any of \code{weight} (objective units per mm of excess, default
+0.001, i.e. 100 mm cost 0.1 NSE), \code{threshold} (mm, default 5),
+\code{date} (\code{"MM-DD"}, default \code{"08-31"}) and \code{subbasins}
+(default: all \code{target_subbasins}, including ungauged ones). See
+section "PenSWE" in Details.}
 
 \item{maxn}{Maximum number of function evaluations}
 

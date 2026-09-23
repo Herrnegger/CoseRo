@@ -24,7 +24,10 @@ print_optimization_report(
   opt_filename,
   par_bounds = NULL,
   output_file = NULL,
-  print_to_console = TRUE
+  print_to_console = TRUE,
+  penalty = NULL,
+  initial_penswe = NULL,
+  final_penswe = NULL
 )
 }
 \arguments{
@@ -61,6 +64,11 @@ print_optimization_report(
 \item{final_stats}{Statistics data frame from final run (optional)}
 
 \item{opt_filename}{Optimized parameter filename}
+
+\item{penalty}{Resolved penalty settings (optional)}
+
+\item{initial_penswe, final_penswe}{Results of \code{\link{penswe}} for the
+baseline and final run (optional)}
 }
 \description{
 Prints a formatted comparison of initial vs optimized performance and parameters.

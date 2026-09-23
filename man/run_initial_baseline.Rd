@@ -10,7 +10,9 @@ run_initial_baseline(
   metric,
   defaults_settings,
   metric_args = list(),
-  verbose = TRUE
+  verbose = TRUE,
+  penalty = NULL,
+  penalty_weights = NULL
 )
 }
 \arguments{
@@ -26,9 +28,14 @@ run_initial_baseline(
 calculation (see \code{\link{calculate_single_metric}})}
 
 \item{verbose}{Print progress}
+
+\item{penalty}{Resolved penalty settings from \code{resolve_penalty()}, or NULL}
+
+\item{penalty_weights}{Subbasin weights for PenSWE, or NULL}
 }
 \value{
-List with initial_run result and initial_metrics matrix
+List with initial_run result, initial_metrics matrix and
+initial_penswe (result of \code{\link{penswe}}, NULL without PenSWE)
 }
 \description{
 Runs COSERO with current (unmodified) parameters and extracts baseline metrics.
