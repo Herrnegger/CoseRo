@@ -37,3 +37,4 @@ HYDROVAR,"CV for within-zone spread of hydraulic routing parameters (BETA, KBF, 
 CTVAR,"CV for within-zone spread of snow melt factors (CTMIN, CTMAX)",0.0,2.5,0.5,relchg,Disaggregation
 NDC,Number of disaggregation classes per zone (integer 1-10; 1 = disaggregation disabled; can be varied externally but not by COSERO's internal optimizer),1,10,1,abschg,Disaggregation
 FHL,Hydraulic-lift efficiency (max fraction of unmet stress-weighted transpiration demand supplied from deep stores; per land-cover class; 0 = original model),0,0.7,0,abschg,Hydraulic lift
+TABLAKE,Lake reservoir residence time (h); linear reservoir Q_out = V/TABLAKE like TAB4; lake zones only (WATERBODY_ > 0 and AREF_LAKE_ > 0); 0 = no lake reservoir,24,4000,200,relchg,Lake

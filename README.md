@@ -518,6 +518,14 @@ result <- run_cosero(
 
 Hypsometric curves (`HYPSO0_` through `HYPSO100_`, elevation at 0–100% area quantiles in 5% steps) are stored as read-only columns in the parameter file and are computed from a DEM — they are not calibration parameters.
 
+**Lake reservoir** — `TABLAKE` is calibratable (bounds in `parameter_bounds.csv`, category `Lake`):
+
+| Parameter | Description | Unit | Bounds |
+|---|---|---|---|
+| `TABLAKE` | Lake reservoir residence time; linear reservoir `Q_out = V / TABLAKE` (like `TAB4`) | h | 24 – 4000 |
+
+The lake share of a zone is `WATERBODY_`; its reservoir runs only where `TABLAKE_ > 0` **and** `AREF_LAKE_ > 0`, so `TABLAKE_ = 0` switches it off. `KELAKE_` (open-water ET factor), `BWLAKEINI_`, `AREF_LAKE_`, `VREF_LAKE_` and `PLAKE_` are fixed inputs, not calibrated. Use `relchg` (the CSV default): it keeps `TABLAKE_ = 0` zones at 0, whereas `abschg` would switch the reservoir on everywhere. The runs still clamp every modified zone to `[min, max]`, though, so in a model mixing lake and non-lake zones restrict `zones_to_modify` to the lake zones. Requires a lake-enabled COSERO.exe — the build bundled in `cosero_binaries.zip` does not read `TABLAKE_`. Example: `tests/KLIRES/optimize_klires_lake.R`.
+
 ### 4. Understanding COSERO Output Types
 
 **OUTPUTTYPE 0 — Calibration mode** — `COSERO.runoff`, `statistics.txt` only. The fastest option; written for optimization/sensitivity workflows that need just discharge and metrics. The optimizers (`optimize_cosero_dds()` / `optimize_cosero_sce()`) default to this.
@@ -551,7 +559,7 @@ CoseRo/
 │   └── extdata/
 │       ├── COSERO_Wildalpen.zip             # Example project
 │       ├── COSERO_Wildalpen_agreggated.zip  # Example project with NDC disaggregation
-│       └── parameter_bounds.csv             # Default parameter bounds (38 parameters)
+│       └── parameter_bounds.csv             # Default parameter bounds (39 parameters)
 └── man/                          # Auto-generated documentation
 ```
 
@@ -609,7 +617,7 @@ CoseRo/
 | `optimize_cosero_dds()` | Optimize parameters with DDS (fast, greedy search) |
 | `optimize_cosero_sce()` | Optimize parameters with SCE-UA (robust, population-based) |
 | `create_optimization_bounds()` | Define parameter bounds for optimization |
-| `load_parameter_bounds()` | Load bounds from bundled CSV (38 pre-defined parameters) |
+| `load_parameter_bounds()` | Load bounds from bundled CSV (39 pre-defined parameters) |
 | `plot_cosero_optimization()` | Plot optimization convergence history |
 | `export_cosero_optimization()` | Export results to CSV and copy report to export folder |
 

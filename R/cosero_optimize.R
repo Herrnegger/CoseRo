@@ -2649,9 +2649,13 @@ export_cosero_optimization <- function(opt_result, output_dir) {
   # Report text file
   report_copied <- FALSE
   if (!is.null(opt_result$report_file) && file.exists(opt_result$report_file)) {
-    file.copy(opt_result$report_file,
-              file.path(output_dir, basename(opt_result$report_file)),
-              overwrite = TRUE)
+    report_dest <- file.path(output_dir, basename(opt_result$report_file))
+    # The optimizer already writes the report to <project>/output; copying a
+    # file onto itself is an error in R >= 4.5
+    if (normalizePath(report_dest, mustWork = FALSE) !=
+        normalizePath(opt_result$report_file)) {
+      file.copy(opt_result$report_file, report_dest, overwrite = TRUE)
+    }
     report_copied <- TRUE
   }
 
